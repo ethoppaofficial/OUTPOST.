@@ -1,0 +1,6 @@
+{
+  "name": "OUTPOST - Student Housing & Accommodation",
+  "description": "Verified student accommodation discovery, roommate matching, reservation workflows, and housing management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

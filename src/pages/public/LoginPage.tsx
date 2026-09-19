@@ -1,0 +1,172 @@
+import React, { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { LogIn, ShieldCheck, UserCheck, AlertCircle, ArrowRight } from 'lucide-react';
+import { authService } from '../../application/services/authService';
+import { UserRole } from '../../domain/types';
+
+export const LoginPage: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [roleTab, setRoleTab] = useState<UserRole>('student');
+  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const result = authService.login(email);
+    if (result.success && result.user) {
+      if (result.user.role === 'student') navigate('/student/dashboard');
+      else if (result.user.role === 'landlord') navigate('/landlord/dashboard');
+      else if (result.user.role === 'admin') navigate('/admin/dashboard');
+    } else {
+      setError(result.error || 'Login failed.');
+    }
+  };
+
+  const quickFill = (demoEmail: string, demoRole: UserRole) => {
+    setEmail(demoEmail);
+    setPassword('DemoSecret123!');
+    setRoleTab(demoRole);
+    setError(null);
+  };
+
+  return (
+    <div className="max-w-md mx-auto my-6 sm:my-10 space-y-6">
+      <div className="text-center space-y-2">
+        <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center mx-auto text-xl font-black shadow-md">
+          O
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          Sign In to OUTPOST
+        </h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Access your student portal, landlord listings, or admin console
+        </p>
+      </div>
+
+      {/* Role Tabs */}
+      <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-semibold">
+        {(['student', 'landlord', 'admin'] as UserRole[]).map((r) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => {
+              setRoleTab(r);
+              if (r === 'student') setEmail('tunde.student@unilag.edu.ng');
+              else if (r === 'landlord') setEmail('emeka.landlord@outpost.ng');
+              else if (r === 'admin') setEmail('admin@outpost.ng');
+            }}
+            className={`flex-1 py-2 rounded-lg capitalize transition ${
+              roleTab === r
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+
+      {/* Login Card */}
+      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xl space-y-5">
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Active Email Address
+            </label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. yourname@university.edu.ng"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center text-xs">
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Password</label>
+              <Link to="/forgot-password" className="text-[11px] text-emerald-600 hover:underline">
+                Forgot password?
+              </Link>
+            </div>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••••••"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md flex items-center justify-center gap-2"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>Sign In to Portal</span>
+          </button>
+        </form>
+
+        {/* Development Quick Fill Helpers */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-center">
+            Demo 1-Click Credentials
+          </p>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => quickFill('tunde.student@unilag.edu.ng', 'student')}
+              className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+            >
+              <span className="font-semibold block">Tunde (Verified)</span>
+              <span className="text-[10px] text-slate-400">UNILAG Student</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => quickFill('ibrahim.musa@oau.edu.ng', 'student')}
+              className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+            >
+              <span className="font-semibold block">Ibrahim (Pending)</span>
+              <span className="text-[10px] text-slate-400">OAU Student</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => quickFill('emeka.landlord@outpost.ng', 'landlord')}
+              className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+            >
+              <span className="font-semibold block">Chief Emeka</span>
+              <span className="text-[10px] text-slate-400">Verified Landlord</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => quickFill('admin@outpost.ng', 'admin')}
+              className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+            >
+              <span className="font-semibold block">Dr. Vance (Admin)</span>
+              <span className="text-[10px] text-slate-400">Console Officer</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="text-center text-xs text-slate-500 pt-2">
+          Don't have an account?{' '}
+          <Link to="/register" className="font-semibold text-emerald-600 hover:underline">
+            Register as Student or Landlord
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+};

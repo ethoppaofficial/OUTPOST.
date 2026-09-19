@@ -1,0 +1,45 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    // Public property images
+    match /property-images/{imageId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (request.auth.token.role == 'landlord' || isAdmin());
+    }
+
+    // Private Student Verification Documents (Only student owner & admin)
+    match /student-docs/{studentId}/{documentId} {
+      allow read: if isAuthenticated() && (request.auth.uid == studentId || isAdmin());
+      allow write: if isAuthenticated() && request.auth.uid == studentId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+    }
+
+    // Private Landlord Verification Documents (Only landlord owner & admin)
+    match /landlord-docs/{landlordId}/{documentId} {
+      allow read: if isAuthenticated() && (request.auth.uid == landlordId || isAdmin());
+      allow write: if isAuthenticated() && request.auth.uid == landlordId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+    }
+
+    // Private Payment Receipts (Only student, property landlord, or admin)
+    match /receipts/{reservationId}/{receiptId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+    }
+  }
+}
