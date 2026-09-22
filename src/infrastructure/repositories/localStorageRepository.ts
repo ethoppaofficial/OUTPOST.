@@ -196,7 +196,7 @@ export class LocalStorageRepository {
       student: {
         userId: profile.userId,
         displayName: profile.fullName,
-        institution: profile.university,
+        institution: profile.university || profile.institutionName || 'Higher Institution',
         programme: profile.programme,
         studyLevel: profile.studyLevel,
         avatarUrl: user.avatarUrl,
@@ -646,10 +646,14 @@ export class LocalStorageRepository {
     const leaderUser = this.getUserById(leaderId);
     const targetProp = targetPropertyId ? this.getPropertyById(targetPropertyId) : undefined;
 
+    const now = new Date().toISOString();
     const newGroup: AccommodationGroup = {
       id: `group-${Date.now()}`,
       name,
       description,
+      status: 'active',
+      ownerId: leaderId,
+      ownerName: leader ? leader.fullName : 'Leader',
       leaderId,
       leaderName: leader ? leader.fullName : 'Leader',
       memberIds: [leaderId],
@@ -659,13 +663,14 @@ export class LocalStorageRepository {
           name: leader ? leader.fullName : 'Leader',
           avatarUrl: leaderUser?.avatarUrl,
           role: 'leader',
-          joinedAt: new Date().toISOString(),
+          joinedAt: now,
         },
       ],
       targetPropertyId,
       targetPropertyName: targetProp?.title,
       maxCapacity,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
 
     groups.push(newGroup);
@@ -676,8 +681,10 @@ export class LocalStorageRepository {
     const groupConv: Conversation = {
       id: `conv-group-${newGroup.id}`,
       type: 'group',
+      title: newGroup.name,
       name: newGroup.name,
       groupId: newGroup.id,
+      createdBy: leaderId,
       participantIds: [leaderId],
       participants: [
         {
@@ -689,7 +696,9 @@ export class LocalStorageRepository {
         },
       ],
       lastMessageText: `Group "${name}" established.`,
-      lastMessageTimestamp: new Date().toISOString(),
+      lastMessageTimestamp: now,
+      createdAt: now,
+      updatedAt: now,
       unreadCount: 0,
     };
     convos.push(groupConv);
@@ -1268,10 +1277,13 @@ export class LocalStorageRepository {
     const landlordB = this.getLandlordProfile(userIdB);
     const nameB = studentB?.fullName || landlordB?.legalName || userB?.email || 'User';
 
+    const now = new Date().toISOString();
     const newConv: Conversation = {
       id: `conv-${Date.now()}`,
       type: 'direct',
+      title: nameB,
       name: nameB,
+      createdBy: userIdA,
       participantIds: [userIdA, userIdB],
       participants: [
         {
@@ -1290,7 +1302,9 @@ export class LocalStorageRepository {
         },
       ],
       lastMessageText: 'Conversation started',
-      lastMessageTimestamp: new Date().toISOString(),
+      lastMessageTimestamp: now,
+      createdAt: now,
+      updatedAt: now,
       unreadCount: 0,
     };
 

@@ -39,12 +39,14 @@ import { VerificationQueuePage } from './pages/admin/VerificationQueuePage';
 import { PropertyApprovalsPage } from './pages/admin/PropertyApprovalsPage';
 import { UsersPage } from './pages/admin/UsersPage';
 import { DisputesPage } from './pages/admin/DisputesPage';
+import { ThemeProvider } from './application/context/ThemeContext';
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppShell>
-        <Routes>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AppShell>
+          <Routes>
           {/* Public Routes */}
           <Route path="/" element={<HomePage />} />
           <Route path="/properties" element={<PropertiesPage />} />
@@ -289,5 +291,6 @@ export default function App() {
         </Routes>
       </AppShell>
     </BrowserRouter>
+  </ThemeProvider>
   );
 }

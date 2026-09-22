@@ -7,6 +7,7 @@ import {
   RoommatePreference,
   RoommateRequest,
   AccommodationGroup,
+  GroupInvitation,
   Reservation,
   Invoice,
   PaymentReceipt,
