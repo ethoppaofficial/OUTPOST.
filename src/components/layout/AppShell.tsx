@@ -22,6 +22,7 @@ import { authService, AuthSession } from '../../application/services/authService
 import { notificationService } from '../../application/services/notificationService';
 import { ThemeToggle } from './ThemeToggle';
 import { PersonaSwitcher } from './PersonaSwitcher';
+import { useFirebase } from '../../application/context/FirebaseContext';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -34,6 +35,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [notifsDropdownOpen, setNotifsDropdownOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { connected } = useFirebase();
 
   const refreshSession = () => {
     const s = authService.getSession();
@@ -297,6 +299,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </div>
 
           <div className="flex items-center gap-6">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
+              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span>Firebase Cloud {connected ? 'Live' : 'Connecting'}</span>
+            </div>
             <Link to="/properties" className="hover:text-slate-900 dark:hover:text-white transition">All Properties</Link>
             <Link to="/login" className="hover:text-slate-900 dark:hover:text-white transition">Sign In</Link>
             <Link to="/register" className="hover:text-slate-900 dark:hover:text-white transition">Register Account</Link>

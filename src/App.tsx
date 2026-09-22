@@ -40,13 +40,15 @@ import { PropertyApprovalsPage } from './pages/admin/PropertyApprovalsPage';
 import { UsersPage } from './pages/admin/UsersPage';
 import { DisputesPage } from './pages/admin/DisputesPage';
 import { ThemeProvider } from './application/context/ThemeContext';
+import { FirebaseProvider } from './application/context/FirebaseContext';
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BrowserRouter>
-        <AppShell>
-          <Routes>
+    <FirebaseProvider>
+      <ThemeProvider>
+        <BrowserRouter>
+          <AppShell>
+            <Routes>
           {/* Public Routes */}
           <Route path="/" element={<HomePage />} />
           <Route path="/properties" element={<PropertiesPage />} />
@@ -292,5 +294,6 @@ export default function App() {
       </AppShell>
     </BrowserRouter>
   </ThemeProvider>
+</FirebaseProvider>
   );
 }

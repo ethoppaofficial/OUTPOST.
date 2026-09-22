@@ -1,0 +1,228 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Platform user account record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["student", "landlord", "admin"] },
+        "phoneNumber": { "type": "string", "maxLength": 30 },
+        "avatarUrl": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Student verification and academic profile",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "registrationNumber": { "type": "string", "maxLength": 50 },
+        "university": { "type": "string", "maxLength": 120 },
+        "institutionName": { "type": "string", "maxLength": 120 },
+        "programme": { "type": "string", "maxLength": 100 },
+        "studyLevel": { "type": "string", "maxLength": 50 },
+        "verificationStatus": { "type": "string", "enum": ["pending", "verified", "rejected"] },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "fullName", "verificationStatus"]
+    },
+    "StudentVerificationDocument": {
+      "title": "StudentVerificationDocument",
+      "description": "Uploaded institutional verification documents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "documentType": { "type": "string", "enum": ["admission_letter", "school_id", "course_registration"] },
+        "documentUrl": { "type": "string" },
+        "fileName": { "type": "string", "maxLength": 120 },
+        "uploadedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "rejectionReason": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["id", "studentId", "documentType", "status"]
+    },
+    "LandlordProfile": {
+      "title": "LandlordProfile",
+      "description": "Landlord identity and verification records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "legalName": { "type": "string", "maxLength": 100 },
+        "businessName": { "type": "string", "maxLength": 120 },
+        "phoneNumber": { "type": "string", "maxLength": 30 },
+        "verificationStatus": { "type": "string", "enum": ["pending", "verified", "rejected"] },
+        "rejectionReason": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["userId", "legalName", "verificationStatus"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Off-campus student accommodation property listing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "landlordId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "locationId": { "type": "string" },
+        "locationName": { "type": "string", "maxLength": 100 },
+        "neighbourhood": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "availableUnits": { "type": "number" },
+        "totalUnits": { "type": "number" },
+        "verificationStatus": { "type": "string", "enum": ["draft", "submitted", "approved", "rejected", "suspended"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "landlordId", "title", "price", "verificationStatus"]
+    },
+    "Reservation": {
+      "title": "Reservation",
+      "description": "Student booking hold or reservation on a unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "landlordId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "unitId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["hold_active", "receipt_submitted", "verified", "expired", "cancelled"] },
+        "holdExpiresAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "landlordId", "propertyId", "status"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Official booking invoice generated for reservation payment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reservationId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "landlordId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["unpaid", "pending_confirmation", "paid", "cancelled"] },
+        "issuedAt": { "type": "string" },
+        "dueDate": { "type": "string" }
+      },
+      "required": ["id", "reservationId", "studentId", "landlordId", "totalAmount", "status"]
+    },
+    "PaymentReceipt": {
+      "title": "PaymentReceipt",
+      "description": "Bank transfer receipt submitted by student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reservationId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "landlordId": { "type": "string" },
+        "receiptUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "verified", "rejected"] },
+        "rejectionReason": { "type": "string", "maxLength": 300 },
+        "uploadedAt": { "type": "string" }
+      },
+      "required": ["id", "reservationId", "studentId", "landlordId", "status"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct or group communication thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["direct", "group"] },
+        "name": { "type": "string", "maxLength": 100 },
+        "groupId": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "lastMessageText": { "type": "string", "maxLength": 500 },
+        "lastMessageTimestamp": { "type": "string" },
+        "unreadCount": { "type": "number" }
+      },
+      "required": ["id", "type", "participantIds"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual message in a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "conversationId", "senderId", "text", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User in-app notification event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 120 },
+        "message": { "type": "string", "maxLength": 500 },
+        "isRead": { "type": "boolean" },
+        "link": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "message", "isRead"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of all user profiles and roles"
+    },
+    "/studentProfiles/{userId}": {
+      "schema": "StudentProfile",
+      "description": "Student verification records and academic credentials"
+    },
+    "/studentVerificationDocuments/{docId}": {
+      "schema": "StudentVerificationDocument",
+      "description": "Private student verification documents"
+    },
+    "/landlordProfiles/{userId}": {
+      "schema": "LandlordProfile",
+      "description": "Landlord profiles and property manager records"
+    },
+    "/properties/{propertyId}": {
+      "schema": "Property",
+      "description": "Off-campus housing accommodation listings"
+    },
+    "/reservations/{reservationId}": {
+      "schema": "Reservation",
+      "description": "Student room reservations and hold records"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Official invoices for booking payments"
+    },
+    "/paymentReceipts/{receiptId}": {
+      "schema": "PaymentReceipt",
+      "description": "Student payment receipts submitted to landlords"
+    },
+    "/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Direct and group conversation threads"
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual messages in chat conversations"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "System and transaction notifications for users"
+    }
+  }
+}
