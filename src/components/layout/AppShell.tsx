@@ -232,16 +232,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </Link>
         </div>
 
-        {/* Verification & Trust Badge */}
-        <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/50 dark:border-emerald-800/40 space-y-1.5">
-          <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-semibold text-xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Case Study Sandbox</span>
-          </div>
-          <p className="text-[11px] text-emerald-900/80 dark:text-emerald-300/80 leading-relaxed">
-            Data models student hostels around BUK New Campus (Dambare & Rimin Gata) with 7-day payment holds.
-          </p>
-        </div>
+
       </div>
 
       {/* User Card & Footer in Sidebar */}
