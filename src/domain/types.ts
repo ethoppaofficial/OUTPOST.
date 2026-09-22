@@ -228,25 +228,57 @@ export interface RoommateRequest {
 
 export type GroupStatus = 'active' | 'full' | 'closed';
 
+export type GroupMemberRole = 'admin' | 'member';
+export type GroupMemberStatus = 'active' | 'invited' | 'pending' | 'removed' | 'left';
+
+export interface GroupMember {
+  id: string;
+  groupId: string;
+  userId: string;
+  role: GroupMemberRole;
+  status: GroupMemberStatus;
+  addedBy: string;
+  joinedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GroupMemberRecord {
   userId: string;
   name: string;
   registrationNumber?: string;
   avatarUrl?: string;
-  role: 'owner' | 'leader' | 'member';
+  role: 'owner' | 'leader' | 'admin' | 'member';
+  status?: GroupMemberStatus;
   joinedAt: string;
+}
+
+export interface GroupJoinRequest {
+  id: string;
+  groupId: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  regNumber?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
 }
 
 export interface AccommodationGroup {
   id: string;
   name: string;
   description: string;
+  avatarUrl?: string;
   purpose?: string;
+  visibility?: 'discoverable' | 'invite_only' | 'request_required';
   status: GroupStatus;
   ownerId: string;
   ownerName: string;
-  leaderId: string; // alias for ownerId
-  leaderName: string; // alias for ownerName
+  leaderId: string; // alias for primary admin/owner
+  leaderName: string;
+  adminIds?: string[]; // all group administrators
   memberIds: string[];
   members: GroupMemberRecord[];
   targetPropertyId?: string;
@@ -389,12 +421,37 @@ export interface AppNotification {
 
 export type ConversationType = 'direct' | 'group';
 
+export type MessageDeliveryStatus =
+  | 'pending'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'failed';
+
+export interface MessageMention {
+  userId: string;
+  displayNameSnapshot?: string;
+  userName?: string;
+  startIndex?: number;
+  endIndex?: number;
+  indices?: [number, number];
+}
+
+export interface MessageReplyReference {
+  messageId: string;
+  senderId: string;
+  senderName?: string;
+  textPreview: string;
+}
+
 export interface ConversationParticipant {
   userId: string;
   name: string;
   avatarUrl?: string;
   role: UserRole;
   isOnline?: boolean;
+  lastReadMessageId?: string;
+  lastReadAt?: string;
 }
 
 export interface Conversation {
@@ -412,7 +469,10 @@ export interface Conversation {
   lastMessageAt?: string;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string;
   unreadCount?: number;
+  isMuted?: boolean;
+  isPinned?: boolean;
 }
 
 export interface ChatMessage {
@@ -423,8 +483,33 @@ export interface ChatMessage {
   senderAvatar?: string;
   senderRole: UserRole;
   text: string;
-  status: 'sending' | 'sent' | 'delivered' | 'failed';
+  status: MessageDeliveryStatus;
+  deliveryStatus?: MessageDeliveryStatus;
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
+  failedAt?: string;
+  deliveryError?: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
+  mentions?: MessageMention[];
+  replyTo?: MessageReplyReference;
   createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TypingState {
+  conversationId: string;
+  userId: string;
+  userName: string;
+  timestamp: number;
+}
+
+export interface PresenceState {
+  userId: string;
+  isOnline: boolean;
+  lastSeenAt: string;
 }
 
 export interface AuditLog {

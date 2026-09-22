@@ -12,18 +12,23 @@ export const HomePage: React.FC = () => {
   const featured = propertyService.searchProperties({ onlyApproved: true }).slice(0, 3);
 
   const campuses = [
-    { label: 'All Locations & Campuses', value: 'All' },
-    { label: 'Metropolitan Institute of Technology', value: 'Metropolitan Institute of Technology' },
-    { label: 'Heritage State University', value: 'Heritage State University' },
-    { label: 'Apex College of Health Sciences', value: 'Apex College of Health Sciences' },
-    { label: 'Continental University', value: 'Continental University' },
+    { label: 'All Kano Locations', value: 'All' },
+    { label: 'Bayero University Kano (BUK) - New Campus', value: 'Bayero University Kano (BUK)' },
+    { label: 'Dambare Settlement (Gwarzo Road)', value: 'Dambare' },
+    { label: 'Rimin Gata Community', value: 'Rimin Gata' },
   ];
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
-    if (selectedCampus !== 'All') params.set('university', selectedCampus);
+    if (selectedCampus !== 'All') {
+      if (selectedCampus === 'Dambare' || selectedCampus === 'Rimin Gata') {
+        params.set('neighbourhood', selectedCampus);
+      } else {
+        params.set('university', selectedCampus);
+      }
+    }
     navigate(`/properties?${params.toString()}`);
   };
 
@@ -32,17 +37,12 @@ export const HomePage: React.FC = () => {
       {/* Hero Section */}
       <section className="relative rounded-3xl overflow-hidden bg-slate-900 text-white p-6 sm:p-12 md:p-16 border border-slate-800 shadow-xl">
         <div className="relative z-10 max-w-3xl space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold uppercase tracking-wider">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            Verified Student Accommodations
-          </div>
-
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
-            Find vetted student housing & compatible roommates.
+            Vetted student housing near Bayero University Kano.
           </h1>
 
           <p className="text-slate-300 text-base sm:text-lg leading-relaxed max-w-2xl font-normal">
-            No agent scams, zero inspection fee harassment. Reserve vetted hostels near any higher institution campus with official bank invoice tracking.
+            Discover verified student lodgings in Dambare and Rimin Gata along Gwarzo Road. No agent extortion, transparent 7-day payment holds, and peer-to-peer roommate compatibility.
           </p>
 
           {/* Search Box */}
@@ -56,7 +56,7 @@ export const HomePage: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search hostel name, institution, or neighbourhood..."
+                placeholder="Search hostel name, Dambare, Rimin Gata, or amenity..."
                 className="w-full bg-transparent text-sm focus:outline-none placeholder:text-slate-400 text-slate-900 dark:text-white"
               />
             </div>
@@ -81,21 +81,25 @@ export const HomePage: React.FC = () => {
             </button>
           </form>
 
-          {/* Quick campus links */}
+          {/* Quick neighbourhood links */}
           <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            <span>Popular campuses:</span>
-            {campuses.slice(1).map((c) => (
-              <button
-                key={c.value}
-                onClick={() => {
-                  setSelectedCampus(c.value);
-                  navigate(`/properties?university=${c.value}`);
-                }}
-                className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition"
-              >
-                {c.label}
-              </button>
-            ))}
+            <span>Key BUK Settlements:</span>
+            <button
+              onClick={() => {
+                navigate('/properties?neighbourhood=Dambare');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-emerald-900/40 hover:text-emerald-400 border border-slate-700 text-slate-300 transition"
+            >
+              Dambare (Opposite New Campus)
+            </button>
+            <button
+              onClick={() => {
+                navigate('/properties?neighbourhood=Rimin+Gata');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-emerald-900/40 hover:text-emerald-400 border border-slate-700 text-slate-300 transition"
+            >
+              Rimin Gata (off Gwarzo Rd)
+            </button>
           </div>
         </div>
       </section>

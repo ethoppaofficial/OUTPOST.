@@ -23,13 +23,14 @@ import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
 
 export const PropertyDetailPage: React.FC = () => {
-  const { propertyId } = useParams<{ propertyId: string }>();
+  const { id, propertyId } = useParams<{ id?: string; propertyId?: string }>();
+  const lookupKey = propertyId || id || '';
   const navigate = useNavigate();
   const session = authService.getSession();
 
   const property =
-    propertyService.getPropertyBySlug(propertyId || '') ||
-    propertyService.getPropertyById(propertyId || '');
+    propertyService.getPropertyBySlug(lookupKey) ||
+    propertyService.getPropertyById(lookupKey);
 
   const [selectedUnitId, setSelectedUnitId] = useState<string>(
     property?.rooms[0]?.id || ''

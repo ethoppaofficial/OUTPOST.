@@ -143,10 +143,26 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.leaderId == request.auth.uid;
       allow update: if isSignedIn() && (
         resource.data.leaderId == request.auth.uid ||
+        (resource.data.adminIds != null && request.auth.uid in resource.data.adminIds) ||
         request.auth.uid in resource.data.memberIds ||
         isAdmin()
       );
       allow delete: if isSignedIn() && (resource.data.leaderId == request.auth.uid || isAdmin());
+    }
+
+    // Group Join Requests
+    match /groupJoinRequests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin() ||
+        request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.memberIds
+      );
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.memberIds
+      );
+      allow delete: if isAdmin();
     }
 
     // Real-Time Chat & Conversations (Strict Participant Access)
@@ -156,10 +172,41 @@ service cloud.firestore {
       allow update: if isSignedIn() && request.auth.uid in resource.data.participantIds;
     }
 
+    // Messages with participant-checked read, strict sender creation, and 15-min author-only edit
     match /messages/{messageId} {
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        isAdmin() ||
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participantIds
+      );
+      allow create: if isSignedIn() && 
+        request.resource.data.senderId == request.auth.uid &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participantIds;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        // Sender editing within 15 minutes, preserving sender and conversation identity
+        (
+          resource.data.senderId == request.auth.uid &&
+          request.resource.data.senderId == resource.data.senderId &&
+          request.resource.data.conversationId == resource.data.conversationId
+        ) ||
+        // Or marking as read by a participant
+        (
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participantIds &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryStatus', 'readAt', 'updatedAt'])
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Typing and Presence indicators
+    match /typingStates/{stateId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /presenceStates/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
     }
 
     // In-App Notifications

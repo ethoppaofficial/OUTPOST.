@@ -8,12 +8,16 @@ import {
   RoommateRequest,
   AccommodationGroup,
   GroupInvitation,
+  GroupJoinRequest,
   Reservation,
   Invoice,
   PaymentReceipt,
   AppNotification,
   Conversation,
   ChatMessage,
+  MessageReplyReference,
+  MessageMention,
+  MessageDeliveryStatus,
   AuditLog,
   VerificationReviewStatus,
   ReservationStatus,
@@ -41,23 +45,24 @@ import { calculateCompatibility } from '../../domain/matching';
 import { appEventBus } from '../events/eventBus';
 
 const STORAGE_KEYS = {
-  USERS: 'outpost_users_v1',
-  STUDENT_PROFILES: 'outpost_student_profiles_v1',
-  STUDENT_DOCS: 'outpost_student_docs_v1',
-  LANDLORD_PROFILES: 'outpost_landlord_profiles_v1',
-  PROPERTIES: 'outpost_properties_v1',
-  ROOMMATE_PREFERENCES: 'outpost_roommate_prefs_v1',
-  ROOMMATE_REQUESTS: 'outpost_roommate_reqs_v1',
-  GROUPS: 'outpost_groups_v1',
-  GROUP_INVITATIONS: 'outpost_group_invitations_v1',
-  RESERVATIONS: 'outpost_reservations_v1',
-  INVOICES: 'outpost_invoices_v1',
-  PAYMENT_RECEIPTS: 'outpost_payment_receipts_v1',
-  NOTIFICATIONS: 'outpost_notifications_v1',
-  CONVERSATIONS: 'outpost_conversations_v1',
-  MESSAGES: 'outpost_messages_v1',
-  AUDIT_LOGS: 'outpost_audit_logs_v1',
-  CURRENT_USER_ID: 'outpost_active_user_id_v1',
+  USERS: 'outpost_users_v2',
+  STUDENT_PROFILES: 'outpost_student_profiles_v2',
+  STUDENT_DOCS: 'outpost_student_docs_v2',
+  LANDLORD_PROFILES: 'outpost_landlord_profiles_v2',
+  PROPERTIES: 'outpost_properties_v2',
+  ROOMMATE_PREFERENCES: 'outpost_roommate_prefs_v2',
+  ROOMMATE_REQUESTS: 'outpost_roommate_reqs_v2',
+  GROUPS: 'outpost_groups_v2',
+  GROUP_INVITATIONS: 'outpost_group_invitations_v2',
+  GROUP_JOIN_REQUESTS: 'outpost_group_join_requests_v2',
+  RESERVATIONS: 'outpost_reservations_v2',
+  INVOICES: 'outpost_invoices_v2',
+  PAYMENT_RECEIPTS: 'outpost_payment_receipts_v2',
+  NOTIFICATIONS: 'outpost_notifications_v2',
+  CONVERSATIONS: 'outpost_conversations_v2',
+  MESSAGES: 'outpost_messages_v2',
+  AUDIT_LOGS: 'outpost_audit_logs_v2',
+  CURRENT_USER_ID: 'outpost_active_user_id_v2',
 };
 
 function load<T>(key: string, seed: T): T {
@@ -149,6 +154,18 @@ export class LocalStorageRepository {
 
   public getStudentProfile(userId: string): StudentProfile | undefined {
     return this.getStudentProfiles().find((p) => p.userId === userId);
+  }
+
+  public searchStudents(query: string): StudentProfile[] {
+    const trimmed = query.trim().toLowerCase();
+    const profiles = this.getStudentProfiles();
+    if (!trimmed) return profiles;
+    return profiles.filter(
+      (p) =>
+        p.fullName.toLowerCase().includes(trimmed) ||
+        p.registrationNumber.toLowerCase().includes(trimmed) ||
+        (p.university && p.university.toLowerCase().includes(trimmed))
+    );
   }
 
   public saveStudentProfile(profile: StudentProfile): StudentProfile {
@@ -639,8 +656,14 @@ export class LocalStorageRepository {
     description: string,
     leaderId: string,
     maxCapacity: number,
-    targetPropertyId?: string
+    targetPropertyId?: string,
+    visibility: 'discoverable' | 'invite_only' | 'request_required' = 'discoverable'
   ): AccommodationGroup {
+    const trimmedName = name.trim();
+    if (!trimmedName || trimmedName.length > 60) {
+      throw new Error('Group name must be between 1 and 60 characters.');
+    }
+
     const groups = load<AccommodationGroup[]>(STORAGE_KEYS.GROUPS, SEED_GROUPS);
     const leader = this.getStudentProfile(leaderId);
     const leaderUser = this.getUserById(leaderId);
@@ -649,32 +672,44 @@ export class LocalStorageRepository {
     const now = new Date().toISOString();
     const newGroup: AccommodationGroup = {
       id: `group-${Date.now()}`,
-      name,
-      description,
+      name: trimmedName,
+      description: description.trim(),
       status: 'active',
+      visibility,
       ownerId: leaderId,
       ownerName: leader ? leader.fullName : 'Leader',
       leaderId,
       leaderName: leader ? leader.fullName : 'Leader',
+      adminIds: [leaderId],
       memberIds: [leaderId],
       members: [
         {
           userId: leaderId,
           name: leader ? leader.fullName : 'Leader',
           avatarUrl: leaderUser?.avatarUrl,
-          role: 'leader',
+          role: 'admin',
+          status: 'active',
           joinedAt: now,
         },
       ],
       targetPropertyId,
       targetPropertyName: targetProp?.title,
-      maxCapacity,
+      maxCapacity: Math.max(2, Math.min(12, maxCapacity || 4)),
       createdAt: now,
       updatedAt: now,
     };
 
     groups.push(newGroup);
     save(STORAGE_KEYS.GROUPS, groups);
+
+    // Audit log
+    this.createAuditLog({
+      action: 'GROUP_CREATED',
+      actorId: leaderId,
+      actorName: newGroup.ownerName,
+      actorRole: 'student',
+      details: `Created accommodation group "${newGroup.name}" (${visibility}).`,
+    });
 
     // Also automatically create a group chat conversation for this accommodation group
     const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
@@ -695,7 +730,7 @@ export class LocalStorageRepository {
           isOnline: true,
         },
       ],
-      lastMessageText: `Group "${name}" established.`,
+      lastMessageText: `Group "${trimmedName}" established.`,
       lastMessageTimestamp: now,
       createdAt: now,
       updatedAt: now,
@@ -703,8 +738,426 @@ export class LocalStorageRepository {
     };
     convos.push(groupConv);
     save(STORAGE_KEYS.CONVERSATIONS, convos);
+    appEventBus.publish('conversationsUpdated', convos);
 
     return newGroup;
+  }
+
+  public renameGroup(groupId: string, actorId: string, newName: string): { success: boolean; error?: string; group?: AccommodationGroup } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const isAdmin = group.adminIds?.includes(actorId) || group.leaderId === actorId || group.ownerId === actorId;
+    if (!isAdmin) {
+      return { success: false, error: 'Only group administrators can rename the group.' };
+    }
+
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed.length < 2 || trimmed.length > 60) {
+      return { success: false, error: 'Group name must be between 2 and 60 characters.' };
+    }
+
+    const oldName = group.name;
+    group.name = trimmed;
+    group.updatedAt = new Date().toISOString();
+    this.updateGroup(group);
+
+    // Update conversation name
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.groupId === groupId);
+    if (conv) {
+      conv.title = trimmed;
+      conv.name = trimmed;
+      conv.updatedAt = group.updatedAt;
+      save(STORAGE_KEYS.CONVERSATIONS, convos);
+      appEventBus.publish('conversationsUpdated', convos);
+    }
+
+    // Audit log
+    this.createAuditLog({
+      action: 'GROUP_RENAMED',
+      actorId,
+      actorName: this.getUserDisplayName(actorId),
+      actorRole: 'student',
+      details: `Renamed group from "${oldName}" to "${trimmed}".`,
+    });
+
+    // Notify members
+    group.memberIds.forEach((mId) => {
+      if (mId !== actorId) {
+        this.createNotification({
+          userId: mId,
+          title: 'Group Renamed',
+          message: `Your group was renamed from "${oldName}" to "${trimmed}".`,
+          type: 'info',
+          link: `/student/groups/${groupId}`,
+        });
+      }
+    });
+
+    return { success: true, group };
+  }
+
+  public promoteMemberToAdmin(groupId: string, actorId: string, targetUserId: string): { success: boolean; error?: string } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const isAdmin = group.adminIds?.includes(actorId) || group.leaderId === actorId || group.ownerId === actorId;
+    if (!isAdmin) {
+      return { success: false, error: 'Only group administrators can promote members.' };
+    }
+
+    if (!group.memberIds.includes(targetUserId)) {
+      return { success: false, error: 'User is not an active member of this group.' };
+    }
+
+    if (!group.adminIds) group.adminIds = [group.leaderId];
+    if (!group.adminIds.includes(targetUserId)) {
+      group.adminIds.push(targetUserId);
+    }
+
+    const mem = group.members.find((m) => m.userId === targetUserId);
+    if (mem) {
+      mem.role = 'admin';
+    }
+
+    group.updatedAt = new Date().toISOString();
+    this.updateGroup(group);
+
+    this.createAuditLog({
+      action: 'GROUP_ADMIN_PROMOTED',
+      actorId,
+      actorName: this.getUserDisplayName(actorId),
+      actorRole: 'student',
+      details: `Promoted ${this.getUserDisplayName(targetUserId)} to group administrator.`,
+    });
+
+    this.createNotification({
+      userId: targetUserId,
+      title: 'Promoted to Group Admin',
+      message: `You are now an administrator of "${group.name}".`,
+      type: 'success',
+      link: `/student/groups/${groupId}`,
+    });
+
+    return { success: true };
+  }
+
+  public demoteAdmin(groupId: string, actorId: string, targetUserId: string): { success: boolean; error?: string } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const isActorAdmin = group.adminIds?.includes(actorId) || group.leaderId === actorId || group.ownerId === actorId;
+    if (!isActorAdmin) {
+      return { success: false, error: 'Only group administrators can demote administrators.' };
+    }
+
+    if (!group.adminIds) group.adminIds = [group.leaderId];
+    const remainingAdmins = group.adminIds.filter((id) => id !== targetUserId);
+    if (remainingAdmins.length === 0) {
+      return { success: false, error: 'Cannot demote the final group administrator. Promote another member first.' };
+    }
+
+    group.adminIds = remainingAdmins;
+    if (group.leaderId === targetUserId) {
+      group.leaderId = remainingAdmins[0];
+      group.ownerId = remainingAdmins[0];
+      group.ownerName = this.getUserDisplayName(remainingAdmins[0]);
+      group.leaderName = group.ownerName;
+    }
+
+    const mem = group.members.find((m) => m.userId === targetUserId);
+    if (mem) {
+      mem.role = 'member';
+    }
+
+    group.updatedAt = new Date().toISOString();
+    this.updateGroup(group);
+
+    this.createAuditLog({
+      action: 'GROUP_ADMIN_DEMOTED',
+      actorId,
+      actorName: this.getUserDisplayName(actorId),
+      actorRole: 'student',
+      details: `Demoted ${this.getUserDisplayName(targetUserId)} to regular member.`,
+    });
+
+    this.createNotification({
+      userId: targetUserId,
+      title: 'Admin Role Changed',
+      message: `Your administrator privileges for "${group.name}" have been modified.`,
+      type: 'info',
+      link: `/student/groups/${groupId}`,
+    });
+
+    return { success: true };
+  }
+
+  public removeMember(groupId: string, actorId: string, targetUserId: string): { success: boolean; error?: string } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const isActorAdmin = group.adminIds?.includes(actorId) || group.leaderId === actorId || group.ownerId === actorId;
+    const isSelf = actorId === targetUserId;
+
+    if (!isActorAdmin && !isSelf) {
+      return { success: false, error: 'Only group administrators can remove members.' };
+    }
+
+    if (!group.memberIds.includes(targetUserId)) {
+      return { success: false, error: 'User is not a member of this group.' };
+    }
+
+    // Check if target is the final admin
+    if (!group.adminIds) group.adminIds = [group.leaderId];
+    const isTargetAdmin = group.adminIds.includes(targetUserId);
+    if (isTargetAdmin && group.adminIds.length <= 1 && group.memberIds.length > 1) {
+      return {
+        success: false,
+        error: 'Cannot leave or remove the final administrator while other members remain. Promote another member first.',
+      };
+    }
+
+    // Remove from group
+    group.memberIds = group.memberIds.filter((id) => id !== targetUserId);
+    group.adminIds = group.adminIds.filter((id) => id !== targetUserId);
+    group.members = group.members.filter((m) => m.userId !== targetUserId);
+
+    if (group.memberIds.length === 0) {
+      group.status = 'closed';
+    } else if (group.leaderId === targetUserId) {
+      group.leaderId = group.adminIds[0] || group.memberIds[0];
+      group.ownerId = group.leaderId;
+      group.ownerName = this.getUserDisplayName(group.leaderId);
+      group.leaderName = group.ownerName;
+      if (!group.adminIds.includes(group.leaderId)) {
+        group.adminIds.push(group.leaderId);
+      }
+    }
+
+    group.updatedAt = new Date().toISOString();
+    this.updateGroup(group);
+
+    // Remove from linked conversation participantIds so they lose chat access
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.groupId === groupId);
+    if (conv) {
+      conv.participantIds = conv.participantIds.filter((id) => id !== targetUserId);
+      conv.participants = conv.participants.filter((p) => p.userId !== targetUserId);
+      conv.updatedAt = group.updatedAt;
+      save(STORAGE_KEYS.CONVERSATIONS, convos);
+      appEventBus.publish('conversationsUpdated', convos);
+    }
+
+    this.createAuditLog({
+      action: isSelf ? 'GROUP_MEMBER_LEFT' : 'GROUP_MEMBER_REMOVED',
+      actorId,
+      actorName: this.getUserDisplayName(actorId),
+      actorRole: 'student',
+      details: `${isSelf ? 'Left' : 'Removed ' + this.getUserDisplayName(targetUserId) + ' from'} group "${group.name}".`,
+    });
+
+    if (!isSelf) {
+      this.createNotification({
+        userId: targetUserId,
+        title: 'Removed from Group',
+        message: `You have been removed from "${group.name}".`,
+        type: 'warning',
+        link: '/student/groups',
+      });
+    }
+
+    return { success: true };
+  }
+
+  public leaveGroup(groupId: string, userId: string): { success: boolean; error?: string } {
+    return this.removeMember(groupId, userId, userId);
+  }
+
+  public joinGroup(groupId: string, userId: string): { success: boolean; error?: string; pendingApproval?: boolean } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    if (group.status !== 'active') {
+      return { success: false, error: 'Group is no longer active.' };
+    }
+
+    if (group.memberIds.includes(userId)) {
+      return { success: false, error: 'You are already a member of this group.' };
+    }
+
+    if (group.memberIds.length >= group.maxCapacity) {
+      return { success: false, error: 'Group has reached maximum capacity.' };
+    }
+
+    if (group.visibility === 'invite_only') {
+      return { success: false, error: 'This group is invite-only. Request an invitation from a member.' };
+    }
+
+    if (group.visibility === 'request_required') {
+      return this.requestToJoinGroup(groupId, userId);
+    }
+
+    // Direct join for discoverable groups
+    const student = this.getStudentProfile(userId);
+    const user = this.getUserById(userId);
+    group.memberIds.push(userId);
+    group.members.push({
+      userId,
+      name: student?.fullName || 'Student',
+      avatarUrl: user?.avatarUrl,
+      role: 'member',
+      status: 'active',
+      joinedAt: new Date().toISOString(),
+    });
+    group.updatedAt = new Date().toISOString();
+    this.updateGroup(group);
+
+    // Add to group conversation
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.groupId === groupId);
+    if (conv && !conv.participantIds.includes(userId)) {
+      conv.participantIds.push(userId);
+      conv.participants.push({
+        userId,
+        name: student?.fullName || 'Student',
+        avatarUrl: user?.avatarUrl,
+        role: 'student',
+        isOnline: true,
+      });
+      conv.updatedAt = group.updatedAt;
+      save(STORAGE_KEYS.CONVERSATIONS, convos);
+      appEventBus.publish('conversationsUpdated', convos);
+    }
+
+    this.createAuditLog({
+      action: 'GROUP_MEMBER_JOINED',
+      actorId: userId,
+      actorName: student?.fullName || 'Student',
+      actorRole: 'student',
+      details: `Joined accommodation group "${group.name}".`,
+    });
+
+    return { success: true };
+  }
+
+  public requestToJoinGroup(groupId: string, userId: string): { success: boolean; error?: string; pendingApproval?: boolean } {
+    const group = this.getGroupById(groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const requests = load<GroupJoinRequest[]>(STORAGE_KEYS.GROUP_JOIN_REQUESTS, []);
+    const existing = requests.find((r) => r.groupId === groupId && r.userId === userId && r.status === 'pending');
+    if (existing) {
+      return { success: false, error: 'A join request is already pending review.' };
+    }
+
+    const student = this.getStudentProfile(userId);
+    const user = this.getUserById(userId);
+
+    const newReq: GroupJoinRequest = {
+      id: `gjr-${Date.now()}`,
+      groupId,
+      userId,
+      userName: student?.fullName || 'Student',
+      userAvatar: user?.avatarUrl,
+      regNumber: student?.registrationNumber,
+      status: 'pending',
+      requestedAt: new Date().toISOString(),
+    };
+
+    requests.push(newReq);
+    save(STORAGE_KEYS.GROUP_JOIN_REQUESTS, requests);
+
+    // Notify admins
+    const adminIds = group.adminIds || [group.leaderId];
+    adminIds.forEach((aId) => {
+      this.createNotification({
+        userId: aId,
+        title: 'New Group Join Request',
+        message: `${newReq.userName} requested to join "${group.name}".`,
+        type: 'info',
+        link: `/student/groups/${groupId}/settings`,
+      });
+    });
+
+    return { success: true, pendingApproval: true };
+  }
+
+  public getGroupJoinRequests(groupId: string): GroupJoinRequest[] {
+    const requests = load<GroupJoinRequest[]>(STORAGE_KEYS.GROUP_JOIN_REQUESTS, []);
+    return requests.filter((r) => r.groupId === groupId && r.status === 'pending');
+  }
+
+  public respondToJoinRequest(requestId: string, actorId: string, action: 'approve' | 'reject'): { success: boolean; error?: string } {
+    const requests = load<GroupJoinRequest[]>(STORAGE_KEYS.GROUP_JOIN_REQUESTS, []);
+    const req = requests.find((r) => r.id === requestId);
+    if (!req) return { success: false, error: 'Request not found.' };
+
+    const group = this.getGroupById(req.groupId);
+    if (!group) return { success: false, error: 'Group not found.' };
+
+    const isAdmin = group.adminIds?.includes(actorId) || group.leaderId === actorId || group.ownerId === actorId;
+    if (!isAdmin) return { success: false, error: 'Only group administrators can review join requests.' };
+
+    req.status = action === 'approve' ? 'approved' : 'rejected';
+    req.reviewedAt = new Date().toISOString();
+    req.reviewedBy = actorId;
+    save(STORAGE_KEYS.GROUP_JOIN_REQUESTS, requests);
+
+    if (action === 'approve') {
+      if (group.memberIds.length >= group.maxCapacity) {
+        return { success: false, error: 'Group is already at maximum capacity.' };
+      }
+
+      if (!group.memberIds.includes(req.userId)) {
+        group.memberIds.push(req.userId);
+        group.members.push({
+          userId: req.userId,
+          name: req.userName,
+          avatarUrl: req.userAvatar,
+          role: 'member',
+          status: 'active',
+          joinedAt: req.reviewedAt,
+        });
+        group.updatedAt = req.reviewedAt;
+        this.updateGroup(group);
+
+        // Add to conversation
+        const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+        const conv = convos.find((c) => c.groupId === group.id);
+        if (conv && !conv.participantIds.includes(req.userId)) {
+          conv.participantIds.push(req.userId);
+          conv.participants.push({
+            userId: req.userId,
+            name: req.userName,
+            avatarUrl: req.userAvatar,
+            role: 'student',
+            isOnline: true,
+          });
+          conv.updatedAt = req.reviewedAt;
+          save(STORAGE_KEYS.CONVERSATIONS, convos);
+          appEventBus.publish('conversationsUpdated', convos);
+        }
+      }
+
+      this.createNotification({
+        userId: req.userId,
+        title: 'Group Join Request Approved',
+        message: `Your request to join "${group.name}" was approved!`,
+        type: 'success',
+        link: `/student/groups/${group.id}`,
+      });
+    } else {
+      this.createNotification({
+        userId: req.userId,
+        title: 'Group Join Request Declined',
+        message: `Your request to join "${group.name}" was not approved.`,
+        type: 'info',
+        link: '/student/groups',
+      });
+    }
+
+    return { success: true };
   }
 
   public updateGroup(group: AccommodationGroup): AccommodationGroup {
@@ -1219,26 +1672,52 @@ export class LocalStorageRepository {
   public getMessages(conversationId: string): ChatMessage[] {
     const messages = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
     return messages
-      .filter((m) => m.conversationId === conversationId)
+      .filter((m) => m.conversationId === conversationId && !m.isDeleted)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
-  public sendMessage(conversationId: string, senderId: string, text: string): ChatMessage {
+  public sendMessage(
+    conversationId: string,
+    senderId: string,
+    text: string,
+    options?: { replyTo?: MessageReplyReference; mentions?: MessageMention[] }
+  ): ChatMessage {
+    const conv = this.getConversationById(conversationId);
+    if (!conv) {
+      throw new Error('Conversation not found.');
+    }
+
+    if (!conv.participantIds.includes(senderId)) {
+      throw new Error('You are not an active participant in this conversation.');
+    }
+
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+      throw new Error('Message text cannot be empty.');
+    }
+
     const user = this.getUserById(senderId);
     const student = this.getStudentProfile(senderId);
     const landlord = this.getLandlordProfile(senderId);
     const senderName = student?.fullName || landlord?.legalName || (user?.role === 'admin' ? 'Outpost Admin' : 'User');
+    const now = new Date().toISOString();
 
     const newMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       conversationId,
       senderId,
       senderName,
       senderAvatar: user?.avatarUrl,
       senderRole: user?.role || 'student',
-      text,
+      text: trimmedText,
       status: 'delivered',
-      createdAt: new Date().toISOString(),
+      deliveryStatus: 'delivered',
+      sentAt: now,
+      deliveredAt: now,
+      replyTo: options?.replyTo,
+      mentions: options?.mentions,
+      createdAt: now,
+      updatedAt: now,
     };
 
     const messages = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
@@ -1247,11 +1726,30 @@ export class LocalStorageRepository {
 
     // Update conversation snippet
     const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
-    const conv = convos.find((c) => c.id === conversationId);
-    if (conv) {
-      conv.lastMessageText = text;
-      conv.lastMessageTimestamp = newMessage.createdAt;
+    const c = convos.find((item) => item.id === conversationId);
+    if (c) {
+      c.lastMessageId = newMessage.id;
+      c.lastMessageText = trimmedText;
+      c.lastMessageTimestamp = now;
+      c.lastMessageAt = now;
+      c.updatedAt = now;
+      c.unreadCount = (c.unreadCount || 0) + 1;
       save(STORAGE_KEYS.CONVERSATIONS, convos);
+    }
+
+    // Handle mentions notifications
+    if (options?.mentions && options.mentions.length > 0) {
+      options.mentions.forEach((mention) => {
+        if (mention.userId !== senderId && conv.participantIds.includes(mention.userId)) {
+          this.createNotification({
+            userId: mention.userId,
+            title: 'Mentioned in Chat',
+            message: `${senderName} mentioned you: "${trimmedText.length > 40 ? trimmedText.substring(0, 37) + '...' : trimmedText}"`,
+            type: 'info',
+            link: `/student/chat/${conversationId}`,
+          });
+        }
+      });
     }
 
     // Publish to event bus for live reactive updates
@@ -1261,11 +1759,157 @@ export class LocalStorageRepository {
     return newMessage;
   }
 
-  public startDirectConversation(userIdA: string, userIdB: string): Conversation {
+  public editMessage(
+    messageId: string,
+    userId: string,
+    newText: string
+  ): { success: boolean; error?: string; message?: ChatMessage } {
+    const messages = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) {
+      return { success: false, error: 'Message not found.' };
+    }
+
+    // Strict ownership validation: Only sender can edit their own message
+    if (message.senderId !== userId) {
+      return { success: false, error: 'You can only edit messages sent by you.' };
+    }
+
+    // Authoritative 15-minute time window check
+    const messageTime = new Date(message.createdAt).getTime();
+    const currentTime = Date.now();
+    const fifteenMinutesMs = 15 * 60 * 1000;
+
+    if (currentTime - messageTime > fifteenMinutesMs) {
+      return {
+        success: false,
+        error: 'Message editing window has expired (15 minutes limit).',
+      };
+    }
+
+    const trimmed = newText.trim();
+    if (!trimmed) {
+      return { success: false, error: 'Message text cannot be empty.' };
+    }
+
+    // Update message while strictly preserving senderId, conversationId, and createdAt
+    message.text = trimmed;
+    message.isEdited = true;
+    message.editedAt = new Date().toISOString();
+    message.updatedAt = message.editedAt;
+
+    save(STORAGE_KEYS.MESSAGES, messages);
+
+    // Update conversation if this was the last message
     const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const c = convos.find((conv) => conv.id === message.conversationId);
+    if (c && c.lastMessageId === message.id) {
+      c.lastMessageText = trimmed;
+      c.updatedAt = message.editedAt;
+      save(STORAGE_KEYS.CONVERSATIONS, convos);
+      appEventBus.publish('conversationsUpdated', convos);
+    }
+
+    appEventBus.publish(`chat:${message.conversationId}`, message);
+    return { success: true, message };
+  }
+
+  public retryFailedMessage(messageId: string, userId: string): { success: boolean; error?: string; message?: ChatMessage } {
+    const messages = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) return { success: false, error: 'Message not found.' };
+    if (message.senderId !== userId) return { success: false, error: 'Unauthorized.' };
+
+    const now = new Date().toISOString();
+    message.status = 'delivered';
+    message.deliveryStatus = 'delivered';
+    message.sentAt = now;
+    message.deliveredAt = now;
+    message.failedAt = undefined;
+    message.deliveryError = undefined;
+    message.updatedAt = now;
+
+    save(STORAGE_KEYS.MESSAGES, messages);
+    appEventBus.publish(`chat:${message.conversationId}`, message);
+
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    appEventBus.publish('conversationsUpdated', convos);
+
+    return { success: true, message };
+  }
+
+  public markMessagesAsRead(conversationId: string, userId: string): void {
+    const messages = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
+    const now = new Date().toISOString();
+    let updatedCount = 0;
+
+    messages.forEach((m) => {
+      if (m.conversationId === conversationId && m.senderId !== userId && m.status !== 'read') {
+        m.status = 'read';
+        m.deliveryStatus = 'read';
+        m.readAt = now;
+        m.updatedAt = now;
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      save(STORAGE_KEYS.MESSAGES, messages);
+    }
+
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.id === conversationId);
+    if (conv) {
+      conv.unreadCount = 0;
+      const participant = conv.participants.find((p) => p.userId === userId);
+      if (participant) {
+        participant.lastReadAt = now;
+      }
+      save(STORAGE_KEYS.CONVERSATIONS, convos);
+      appEventBus.publish('conversationsUpdated', convos);
+    }
+
+    appEventBus.publish(`chat:read:${conversationId}`, { userId, readAt: now });
+  }
+
+  public searchMessages(conversationId: string, query: string): ChatMessage[] {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return [];
+    const messages = this.getMessages(conversationId);
+    return messages.filter((m) => m.text.toLowerCase().includes(trimmed));
+  }
+
+  public toggleMuteConversation(conversationId: string, userId: string): boolean {
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.id === conversationId);
+    if (!conv) return false;
+    conv.isMuted = !conv.isMuted;
+    save(STORAGE_KEYS.CONVERSATIONS, convos);
+    appEventBus.publish('conversationsUpdated', convos);
+    return conv.isMuted;
+  }
+
+  public archiveConversation(conversationId: string, userId: string): boolean {
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    const conv = convos.find((c) => c.id === conversationId);
+    if (!conv) return false;
+    conv.archivedAt = conv.archivedAt ? undefined : new Date().toISOString();
+    save(STORAGE_KEYS.CONVERSATIONS, convos);
+    appEventBus.publish('conversationsUpdated', convos);
+    return !!conv.archivedAt;
+  }
+
+  public startDirectConversation(userIdA: string, userIdB: string): Conversation {
+    if (userIdA === userIdB) {
+      throw new Error('Cannot start a direct conversation with yourself.');
+    }
+
+    const convos = load<Conversation[]>(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
+    // Explicit direct check with exactly two participants preventing duplicate direct threads
     const existing = convos.find(
       (c) =>
         c.type === 'direct' &&
+        c.participantIds.length === 2 &&
         c.participantIds.includes(userIdA) &&
         c.participantIds.includes(userIdB)
     );
@@ -1376,6 +2020,26 @@ export class LocalStorageRepository {
       timestamp: new Date().toISOString(),
     });
     save(STORAGE_KEYS.AUDIT_LOGS, logs);
+  }
+
+  public createAuditLog(data: {
+    action: string;
+    actorId: string;
+    actorName: string;
+    actorRole: UserRole;
+    targetEntity?: string;
+    targetId?: string;
+    details: string;
+  }): void {
+    this.logAudit({
+      action: data.action,
+      actorId: data.actorId,
+      actorName: data.actorName,
+      actorRole: data.actorRole,
+      targetEntity: data.targetEntity || 'SYSTEM',
+      targetId: data.targetId || '',
+      details: data.details,
+    });
   }
 }
 

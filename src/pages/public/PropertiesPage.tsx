@@ -14,6 +14,7 @@ export const PropertiesPage: React.FC = () => {
   // Parse search params into filter state
   const query = searchParams.get('q') || '';
   const university = searchParams.get('university') || 'All';
+  const neighbourhood = searchParams.get('neighbourhood') || 'All';
   const propertyType = searchParams.get('propertyType') || 'All';
   const accommodationType = searchParams.get('accommodationType') || 'All';
   const genderPolicy = searchParams.get('genderPolicy') || 'All';
@@ -45,10 +46,20 @@ export const PropertiesPage: React.FC = () => {
     return Array.from(set).sort();
   }, []);
 
+  const availableNeighbourhoods = useMemo(() => {
+    const all = propertyService.searchProperties({ onlyApproved: false });
+    const set = new Set<string>();
+    all.forEach((p) => {
+      if (p.neighbourhood) set.add(p.neighbourhood);
+    });
+    return Array.from(set).sort();
+  }, []);
+
   const properties = useMemo(() => {
     return propertyService.searchProperties({
       query,
       university,
+      neighbourhood,
       propertyType,
       accommodationType,
       genderPolicy,
@@ -58,11 +69,12 @@ export const PropertiesPage: React.FC = () => {
       sortBy,
       onlyApproved: true,
     });
-  }, [query, university, propertyType, accommodationType, genderPolicy, maxDistanceKm, maxPrice, onlyVerifiedLandlord, sortBy]);
+  }, [query, university, neighbourhood, propertyType, accommodationType, genderPolicy, maxDistanceKm, maxPrice, onlyVerifiedLandlord, sortBy]);
 
   const activeFilterCount = [
     query ? 1 : 0,
     university !== 'All' ? 1 : 0,
+    neighbourhood !== 'All' ? 1 : 0,
     propertyType !== 'All' ? 1 : 0,
     accommodationType !== 'All' ? 1 : 0,
     genderPolicy !== 'All' ? 1 : 0,
@@ -164,6 +176,23 @@ export const PropertiesPage: React.FC = () => {
               {availableInstitutions.map((inst) => (
                 <option key={inst} value={inst}>
                   {inst}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Student Neighbourhood / Settlement */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Student Settlement / Area</label>
+            <select
+              value={neighbourhood}
+              onChange={(e) => updateParam('neighbourhood', e.target.value)}
+              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
+            >
+              <option value="All">All Settlements (Dambare, Rimin Gata...)</option>
+              {availableNeighbourhoods.map((nb) => (
+                <option key={nb} value={nb}>
+                  {nb}
                 </option>
               ))}
             </select>

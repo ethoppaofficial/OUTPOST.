@@ -56,6 +56,12 @@ class PropertyService {
       list = list.filter((p) => p.university.includes(params.university!));
     }
 
+    if (params.neighbourhood && params.neighbourhood !== 'All') {
+      list = list.filter((p) =>
+        p.neighbourhood.toLowerCase().includes(params.neighbourhood!.toLowerCase())
+      );
+    }
+
     if (params.minPrice !== undefined) {
       list = list.filter((p) => p.pricePerSession >= params.minPrice!);
     }

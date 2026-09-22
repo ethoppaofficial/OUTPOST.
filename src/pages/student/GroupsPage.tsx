@@ -1,281 +1,382 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Users, Plus, MessageSquare, ShieldCheck, UserPlus, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  Users,
+  Plus,
+  MessageSquare,
+  ShieldCheck,
+  UserPlus,
+  Globe,
+  Lock,
+  UserCheck,
+  CheckCircle,
+  AlertCircle,
+  Building,
+  Crown,
+  Inbox,
+  ArrowRight
+} from 'lucide-react';
 import { authService } from '../../application/services/authService';
-import { roommateService } from '../../application/services/roommateService';
-import { Modal } from '../../components/ui/Modal';
+import { groupChatService } from '../../application/services/groupChatService';
+import { chatService } from '../../application/services/chatService';
+import { AccommodationGroup, GroupInvitation } from '../../domain/types';
 import { Badge } from '../../components/ui/Badge';
 
 export const GroupsPage: React.FC = () => {
+  const navigate = useNavigate();
   const session = authService.getSession();
-  const [groups, setGroups] = useState(() => roommateService.getStudentGroups(session.user.id));
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
-  const [groupName, setGroupName] = useState('');
-  const [targetUniversity, setTargetUniversity] = useState('UNILAG');
-  const [targetPropertyTitle, setTargetPropertyTitle] = useState('');
-  const [maxCapacity, setMaxCapacity] = useState(4);
-  const [inviteStudentId, setInviteStudentId] = useState('user-student-2');
-  const [error, setError] = useState<string | null>(null);
+  const [allGroups, setAllGroups] = useState<AccommodationGroup[]>(() => groupChatService.getGroups());
+  const [invitations, setInvitations] = useState<GroupInvitation[]>(() =>
+    groupChatService.getPendingInvitations(session.user.id)
+  );
+  const [activeTab, setActiveTab] = useState<'my' | 'explore' | 'invites'>('my');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleCreateGroup = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!groupName.trim()) return;
+  const refreshData = () => {
+    setAllGroups(groupChatService.getGroups());
+    setInvitations(groupChatService.getPendingInvitations(session.user.id));
+  };
 
-    const res = roommateService.createAccommodationGroup(
-      session.user.id,
-      groupName.trim(),
-      targetUniversity,
-      maxCapacity,
-      targetPropertyTitle || undefined
-    );
+  useEffect(() => {
+    refreshData();
+  }, []);
 
+  const myGroups = allGroups.filter((g) => g.memberIds.includes(session.user.id));
+  const discoverableGroups = allGroups.filter(
+    (g) => !g.memberIds.includes(session.user.id) && g.visibility !== 'invite_only'
+  );
+
+  const handleJoin = (groupId: string) => {
+    const res = groupChatService.joinGroup(groupId, session.user.id);
     if (res.success) {
-      setGroups(roommateService.getStudentGroups(session.user.id));
-      setCreateModalOpen(false);
-      setGroupName('');
+      if (res.pendingApproval) {
+        setNotice({ type: 'success', text: 'Join request sent to cohort administrators.' });
+      } else {
+        setNotice({ type: 'success', text: 'You have joined the cohort!' });
+      }
+      refreshData();
+    } else {
+      setNotice({ type: 'error', text: res.error || 'Failed to join group.' });
     }
   };
 
-  const handleInvite = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedGroupId) return;
+  const handleRespondInvite = (inviteId: string, action: 'accept' | 'reject') => {
+    const success = groupChatService.respondToInvitation(inviteId, action);
+    if (success) {
+      setNotice({
+        type: 'success',
+        text: action === 'accept' ? 'Invitation accepted! You are now a cohort member.' : 'Invitation declined.',
+      });
+      refreshData();
+    }
+  };
 
-    const res = roommateService.inviteToGroup(selectedGroupId, inviteStudentId);
-    if (res.success) {
-      setGroups(roommateService.getStudentGroups(session.user.id));
-      setInviteModalOpen(false);
-      setError(null);
+  const handleOpenChat = (group: AccommodationGroup) => {
+    const convos = chatService.getUserConversations(session.user.id);
+    const conv = convos.find((c) => c.groupId === group.id);
+    if (conv) {
+      navigate(`/student/chat/${conv.id}`);
     } else {
-      setError(res.error || 'Failed to add student to group.');
+      navigate('/student/chat');
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            Accommodation Groups & Cohorts
+            Accommodation Cohorts & Squads
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Team up with trusted peers to jointly reserve whole multi-room apartments and split session costs
+            Form trusted house-hunting teams, lock multi-room flats together, and collaborate via linked real-time chats.
           </p>
         </div>
 
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
+        <Link
+          to="/student/groups/new"
+          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 self-start sm:self-auto transition"
         >
           <Plus className="w-4 h-4" />
-          <span>Create New Cohort</span>
-        </button>
+          <span>Establish New Cohort</span>
+        </Link>
       </div>
 
-      {/* Groups List */}
-      {groups.length === 0 ? (
-        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 space-y-3">
-          <Users className="w-8 h-8 text-slate-400 mx-auto" />
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Groups Yet</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Form an accommodation group to coordinate house-hunting, chat together, and lock spaces in the same property.
-          </p>
-          <button
-            onClick={() => setCreateModalOpen(true)}
-            className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-emerald-600 text-white text-xs font-semibold"
-          >
-            Create Your First Group
+      {/* Notice Banner */}
+      {notice && (
+        <div
+          className={`p-3.5 rounded-2xl text-xs flex items-center justify-between gap-3 ${
+            notice.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800'
+              : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {notice.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            <span>{notice.text}</span>
+          </div>
+          <button onClick={() => setNotice(null)} className="text-xs underline hover:opacity-80">
+            Dismiss
           </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {groups.map((g) => {
-            const isLeader = g.leaderId === session.user.id;
-            return (
-              <div
-                key={g.id}
-                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
-                        {g.university} Cohort
-                      </span>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
-                        {g.name}
-                      </h3>
-                    </div>
-                    <Badge variant="neutral" size="sm">
-                      {g.memberIds.length} / {g.maxCapacity} Members
-                    </Badge>
-                  </div>
-
-                  {g.targetPropertyTitle && (
-                    <p className="text-xs text-slate-500">
-                      Target Accommodation: <span className="font-semibold text-slate-700 dark:text-slate-300">{g.targetPropertyTitle}</span>
-                    </p>
-                  )}
-
-                  {/* Members list */}
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Group Cohort Members:
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {g.memberIds.map((mId, idx) => (
-                        <span
-                          key={mId}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium"
-                        >
-                          {mId === g.leaderId ? '👑 Leader' : `Member ${idx + 1}`}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <Link
-                    to="/student/chat"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Open Group Thread</span>
-                  </Link>
-
-                  {isLeader && (
-                    <button
-                      onClick={() => {
-                        setSelectedGroupId(g.id);
-                        setInviteModalOpen(true);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>Invite Member</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 
-      {/* Create Modal */}
-      <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Student Accommodation Cohort">
-        <form onSubmit={handleCreateGroup} className="space-y-4 text-xs">
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Group Name</label>
-            <input
-              type="text"
-              required
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              placeholder="e.g. UNILAG 400L Engineering Crew"
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-            />
-          </div>
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6 text-xs font-bold">
+        <button
+          onClick={() => setActiveTab('my')}
+          className={`pb-3 transition border-b-2 flex items-center gap-1.5 ${
+            activeTab === 'my'
+              ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <span>My Cohorts</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px]">
+            {myGroups.length}
+          </span>
+        </button>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="font-semibold text-slate-700 dark:text-slate-300">University</label>
-              <select
-                value={targetUniversity}
-                onChange={(e) => setTargetUniversity(e.target.value)}
-                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-              >
-                <option value="UNILAG">UNILAG</option>
-                <option value="UI">UI</option>
-                <option value="OAU">OAU</option>
-                <option value="Covenant">Covenant</option>
-              </select>
+        <button
+          onClick={() => setActiveTab('explore')}
+          className={`pb-3 transition border-b-2 flex items-center gap-1.5 ${
+            activeTab === 'explore'
+              ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5" />
+          <span>Explore Open Cohorts</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px]">
+            {discoverableGroups.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('invites')}
+          className={`pb-3 transition border-b-2 flex items-center gap-1.5 ${
+            activeTab === 'invites'
+              ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <Inbox className="w-3.5 h-3.5" />
+          <span>Invitations</span>
+          {invitations.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-emerald-600 text-white text-[10px]">
+              {invitations.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* TAB 1: MY COHORTS */}
+      {activeTab === 'my' && (
+        <>
+          {myGroups.length === 0 ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 space-y-4">
+              <Users className="w-10 h-10 text-slate-400 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">You Have Not Joined Any Cohorts</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Form an accommodation team with campus peers or explore open cohorts looking for flatmates.
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                <Link
+                  to="/student/groups/new"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs transition"
+                >
+                  Create Cohort
+                </Link>
+                <button
+                  onClick={() => setActiveTab('explore')}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Explore Open Cohorts
+                </button>
+              </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {myGroups.map((g) => {
+                const isAdmin =
+                  g.adminIds?.includes(session.user.id) ||
+                  g.leaderId === session.user.id ||
+                  g.ownerId === session.user.id;
 
-            <div className="space-y-1.5">
-              <label className="font-semibold text-slate-700 dark:text-slate-300">Target Capacity</label>
-              <input
-                type="number"
-                min="2"
-                max="8"
-                value={maxCapacity}
-                onChange={(e) => setMaxCapacity(Number(e.target.value))}
-                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-              />
-            </div>
-          </div>
+                return (
+                  <div
+                    key={g.id}
+                    className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                              {g.university || 'General'} Cohort
+                            </span>
+                            {isAdmin && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-[9px] font-bold flex items-center gap-0.5">
+                                <Crown className="w-2.5 h-2.5" /> Admin
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                            {g.name}
+                          </h3>
+                        </div>
 
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Target Property (Optional)</label>
-            <input
-              type="text"
-              value={targetPropertyTitle}
-              onChange={(e) => setTargetPropertyTitle(e.target.value)}
-              placeholder="e.g. Silver Crest Luxury Student Flats"
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-            />
-          </div>
+                        <Badge variant="neutral" size="sm">
+                          {g.memberIds.length} / {g.maxCapacity} Members
+                        </Badge>
+                      </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setCreateModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
-            >
-              Create Cohort
-            </button>
-          </div>
-        </form>
-      </Modal>
+                      {g.description && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                          {g.description}
+                        </p>
+                      )}
 
-      {/* Invite Modal */}
-      <Modal isOpen={inviteModalOpen} onClose={() => setInviteModalOpen(false)} title="Invite Student to Cohort">
-        <form onSubmit={handleInvite} className="space-y-4 text-xs">
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Select Student</label>
-            <select
-              value={inviteStudentId}
-              onChange={(e) => setInviteStudentId(e.target.value)}
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-            >
-              <option value="user-student-2">Chioma Adebayo (UI - Verified)</option>
-              <option value="user-student-3">Ibrahim Musa (OAU - Pending)</option>
-              <option value="user-student-4">Zainab Kalu (Covenant - Enrolled)</option>
-            </select>
-          </div>
+                      {(g.targetPropertyName || g.targetPropertyTitle) && (
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                          <Building className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                          <span className="truncate">
+                            Target: <span className="font-semibold text-slate-900 dark:text-white">{g.targetPropertyName || g.targetPropertyTitle}</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-          {error && (
-            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700">
-              {error}
+                    <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => handleOpenChat(g)}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-semibold transition flex items-center gap-1.5"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Chat</span>
+                      </button>
+
+                      <Link
+                        to={`/student/groups/${g.id}`}
+                        className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition flex items-center gap-1"
+                      >
+                        <span>Cohort Hub</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
+        </>
+      )}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setInviteModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
-            >
-              Add to Group
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {/* TAB 2: EXPLORE OPEN COHORTS */}
+      {activeTab === 'explore' && (
+        <div className="space-y-4">
+          {discoverableGroups.length === 0 ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
+              No open public cohorts discovered at this time. Be the first to establish one!
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {discoverableGroups.map((g) => {
+                const isFull = g.memberIds.length >= g.maxCapacity;
+                const requiresRequest = g.visibility === 'request_required';
+
+                return (
+                  <div
+                    key={g.id}
+                    className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 flex flex-col justify-between"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                            {g.university || 'Campus'} Cohort
+                          </span>
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
+                            {g.name}
+                          </h3>
+                        </div>
+                        <Badge variant={isFull ? 'danger' : 'success'} size="sm">
+                          {isFull ? 'Full' : `${g.maxCapacity - g.memberIds.length} Spots Open`}
+                        </Badge>
+                      </div>
+
+                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                        {g.description || 'Verified accommodation group coordinating mutual housing lease.'}
+                      </p>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      <Link
+                        to={`/student/groups/${g.id}`}
+                        className="text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                      >
+                        View Details →
+                      </Link>
+
+                      <button
+                        onClick={() => handleJoin(g.id)}
+                        disabled={isFull}
+                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>{requiresRequest ? 'Request to Join' : 'Join Cohort'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: INVITATIONS */}
+      {activeTab === 'invites' && (
+        <div className="space-y-4">
+          {invitations.length === 0 ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-xs text-slate-400">
+              You have no pending cohort invitations.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-4">
+              {invitations.map((inv) => (
+                <div key={inv.id} className="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Invitation to join "{inv.groupName}"
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Sent by {inv.senderName} • {new Date(inv.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRespondInvite(inv.id, 'accept')}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => handleRespondInvite(inv.id, 'reject')}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

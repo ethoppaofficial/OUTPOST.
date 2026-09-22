@@ -20,6 +20,8 @@ import { RoommatePreferencesPage } from './pages/student/RoommatePreferencesPage
 import { RoommateRequestsPage } from './pages/student/RoommateRequestsPage';
 import { UserSearchPage } from './pages/student/UserSearchPage';
 import { GroupsPage } from './pages/student/GroupsPage';
+import { NewGroupPage } from './pages/student/NewGroupPage';
+import { GroupDetailPage } from './pages/student/GroupDetailPage';
 import { ReservationsPage } from './pages/student/ReservationsPage';
 import { ReservationDetailPage } from './pages/student/ReservationDetailPage';
 import { InvoicePage } from './pages/student/InvoicePage';
@@ -100,6 +102,14 @@ export default function App() {
             }
           />
           <Route
+            path="/student/profile/verification"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <StudentVerificationPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/student/roommates"
             element={
               <ProtectedRoute allowedRoles={['student']}>
@@ -132,10 +142,66 @@ export default function App() {
             }
           />
           <Route
+            path="/student/user-search"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <UserSearchPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/student/groups"
             element={
               <ProtectedRoute allowedRoles={['student']}>
                 <GroupsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/new"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <NewGroupPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/:groupId"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <GroupDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/:groupId/members"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <GroupDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/:groupId/members/:userId"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <GroupDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/:groupId/settings"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <GroupDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/groups/:groupId/chat"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <GroupDetailPage />
               </ProtectedRoute>
             }
           />
@@ -165,6 +231,14 @@ export default function App() {
           />
           <Route
             path="/student/chat"
+            element={
+              <ProtectedRoute allowedRoles={['student']}>
+                <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/chat/:conversationId"
             element={
               <ProtectedRoute allowedRoles={['student']}>
                 <ChatPage />
@@ -264,7 +338,23 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/landlord-verifications"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <VerificationQueuePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/properties"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <PropertyApprovalsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/property-verifications"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <PropertyApprovalsPage />
@@ -284,6 +374,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <DisputesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/chat"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ChatPage />
               </ProtectedRoute>
             }
           />
