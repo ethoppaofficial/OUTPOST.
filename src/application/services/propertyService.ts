@@ -1,5 +1,6 @@
-import { Property, PropertyType, AccommodationType, GenderPolicy, PropertyVerificationStatus } from '../../domain/types';
+import { Property, PropertyType, AccommodationType, GenderPolicy, PropertyVerificationStatus, PropertyLocation, HousingArea } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
+import { encodeGeohash, computePublicCoordinates, AREA_CENTERS } from '../../domain/geoUtils';
 
 export interface PropertyFilterParams {
   query?: string;
@@ -157,11 +158,56 @@ class PropertyService {
     const slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(100 + Math.random() * 900);
 
     const locationId = data.locationId || (data.neighbourhood?.toLowerCase().includes('rimin') ? 'loc-rimin-gata' : 'loc-dambare');
+    const area: HousingArea = locationId === 'loc-rimin-gata' ? 'Rimin Gata' : 'Dambare';
+    const propId = `prop-${Date.now()}`;
+
+    // Ensure property location is initialized
+    let location: PropertyLocation;
+    if (data.location) {
+      location = {
+        ...data.location,
+        id: data.location.id || `loc-${Date.now()}`,
+        propertyId: propId,
+        locationId,
+        area,
+        city: 'Kano',
+        state: 'Kano State',
+        country: 'Nigeria',
+        geohash: encodeGeohash(data.location.latitude, data.location.longitude),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      const center = AREA_CENTERS[area];
+      const pubCoords = computePublicCoordinates(center.latitude, center.longitude, 'nearby_building', area, propId);
+      location = {
+        id: `loc-${Date.now()}`,
+        propertyId: propId,
+        locationId,
+        area,
+        city: 'Kano',
+        state: 'Kano State',
+        country: 'Nigeria',
+        latitude: center.latitude,
+        longitude: center.longitude,
+        geohash: encodeGeohash(center.latitude, center.longitude),
+        source: 'landlord_pin',
+        verificationStatus: 'pending',
+        precision: 'nearby_building',
+        publicLatitude: pubCoords.publicLatitude,
+        publicLongitude: pubCoords.publicLongitude,
+        publicLocationLabel: pubCoords.publicLocationLabel,
+        formattedAddress: data.address || `${area} Student Settlement, Kano`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
 
     const newProp: Property = {
       ...data,
       locationId,
-      id: `prop-${Date.now()}`,
+      location,
+      id: propId,
       landlordId,
       landlordName: landlord?.legalName || 'Landlord',
       landlordVerified: landlord?.verificationStatus === 'approved',
@@ -172,6 +218,52 @@ class PropertyService {
     };
 
     return repository.createProperty(newProp);
+  }
+
+  public updatePropertyLocation(propertyId: string, locationData: Partial<PropertyLocation>): Property {
+    const existing = repository.getPropertyById(propertyId);
+    if (!existing) throw new Error(`Property ${propertyId} not found`);
+
+    const currentLoc = existing.location || {
+      id: `loc-${Date.now()}`,
+      propertyId,
+      locationId: existing.locationId || 'loc-dambare',
+      area: (existing.neighbourhood?.includes('Rimin') ? 'Rimin Gata' : 'Dambare') as HousingArea,
+      city: 'Kano' as const,
+      state: 'Kano State' as const,
+      country: 'Nigeria' as const,
+      latitude: AREA_CENTERS.Dambare.latitude,
+      longitude: AREA_CENTERS.Dambare.longitude,
+      geohash: encodeGeohash(AREA_CENTERS.Dambare.latitude, AREA_CENTERS.Dambare.longitude),
+      source: 'admin_adjusted' as const,
+      verificationStatus: 'verified' as const,
+      precision: 'nearby_building' as const,
+      publicLocationLabel: 'Off-campus settlement',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedLocation: PropertyLocation = {
+      ...currentLoc,
+      ...locationData,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (locationData.latitude !== undefined && locationData.longitude !== undefined) {
+      updatedLocation.geohash = encodeGeohash(locationData.latitude, locationData.longitude);
+      const pub = computePublicCoordinates(
+        locationData.latitude,
+        locationData.longitude,
+        updatedLocation.precision,
+        updatedLocation.area,
+        propertyId
+      );
+      updatedLocation.publicLatitude = pub.publicLatitude;
+      updatedLocation.publicLongitude = pub.publicLongitude;
+      updatedLocation.publicLocationLabel = pub.publicLocationLabel;
+    }
+
+    return this.updateProperty(propertyId, { location: updatedLocation });
   }
 
   public getAllProperties(): Property[] {

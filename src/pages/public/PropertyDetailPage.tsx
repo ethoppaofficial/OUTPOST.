@@ -21,6 +21,7 @@ import { ImageGallery } from '../../components/ui/ImageGallery';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { PropertyMap } from '../../components/map/PropertyMap';
 
 export const PropertyDetailPage: React.FC = () => {
   const { id, propertyId } = useParams<{ id?: string; propertyId?: string }>();
@@ -242,6 +243,47 @@ export const PropertyDetailPage: React.FC = () => {
                 </li>
               ))}
             </ul>
+          </section>
+
+          {/* Location & Neighborhood Map */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Settlement Location & Neighborhood</span>
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {property.neighbourhood} Settlement • ~{property.distanceKm} km from {property.campus}
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                {property.location?.precision === 'exact_building'
+                  ? 'Exact Pin'
+                  : 'Approx. Street Perimeter'}
+              </span>
+            </div>
+
+            <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+              <PropertyMap
+                properties={[property]}
+                selectedPropertyId={property.id}
+                height="320px"
+                zoomToFit={false}
+              />
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-slate-900 dark:text-white block">
+                  Student Safety & Gate Privacy Protection
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
+                  To protect current student occupants from unannounced drop-ins, public markers indicate the vetted neighborhood perimeter. The specific gate number and caretaker arrival contact are provided upon locking your 7-day reservation hold.
+                </p>
+              </div>
+            </div>
           </section>
 
           {/* Verified Landlord Summary */}

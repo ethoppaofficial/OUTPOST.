@@ -6,11 +6,30 @@ import { VerificationBadge, Badge } from './Badge';
 
 interface PropertyCardProps {
   property: Property;
+  isSelected?: boolean;
+  onSelect?: (propertyId: string) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export const PropertyCard: React.FC<PropertyCardProps> = ({ property }) => {
+export const PropertyCard: React.FC<PropertyCardProps> = ({
+  property,
+  isSelected = false,
+  onSelect,
+  onMouseEnter,
+  onMouseLeave,
+}) => {
   return (
-    <div className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden shadow-xs hover:shadow-md transition-all duration-200 flex flex-col">
+    <div
+      onClick={() => onSelect?.(property.id)}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={`group bg-white dark:bg-slate-900 rounded-2xl border overflow-hidden shadow-xs hover:shadow-md transition-all duration-200 flex flex-col cursor-pointer ${
+        isSelected
+          ? 'border-emerald-500 ring-2 ring-emerald-500/30 dark:border-emerald-400'
+          : 'border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+      }`}
+    >
       {/* Image Header */}
       <div className="relative h-52 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
         <img

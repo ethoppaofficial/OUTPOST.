@@ -30,6 +30,53 @@ export type StudentDocumentType =
 
 export type VerificationReviewStatus = 'pending' | 'approved' | 'rejected' | 'resubmission_required';
 
+export type HousingArea = 'Dambare' | 'Rimin Gata';
+
+export type LocationSource =
+  | 'landlord_pin'
+  | 'geocoded_address'
+  | 'admin_adjusted'
+  | 'seed_demo';
+
+export type LocationVerificationStatus =
+  | 'not_submitted'
+  | 'pending'
+  | 'verified'
+  | 'rejected';
+
+export type LocationPrecision =
+  | 'exact_building'
+  | 'nearby_building'
+  | 'street'
+  | 'neighbourhood';
+
+export interface PropertyLocation {
+  id: string;
+  propertyId: string;
+  locationId: string;
+  area: HousingArea;
+  city: 'Kano';
+  state: 'Kano State';
+  country: 'Nigeria';
+  latitude: number;
+  longitude: number;
+  geohash: string;
+  source: LocationSource;
+  verificationStatus: LocationVerificationStatus;
+  precision: LocationPrecision;
+  publicLatitude?: number;
+  publicLongitude?: number;
+  formattedAddress?: string;
+  publicLocationLabel: string;
+  submittedBy?: string;
+  reviewedBy?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface HousingLocation {
   id: string;
   name: 'Dambare' | 'Rimin Gata';
@@ -180,6 +227,7 @@ export interface UnitOrRoom {
 export interface Property {
   id: string;
   locationId: string;
+  location?: PropertyLocation;
   landlordId: string;
   landlordName: string;
   landlordVerified: boolean;

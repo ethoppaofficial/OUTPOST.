@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   Search,
   Filter,
@@ -12,12 +12,17 @@ import {
   Sparkles,
   Info,
   ShieldCheck,
+  Map as MapIcon,
+  List as ListIcon,
+  X,
+  ExternalLink,
 } from 'lucide-react';
 import { propertyService, PropertyFilterParams } from '../../application/services/propertyService';
 import { PropertyCard } from '../../components/ui/PropertyCard';
 import { PropertyCardSkeleton } from '../../components/ui/LoadingSkeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LOCATIONS, getLocationById } from '../../domain/locations';
+import { PropertyMap } from '../../components/map/PropertyMap';
 
 const COMMON_AMENITIES = [
   'Solar Inverter Backup',
@@ -32,8 +37,16 @@ const COMMON_AMENITIES = [
 export const PropertiesPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+  const [mobileViewMode, setMobileViewMode] = useState<'list' | 'map'>('list');
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(
+    searchParams.get('selected') || null
+  );
+  const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+
+  // References for smooth scrolling
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Parse search params into reactive filter state
   const query = searchParams.get('q') || '';
@@ -75,6 +88,7 @@ export const PropertiesPage: React.FC = () => {
   const resetFilters = () => {
     setSearchParams(new URLSearchParams(), { replace: true });
     setHasError(false);
+    setSelectedPropertyId(null);
   };
 
   // Determine active location IDs
@@ -143,25 +157,39 @@ export const PropertiesPage: React.FC = () => {
   // Selected location meta
   const currentLocMeta = locationParam !== 'all' ? getLocationById(locationParam) : null;
 
+  // Selected property object for mobile drawer / bottom sheet
+  const selectedProp = useMemo(() => {
+    return properties.find((p) => p.id === selectedPropertyId);
+  }, [properties, selectedPropertyId]);
+
+  // Handle marker selection from map
+  const handleSelectFromMap = (id: string) => {
+    setSelectedPropertyId(id);
+    const cardEl = cardRefs.current.get(id);
+    if (cardEl && mobileViewMode === 'list') {
+      cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-              Student Accommodations Directory
+              Student Accommodation Directory
             </h1>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
-              BUK Off-Campus
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+              Bayero Univ. Kano (BUK)
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Showing {properties.length} verified listings across Dambare and Rimin Gata (Gwarzo Road)
+            Displaying {properties.length} verified listings in Dambare & Rimin Gata off-campus corridor
           </p>
         </div>
 
-        {/* Search Input Bar */}
+        {/* Search Input Bar & Mobile Controls */}
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -170,13 +198,13 @@ export const PropertiesPage: React.FC = () => {
               value={query}
               onChange={(e) => updateParam('q', e.target.value)}
               placeholder="Search hostel, Dambare, Rimin Gata, solar..."
-              className="w-full pl-9 pr-4 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white"
+              className="w-full pl-9 pr-4 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 text-slate-900 dark:text-white"
             />
           </div>
 
           <button
             onClick={() => setMobileFilterOpen(!mobileFilterOpen)}
-            className="md:hidden flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-700 dark:text-slate-300"
+            className="lg:hidden flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-700 dark:text-slate-300"
           >
             <Filter className="w-4 h-4" />
             <span>Filters ({activeFilterCount})</span>
@@ -184,303 +212,148 @@ export const PropertiesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Quick Location Pills / Chips */}
-      <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
-          <MapPin className="w-3 h-3 text-emerald-500" />
-          Location:
-        </span>
+      {/* Quick Location Pills / Settlement Area Filter Chips */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+            <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+            Area:
+          </span>
 
-        <button
-          onClick={() => {
-            updateParam('loc', 'all');
-            updateParam('neighbourhood', 'All');
-          }}
-          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-            locationParam === 'all' && neighbourhood === 'All'
-              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
-              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
-          }`}
-        >
-          All Off-Campus Areas
-        </button>
+          <button
+            onClick={() => {
+              updateParam('loc', 'all');
+              updateParam('neighbourhood', 'All');
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              locationParam === 'all' && neighbourhood === 'All'
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
+            }`}
+          >
+            All Areas
+          </button>
 
-        <button
-          onClick={() => {
-            updateParam('loc', 'loc-dambare');
-            updateParam('neighbourhood', 'Dambare');
-          }}
-          className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition ${
-            locationParam === 'loc-dambare' || neighbourhood === 'Dambare'
-              ? 'bg-emerald-600 text-white shadow-xs'
-              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
-          }`}
-        >
-          <span>📍 Dambare Only</span>
-          <span className="text-[10px] opacity-80">(~0.4km)</span>
-        </button>
+          <button
+            onClick={() => {
+              updateParam('loc', 'loc-dambare');
+              updateParam('neighbourhood', 'Dambare');
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
+              locationParam === 'loc-dambare' || neighbourhood === 'Dambare'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
+            }`}
+          >
+            <span>Dambare</span>
+            <span className="text-[10px] opacity-80">(~0.4km opposite BUK Gate)</span>
+          </button>
 
-        <button
-          onClick={() => {
-            updateParam('loc', 'loc-rimin-gata');
-            updateParam('neighbourhood', 'Rimin Gata');
-          }}
-          className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition ${
-            locationParam === 'loc-rimin-gata' || neighbourhood === 'Rimin Gata'
-              ? 'bg-purple-600 text-white shadow-xs'
-              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
-          }`}
-        >
-          <span>📍 Rimin Gata Only</span>
-          <span className="text-[10px] opacity-80">(~0.9km)</span>
-        </button>
+          <button
+            onClick={() => {
+              updateParam('loc', 'loc-rimin-gata');
+              updateParam('neighbourhood', 'Rimin Gata');
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
+              locationParam === 'loc-rimin-gata' || neighbourhood === 'Rimin Gata'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
+            }`}
+          >
+            <span>Rimin Gata</span>
+            <span className="text-[10px] opacity-80">(~0.9km west)</span>
+          </button>
 
-        <button
-          onClick={() => updateParam('availableOnly', availabilityOnly ? '' : 'true')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-            availabilityOnly
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-semibold'
-              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
-          }`}
-        >
-          🟢 Spaces Available
-        </button>
+          <button
+            onClick={() => updateParam('availableOnly', availabilityOnly ? '' : 'true')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              availabilityOnly
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            Spaces Available
+          </button>
+        </div>
 
-        <button
-          onClick={() => updateParam('verifiedOnly', onlyVerifiedLandlord ? '' : 'true')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-            onlyVerifiedLandlord
-              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800 font-semibold'
-              : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
-          }`}
-        >
-          🛡️ Verified Landlords Only
-        </button>
+        {/* Mobile Map / List Toggle Button */}
+        <div className="lg:hidden flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-xl text-xs font-semibold">
+          <button
+            onClick={() => setMobileViewMode('list')}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg transition ${
+              mobileViewMode === 'list'
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <ListIcon className="w-3.5 h-3.5" />
+            <span>List</span>
+          </button>
+          <button
+            onClick={() => setMobileViewMode('map')}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg transition ${
+              mobileViewMode === 'map'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <MapIcon className="w-3.5 h-3.5" />
+            <span>Map</span>
+          </button>
+        </div>
       </div>
 
-      {/* Settlement Context Card (when filtered) */}
-      {currentLocMeta && (
-        <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 flex items-start gap-3 text-xs">
-          <Info className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <span className="font-semibold text-emerald-900 dark:text-emerald-200">
-              Exploring {currentLocMeta.name} ({currentLocMeta.city}, {currentLocMeta.state})
-            </span>
-            <p className="text-emerald-700 dark:text-emerald-300 text-[11px] leading-relaxed">
-              {currentLocMeta.description}. Proximity: {currentLocMeta.distanceEstimate} from Bayero University Kano New Campus main gate.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Layout with Sidebar Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {/* Filter Sidebar (Desktop & Mobile Drawer) */}
+      {/* Main Content Area: Split View on Desktop (List + Map) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Filter Sidebar (Desktop) + Property List */}
         <div
-          className={`${
-            mobileFilterOpen ? 'block' : 'hidden'
-          } md:block md:col-span-1 space-y-6 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 self-start shadow-xs`}
+          className={`lg:col-span-7 space-y-6 ${
+            mobileViewMode === 'map' ? 'hidden lg:block' : 'block'
+          }`}
         >
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-              <SlidersHorizontal className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Filters</span>
+          {/* Active Filters Bar & Sorter */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                {properties.length} Accommodations
+              </span>
               {activeFilterCount > 0 && (
-                <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold">
-                  {activeFilterCount}
-                </span>
+                <button
+                  onClick={resetFilters}
+                  className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 font-medium"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset ({activeFilterCount})</span>
+                </button>
               )}
             </div>
-            {activeFilterCount > 0 && (
-              <button
-                onClick={resetFilters}
-                className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-emerald-600 transition"
+
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-xs">Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => updateParam('sort', e.target.value)}
+                className="py-1 px-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden"
               >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset</span>
-              </button>
-            )}
-          </div>
-
-          {/* Sort By */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Sort Listings</label>
-            <select
-              value={sortBy}
-              onChange={(e) => updateParam('sort', e.target.value)}
-              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="relevance">Relevance & Verified First</option>
-              <option value="price_asc">Price: Lowest to Highest</option>
-              <option value="price_desc">Price: Highest to Lowest</option>
-              <option value="distance">Proximity: Closest to BUK Gate</option>
-              <option value="availability">Highest Spaces Available</option>
-              <option value="newest">Recently Listed</option>
-            </select>
-          </div>
-
-          {/* Location / Settlement Selection */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Off-Campus Settlement</label>
-            <select
-              value={locationParam}
-              onChange={(e) => {
-                updateParam('loc', e.target.value);
-                if (e.target.value === 'loc-dambare') updateParam('neighbourhood', 'Dambare');
-                else if (e.target.value === 'loc-rimin-gata') updateParam('neighbourhood', 'Rimin Gata');
-                else updateParam('neighbourhood', 'All');
-              }}
-              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="all">All Settlements (Dambare & Rimin Gata)</option>
-              {LOCATIONS.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} ({loc.distanceEstimate})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Property Type */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Property Type</label>
-            <select
-              value={propertyType}
-              onChange={(e) => updateParam('propertyType', e.target.value)}
-              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="All">All Types</option>
-              <option value="Hostel">Hostel</option>
-              <option value="Apartment">Apartment</option>
-              <option value="Studio">Studio</option>
-              <option value="Shared House">Shared House</option>
-            </select>
-          </div>
-
-          {/* Room Configuration */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Room Configuration</label>
-            <select
-              value={accommodationType}
-              onChange={(e) => updateParam('accommodationType', e.target.value)}
-              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="All">Any Room Option</option>
-              <option value="Single Room">Single Room (Private)</option>
-              <option value="Shared Room (2-person)">Shared Room (2-Person)</option>
-              <option value="Self-Contained Flat">Self-Contained Flat</option>
-            </select>
-          </div>
-
-          {/* Gender Policy */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Gender Policy</label>
-            <select
-              value={genderPolicy}
-              onChange={(e) => updateParam('genderPolicy', e.target.value)}
-              className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="All">No Gender Restriction (All)</option>
-              <option value="Mixed">Mixed Hostels</option>
-              <option value="Female-Only">Female-Only Hostels</option>
-              <option value="Male-Only">Male-Only Hostels</option>
-            </select>
-          </div>
-
-          {/* Max Distance */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="font-semibold text-slate-700 dark:text-slate-300">Max Distance to Gate</span>
-              <span className="text-slate-500">{maxDistanceKm > 0 ? `${maxDistanceKm} km` : 'Any'}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="5"
-              step="0.5"
-              value={maxDistanceKm}
-              onChange={(e) => updateParam('maxDistance', e.target.value)}
-              className="w-full accent-emerald-600"
-            />
-          </div>
-
-          {/* Max Price Range */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="font-semibold text-slate-700 dark:text-slate-300">Max Session Budget</span>
-              <span className="text-slate-500 font-medium">₦{maxPrice.toLocaleString()}</span>
-            </div>
-            <input
-              type="range"
-              min="150000"
-              max="1000000"
-              step="25000"
-              value={maxPrice}
-              onChange={(e) => updateParam('maxPrice', e.target.value)}
-              className="w-full accent-emerald-600"
-            />
-          </div>
-
-          {/* Amenities Multi-filter */}
-          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-              Required Amenities
-            </span>
-            <div className="space-y-1.5">
-              {COMMON_AMENITIES.map((am) => {
-                const checked = selectedAmenities.includes(am);
-                return (
-                  <label
-                    key={am}
-                    className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleAmenity(am)}
-                      className="w-3.5 h-3.5 rounded text-emerald-600 accent-emerald-600"
-                    />
-                    <span className="truncate">{am}</span>
-                  </label>
-                );
-              })}
+                <option value="relevance">Recommended (BUK Proximity)</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="price_desc">Price: High to Low</option>
+                <option value="distance">Distance from Campus</option>
+                <option value="availability">Spaces Available</option>
+                <option value="newest">Recently Listed</option>
+              </select>
             </div>
           </div>
 
-          {/* Verified Landlord & Availability Toggles */}
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-800 dark:text-slate-200">
-              <input
-                type="checkbox"
-                checked={onlyVerifiedLandlord}
-                onChange={(e) => updateParam('verifiedOnly', e.target.checked ? 'true' : '')}
-                className="w-4 h-4 rounded text-emerald-600 accent-emerald-600"
-              />
-              <span>Verified Landlords Only</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-800 dark:text-slate-200">
-              <input
-                type="checkbox"
-                checked={availabilityOnly}
-                onChange={(e) => updateParam('availableOnly', e.target.checked ? 'true' : '')}
-                className="w-4 h-4 rounded text-emerald-600 accent-emerald-600"
-              />
-              <span>Only Available Units</span>
-            </label>
-          </div>
-        </div>
-
-        {/* Listings Grid */}
-        <div className="md:col-span-3 space-y-6">
+          {/* Properties List / Cards */}
           {hasError ? (
             <div className="p-8 text-center bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900 rounded-3xl space-y-3">
               <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
               <h3 className="text-base font-bold text-rose-900 dark:text-rose-200">
-                Failed to Load Listings
+                Failed to Query Listings
               </h3>
               <p className="text-xs text-rose-700 dark:text-rose-300 max-w-sm mx-auto">
-                An error occurred while querying accommodation records. Please reset filters and try again.
+                An error occurred while loading accommodation records. Please reset filters and try again.
               </p>
               <button
                 onClick={resetFilters}
@@ -490,30 +363,119 @@ export const PropertiesPage: React.FC = () => {
               </button>
             </div>
           ) : loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Array.from({ length: 6 }).map((_, i) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
                 <PropertyCardSkeleton key={i} />
               ))}
             </div>
           ) : properties.length === 0 ? (
             <EmptyState
               icon={<Building2 className="w-10 h-10 text-slate-400" />}
-              title="No Accommodations Found"
-              description={`No properties matched your current criteria${
-                locationParam !== 'all' ? ` in ${currentLocMeta?.name || 'this location'}` : ''
-              }. Try adjusting your distance, budget, or clearing amenity filters.`}
+              title="No Accommodations Match Criteria"
+              description={`No student lodges matched your current filter criteria${
+                locationParam !== 'all' ? ` in ${currentLocMeta?.name || 'this area'}` : ''
+              }. Try adjusting price range, distance, or resetting filters.`}
               actionText="Reset All Filters"
               onAction={resetFilters}
             />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {properties.map((property) => (
-                <PropertyCard key={property.id} property={property} />
+                <div
+                  key={property.id}
+                  ref={(el) => {
+                    if (el) cardRefs.current.set(property.id, el);
+                    else cardRefs.current.delete(property.id);
+                  }}
+                >
+                  <PropertyCard
+                    property={property}
+                    isSelected={selectedPropertyId === property.id}
+                    onSelect={(id) => setSelectedPropertyId(id)}
+                    onMouseEnter={() => setHoveredPropertyId(property.id)}
+                    onMouseLeave={() => setHoveredPropertyId(null)}
+                  />
+                </div>
               ))}
             </div>
           )}
         </div>
+
+        {/* Right Column: Sticky MapLibre Interactive Map (Desktop + Mobile Map Mode) */}
+        <div
+          className={`lg:col-span-5 ${
+            mobileViewMode === 'list' ? 'hidden lg:block' : 'block'
+          } sticky top-20`}
+        >
+          <div className="space-y-3">
+            <PropertyMap
+              properties={properties}
+              selectedPropertyId={selectedPropertyId}
+              hoveredPropertyId={hoveredPropertyId}
+              onSelectProperty={handleSelectFromMap}
+              height="calc(100vh - 150px)"
+              className="min-h-[500px]"
+              zoomToFit
+            />
+
+            {/* Case Study Legal & Privacy Notice */}
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                <strong>Privacy Protected:</strong> Building markers show neighborhood coordinates with privacy offsets. Exact physical gate addresses and contact records are unlocked after verified reservation hold.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Mobile Selected Marker Bottom Sheet (Visible on mobile when in map mode and a marker is selected) */}
+      {mobileViewMode === 'map' && selectedProp && (
+        <div className="fixed bottom-0 inset-x-0 z-50 p-4 bg-white dark:bg-slate-900 rounded-t-3xl border-t border-slate-200 dark:border-slate-800 shadow-2xl space-y-3 animate-in slide-in-from-bottom duration-200">
+          <div className="w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex gap-3">
+              <img
+                src={selectedProp.images[0] || 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=300'}
+                alt={selectedProp.title}
+                className="w-20 h-20 rounded-2xl object-cover flex-shrink-0"
+              />
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-emerald-600 uppercase">
+                  {selectedProp.propertyType} • {selectedProp.neighbourhood}
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
+                  {selectedProp.title}
+                </h3>
+                <p className="text-xs font-black text-slate-900 dark:text-white">
+                  ₦{selectedProp.pricePerSession.toLocaleString()}{' '}
+                  <span className="text-[10px] font-normal text-slate-400">/ session</span>
+                </p>
+                <div className="text-[11px] text-slate-500">
+                  {selectedProp.availableSpaces} spaces available • {selectedProp.distanceKm}km from BUK Gate
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedPropertyId(null)}
+              className="p-1 rounded-full text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="pt-2 flex gap-2">
+            <Link
+              to={`/properties/${selectedProp.slug || selectedProp.id}`}
+              className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs text-center shadow-xs flex items-center justify-center gap-1.5"
+            >
+              <span>View Property Details</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

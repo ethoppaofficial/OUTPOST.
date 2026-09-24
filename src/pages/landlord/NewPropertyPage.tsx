@@ -3,6 +3,9 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { propertyService } from '../../application/services/propertyService';
+import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
+import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
+import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
 
 export const NewPropertyPage: React.FC = () => {
   const session = authService.getSession();
@@ -17,6 +20,30 @@ export const NewPropertyPage: React.FC = () => {
   const [neighbourhood, setNeighbourhood] = useState('Dambare');
   const [city, setCity] = useState('Kano');
   const [distanceKm, setDistanceKm] = useState(0.5);
+
+  const [locationData, setLocationData] = useState<{
+    area: HousingArea;
+    latitude: number;
+    longitude: number;
+    geohash: string;
+    precision: LocationPrecision;
+    publicLatitude: number;
+    publicLongitude: number;
+    publicLocationLabel: string;
+  }>(() => {
+    const defaultCoords = AREA_CENTERS.Dambare;
+    const pub = computePublicCoordinates(defaultCoords.latitude, defaultCoords.longitude, 'nearby_building', 'Dambare');
+    return {
+      area: 'Dambare',
+      latitude: defaultCoords.latitude,
+      longitude: defaultCoords.longitude,
+      geohash: encodeGeohash(defaultCoords.latitude, defaultCoords.longitude),
+      precision: 'nearby_building',
+      publicLatitude: pub.publicLatitude,
+      publicLongitude: pub.publicLongitude,
+      publicLocationLabel: pub.publicLocationLabel,
+    };
+  });
 
   const [propertyType, setPropertyType] = useState('Hostel');
   const [accommodationType, setAccommodationType] = useState('Single Room');
@@ -91,7 +118,8 @@ export const NewPropertyPage: React.FC = () => {
       genderPolicy,
       address: address.trim(),
       city: city.trim(),
-      neighbourhood: neighbourhood.trim(),
+      neighbourhood: locationData.area,
+      locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
       campus: `${university} (${campus})`,
       university,
       distanceKm: Number(distanceKm),
@@ -101,6 +129,29 @@ export const NewPropertyPage: React.FC = () => {
       utilitiesIncluded,
       totalCapacity: Number(roomCapacity),
       availableSpaces: Number(roomCapacity),
+      location: {
+        id: `loc-${Date.now()}`,
+        propertyId: '',
+        locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
+        area: locationData.area,
+        city: 'Kano',
+        state: 'Kano State',
+        country: 'Nigeria',
+        latitude: locationData.latitude,
+        longitude: locationData.longitude,
+        geohash: locationData.geohash,
+        source: 'landlord_pin',
+        verificationStatus: 'pending',
+        precision: locationData.precision,
+        publicLatitude: locationData.publicLatitude,
+        publicLongitude: locationData.publicLongitude,
+        publicLocationLabel: locationData.publicLocationLabel,
+        formattedAddress: address.trim(),
+        submittedBy: session.user.id,
+        submittedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
       rooms: [
         {
           id: `room-${Date.now()}`,
@@ -191,6 +242,23 @@ export const NewPropertyPage: React.FC = () => {
               onChange={(e) => setAddress(e.target.value)}
               placeholder="e.g. Plot 18, Dambare Off-Campus Layout, Gwarzo Road"
               className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+            />
+          </div>
+
+          {/* Interactive MapLibre Pin Placement */}
+          <div className="space-y-2 pt-2">
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block">
+              Property Map Location & Privacy
+            </label>
+            <LandlordPinPicker
+              initialArea={locationData.area}
+              initialLatitude={locationData.latitude}
+              initialLongitude={locationData.longitude}
+              initialPrecision={locationData.precision}
+              onLocationChange={(loc) => {
+                setLocationData(loc);
+                setNeighbourhood(loc.area);
+              }}
             />
           </div>
 

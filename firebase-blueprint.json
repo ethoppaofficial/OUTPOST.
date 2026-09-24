@@ -75,6 +75,28 @@
         "locationId": { "type": "string" },
         "locationName": { "type": "string", "maxLength": 100 },
         "neighbourhood": { "type": "string", "maxLength": 100 },
+        "location": {
+          "type": "object",
+          "description": "Property geographic location with precision, geohash, and privacy coordinates",
+          "properties": {
+            "id": { "type": "string" },
+            "propertyId": { "type": "string" },
+            "locationId": { "type": "string" },
+            "area": { "type": "string", "enum": ["Dambare", "Rimin Gata"] },
+            "city": { "type": "string" },
+            "state": { "type": "string" },
+            "country": { "type": "string" },
+            "latitude": { "type": "number" },
+            "longitude": { "type": "number" },
+            "geohash": { "type": "string" },
+            "source": { "type": "string" },
+            "verificationStatus": { "type": "string" },
+            "precision": { "type": "string" },
+            "publicLatitude": { "type": "number" },
+            "publicLongitude": { "type": "number" },
+            "publicLocationLabel": { "type": "string" }
+          }
+        },
         "price": { "type": "number" },
         "availableUnits": { "type": "number" },
         "totalUnits": { "type": "number" },
