@@ -4,7 +4,7 @@ import {
   VerificationReviewStatus,
   LandlordProfile,
 } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 
 class VerificationService {
   public searchStudentByRegNumber(regNumber: string) {

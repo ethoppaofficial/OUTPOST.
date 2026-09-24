@@ -1,14 +1,30 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { KeyRound, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { KeyRound, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { authService } from '../../application/services/authService';
 
 export const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSent(true);
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await authService.sendPasswordReset(email);
+      if (res.success) {
+        setSent(true);
+      } else {
+        setError(res.error || 'Failed to send password reset email.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Error sending password reset request.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -41,6 +57,12 @@ export const ForgotPasswordPage: React.FC = () => {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+            {error && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="font-semibold text-slate-700 dark:text-slate-300">
                 Registered University or Landlord Email

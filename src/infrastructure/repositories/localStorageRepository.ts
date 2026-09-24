@@ -88,6 +88,10 @@ function save<T>(key: string, data: T): void {
 }
 
 export class LocalStorageRepository {
+  public async init(): Promise<void> {
+    return Promise.resolve();
+  }
+
   // Reset or reseed state
   public resetToSeed(): void {
     localStorage.clear();
@@ -1460,6 +1464,28 @@ export class LocalStorageRepository {
     }
 
     return { expiredCount, details };
+  }
+
+  public cancelReservation(reservationId: string, reason?: string): { success: boolean; message?: string } {
+    const reservations = this.getReservations();
+    const res = reservations.find((r) => r.id === reservationId);
+    if (!res) return { success: false, message: 'Reservation not found.' };
+
+    res.status = 'cancelled';
+    res.cancellationReason = reason || 'Cancelled by student';
+
+    const property = this.getPropertyById(res.propertyId);
+    if (property) {
+      const unit = property.rooms.find((u) => u.id === res.unitId);
+      if (unit) {
+        unit.availableSpaces = Math.min(unit.totalCapacity, unit.availableSpaces + 1);
+        property.availableSpaces = property.rooms.reduce((acc, u) => acc + u.availableSpaces, 0);
+        this.updateProperty(property);
+      }
+    }
+
+    save(STORAGE_KEYS.RESERVATIONS, reservations);
+    return { success: true, message: 'Reservation cancelled successfully.' };
   }
 
   // Invoices

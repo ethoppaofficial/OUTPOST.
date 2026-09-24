@@ -1,5 +1,5 @@
 import { RoommatePreference, RoommateRequest, AccommodationGroup } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 
 class RoommateService {
   public searchByRegistrationNumber(regQuery: string) {

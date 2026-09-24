@@ -13,18 +13,26 @@ export const LoginPage: React.FC = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const { signInWithGoogle, connected, firebaseUser } = useFirebase();
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
 
-    const result = authService.login(email);
-    if (result.success && result.user) {
-      if (result.user.role === 'student') navigate('/student/dashboard');
-      else if (result.user.role === 'landlord') navigate('/landlord/dashboard');
-      else if (result.user.role === 'admin') navigate('/admin/dashboard');
-    } else {
-      setError(result.error || 'Login failed.');
+    try {
+      const result = await authService.loginWithFirebase(email, password);
+      if (result.success && result.user) {
+        if (result.user.role === 'student') navigate('/student/dashboard');
+        else if (result.user.role === 'landlord') navigate('/landlord/dashboard');
+        else if (result.user.role === 'admin') navigate('/admin/dashboard');
+      } else {
+        setError(result.error || 'Login failed.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Login error occurred.');
+    } finally {
+      setSubmitting(false);
     }
   };
 

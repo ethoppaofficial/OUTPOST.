@@ -26,51 +26,58 @@ export const RegisterPage: React.FC = () => {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
 
-    if (role === 'student') {
-      const res = authService.registerStudent({
-        email,
-        password,
-        fullName,
-        phone,
-        registrationNumber,
-        university,
-        campus,
-        studyLevel,
-        programme,
-        gender,
-      });
+    try {
+      if (role === 'student') {
+        const res = await authService.registerStudentWithFirebase({
+          email,
+          password,
+          fullName,
+          phone,
+          registrationNumber,
+          university,
+          campus,
+          studyLevel,
+          programme,
+          gender,
+        });
 
-      if (res.success && res.user) {
-        setSuccess(true);
-        setTimeout(() => navigate('/student/profile/verification'), 1200);
+        if (res.success && res.user) {
+          setSuccess(true);
+          setTimeout(() => navigate('/student/verification'), 1200);
+        } else {
+          setError(res.error || 'Failed to complete student registration.');
+        }
       } else {
-        setError(res.error || 'Failed to complete student registration.');
-      }
-    } else {
-      const res = authService.registerLandlord({
-        email,
-        password,
-        fullName,
-        legalName: legalName || fullName,
-        phone,
-        contactAddress: address || 'Lagos, Nigeria',
-        idType,
-        idReference,
-        businessName,
-      });
+        const res = await authService.registerLandlordWithFirebase({
+          email,
+          password,
+          legalName: legalName || fullName,
+          phone,
+          contactAddress: address || 'Kano State, Nigeria',
+          idType,
+          idReference,
+          businessName,
+        });
 
-      if (res.success && res.user) {
-        setSuccess(true);
-        setTimeout(() => navigate('/landlord/verification'), 1200);
-      } else {
-        setError(res.error || 'Failed to complete landlord registration.');
+        if (res.success && res.user) {
+          setSuccess(true);
+          setTimeout(() => navigate('/landlord/verification'), 1200);
+        } else {
+          setError(res.error || 'Failed to complete landlord registration.');
+        }
       }
+    } catch (err: any) {
+      setError(err?.message || 'An unexpected error occurred during registration.');
+    } finally {
+      setSubmitting(false);
     }
   };
 

@@ -3,12 +3,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Users, ArrowLeft, Shield, Globe, Lock, UserCheck, AlertCircle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { groupChatService } from '../../application/services/groupChatService';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { propertyService } from '../../application/services/propertyService';
 
 export const NewGroupPage: React.FC = () => {
   const navigate = useNavigate();
   const session = authService.getSession();
-  const properties = repository.getProperties();
+  const properties = propertyService.getAllProperties();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');

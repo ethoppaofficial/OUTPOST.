@@ -43,8 +43,14 @@ import { UsersPage } from './pages/admin/UsersPage';
 import { DisputesPage } from './pages/admin/DisputesPage';
 import { ThemeProvider } from './application/context/ThemeContext';
 import { FirebaseProvider } from './application/context/FirebaseContext';
+import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
+import { configValidationError } from './infrastructure/config/appConfig';
 
 export default function App() {
+  if (configValidationError) {
+    return <ConfigErrorScreen />;
+  }
+
   return (
     <FirebaseProvider>
       <ThemeProvider>

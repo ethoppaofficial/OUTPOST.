@@ -133,6 +133,48 @@
       },
       "required": ["id", "reservationId", "studentId", "landlordId", "status"]
     },
+    "RoommatePreference": {
+      "title": "RoommatePreference",
+      "description": "Student roommate living and personality preferences",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "minBudget": { "type": "number" },
+        "maxBudget": { "type": "number" },
+        "moveInPeriod": { "type": "string" },
+        "studyHabits": { "type": "string" },
+        "cleanliness": { "type": "string" }
+      },
+      "required": ["studentId"]
+    },
+    "RoommateRequest": {
+      "title": "RoommateRequest",
+      "description": "Student to student roommate connection request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "cancelled"] },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "senderId", "receiverId", "status"]
+    },
+    "AccommodationGroup": {
+      "title": "AccommodationGroup",
+      "description": "Student accommodation cohort or roommate group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "leaderId": { "type": "string" },
+        "maxCapacity": { "type": "number" },
+        "status": { "type": "string", "enum": ["forming", "locked", "reserved"] }
+      },
+      "required": ["id", "name", "leaderId", "status"]
+    },
     "Conversation": {
       "title": "Conversation",
       "description": "Direct or group communication thread",
@@ -177,6 +219,20 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "userId", "title", "message", "isRead"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System security and administrative audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "actorId", "details"]
     }
   },
   "firestore": {
@@ -212,6 +268,18 @@
       "schema": "PaymentReceipt",
       "description": "Student payment receipts submitted to landlords"
     },
+    "/roommatePreferences/{userId}": {
+      "schema": "RoommatePreference",
+      "description": "Student roommate preferences and matching profiles"
+    },
+    "/roommateRequests/{requestId}": {
+      "schema": "RoommateRequest",
+      "description": "Roommate requests between verified students"
+    },
+    "/accommodationGroups/{groupId}": {
+      "schema": "AccommodationGroup",
+      "description": "Accommodation cohort groups and housemate pools"
+    },
     "/conversations/{conversationId}": {
       "schema": "Conversation",
       "description": "Direct and group conversation threads"
@@ -223,6 +291,10 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "System and transaction notifications for users"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "System administrative moderation and financial audit logs"
     }
   }
 }

@@ -5,7 +5,7 @@ import {
   MessageMention,
   TypingState,
 } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 import { appEventBus } from '../../infrastructure/events/eventBus';
 
 class ChatService {

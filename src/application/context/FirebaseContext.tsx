@@ -9,29 +9,40 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, googleAuthProvider, testConnection } from '../../infrastructure/firebase/firebaseConfig';
 import { handleFirestoreError, OperationType } from '../../infrastructure/firebase/errorHandler';
 import { authService } from '../services/authService';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
+import { appConfig, configValidationError, BackendMode } from '../../infrastructure/config/appConfig';
 import { User, UserRole } from '../../domain/types';
 
 interface FirebaseContextType {
   firebaseUser: FirebaseUser | null;
+  currentUser: User | null;
   loading: boolean;
   connected: boolean;
+  backendMode: BackendMode;
+  isConfigValid: boolean;
+  validationError?: string;
   signInWithGoogle: (preferredRole?: UserRole) => Promise<{ success: boolean; error?: string }>;
+  signInWithEmail: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   firestoreDatabaseId: string;
 }
 
 const FirebaseContext = createContext<FirebaseContextType>({
   firebaseUser: null,
+  currentUser: null,
   loading: true,
   connected: false,
+  backendMode: 'firebase',
+  isConfigValid: true,
   signInWithGoogle: async () => ({ success: false }),
+  signInWithEmail: async () => ({ success: false }),
   signOut: async () => {},
   firestoreDatabaseId: '',
 });
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [connected, setConnected] = useState<boolean>(false);
 
@@ -41,7 +52,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setConnected(isOk);
     });
 
-    // 2. Listen to Auth State
+    // 2. Initialize repository
+    repository.init().catch(() => {});
+
+    // 3. Listen to Auth State
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
@@ -56,11 +70,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
 
           if (!snap.exists()) {
-            // Create user document in Firestore
             await setDoc(userDocRef, {
               id: user.uid,
               email: user.email || '',
-              fullName: user.displayName || 'Google User',
+              fullName: user.displayName || 'OUTPOST User',
               role,
               avatarUrl: user.photoURL || '',
               isActive: true,
@@ -74,10 +87,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
           }
 
-          // Keep in-memory / local repository user state aligned
-          let existingLocal = repository.getUserById(user.uid);
-          if (!existingLocal) {
-            const localUser: User = {
+          let localUser = repository.getUserById(user.uid);
+          if (!localUser) {
+            localUser = {
               id: user.uid,
               email: user.email || '',
               role,
@@ -86,10 +98,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               avatarUrl: user.photoURL || undefined,
               createdAt: new Date().toISOString(),
             };
-            repository.createUser(localUser);
+            await repository.createUser(localUser);
 
             if (role === 'student') {
-              repository.saveStudentProfile({
+              await repository.saveStudentProfile({
                 userId: user.uid,
                 fullName: user.displayName || 'OUTPOST Student',
                 phone: '+234 800 000 0000',
@@ -104,7 +116,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 isProfileVerified: true,
               });
             } else if (role === 'landlord') {
-              repository.saveLandlordProfile({
+              await repository.saveLandlordProfile({
                 userId: user.uid,
                 legalName: user.displayName || 'Verified Landlord',
                 phone: '+234 800 000 0000',
@@ -117,9 +129,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
           }
           repository.setActiveUserId(user.uid);
+          setCurrentUser(localUser);
         } catch (err) {
           handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
         }
+      } else {
+        setCurrentUser(null);
       }
       setLoading(false);
     });
@@ -161,10 +176,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const signInWithEmail = async (email: string, password?: string) => {
+    return authService.loginWithFirebase(email, password);
+  };
+
   const signOut = async () => {
     try {
       await fbSignOut(auth);
-      authService.logout();
+      await authService.logout();
+      setCurrentUser(null);
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -174,11 +194,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <FirebaseContext.Provider
       value={{
         firebaseUser,
+        currentUser,
         loading,
         connected,
+        backendMode: appConfig.backendMode,
+        isConfigValid: !configValidationError,
+        validationError: configValidationError,
         signInWithGoogle,
+        signInWithEmail,
         signOut,
-        firestoreDatabaseId: 'ai-studio-outpoststudentho-f2f5cd38-bc33-486e-897b-2f36813511f0',
+        firestoreDatabaseId: appConfig.firebase.firestoreDatabaseId,
       }}
     >
       {children}

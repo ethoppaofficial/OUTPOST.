@@ -33,6 +33,7 @@ import { notificationService } from '../../application/services/notificationServ
 import { chatService } from '../../application/services/chatService';
 import { ThemeToggle } from './ThemeToggle';
 import { PersonaSwitcher } from './PersonaSwitcher';
+import { BackendStatusBadge } from '../ui/BackendStatusBanner';
 
 export interface NavItem {
   id: string;
@@ -606,8 +607,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               </div>
             </div>
 
-            {/* Right: Persona Switcher, Unread Badges, Notifications, Theme & Profile */}
+            {/* Right: Backend Status, Persona Switcher, Unread Badges, Notifications, Theme & Profile */}
             <div className="flex items-center gap-2 sm:gap-3">
+              <BackendStatusBadge />
               {session?.user?.id && (
                 <PersonaSwitcher
                   currentUserId={session.user.id}

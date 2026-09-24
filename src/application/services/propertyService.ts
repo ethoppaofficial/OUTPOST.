@@ -1,5 +1,5 @@
 import { Property, PropertyType, AccommodationType, GenderPolicy, PropertyVerificationStatus } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 
 export interface PropertyFilterParams {
   query?: string;

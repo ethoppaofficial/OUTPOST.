@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ShieldCheck, Upload, FileText, CheckCircle2, Clock, XCircle, AlertTriangle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
+import { storageService } from '../../infrastructure/firebase/storageService';
 import { StudentDocumentType } from '../../domain/types';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 
@@ -37,7 +38,7 @@ export const StudentVerificationPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file && !fileName) {
       setError('Please select a document file to upload.');
@@ -47,28 +48,39 @@ export const StudentVerificationPage: React.FC = () => {
     setSubmitting(true);
     setError(null);
 
-    // Mock upload URL for demonstration
-    const simulatedUrl = `https://outpost-storage.ng/docs/student_${session.user.id}_${Date.now()}.pdf`;
+    try {
+      let documentUrl = `https://outpost-storage.ng/docs/student_${session.user.id}_${Date.now()}.pdf`;
+      let finalSize = file?.size || 1024 * 350;
 
-    const res = verificationService.uploadStudentDocument({
-      studentId: session.user.id,
-      studentName: student?.fullName || session.displayName || 'Student',
-      documentType,
-      fileName: fileName || `${documentType}_proof.pdf`,
-      fileSize: file?.size || 1024 * 350,
-      fileUrl: simulatedUrl,
-    });
+      if (file) {
+        const uploadRes = await storageService.uploadStudentDocument(session.user.id, file, fileName || file.name);
+        documentUrl = uploadRes.url;
+        finalSize = uploadRes.fileSize;
+      }
 
-    setSubmitting(false);
+      const res = await verificationService.uploadStudentDocument({
+        studentId: session.user.id,
+        studentName: student?.fullName || session.displayName || 'Student',
+        documentType,
+        fileName: fileName || `${documentType}_proof.pdf`,
+        fileSize: finalSize,
+        fileUrl: documentUrl,
+        documentUrl,
+      });
 
-    if (res.success && res.doc) {
-      setSuccessMsg('Document successfully uploaded for administrator review.');
-      setDocuments(verificationService.getStudentDocuments(session.user.id));
-      setFile(null);
-      setFileName('');
-      setTimeout(() => setSuccessMsg(null), 4000);
-    } else {
-      setError(res.error || 'Failed to upload document.');
+      if (res.success && res.doc) {
+        setSuccessMsg('Document successfully uploaded for administrator review.');
+        setDocuments(verificationService.getStudentDocuments(session.user.id));
+        setFile(null);
+        setFileName('');
+        setTimeout(() => setSuccessMsg(null), 4000);
+      } else {
+        setError(res.error || 'Failed to upload document.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Error uploading document to storage.');
+    } finally {
+      setSubmitting(false);
     }
   };
 

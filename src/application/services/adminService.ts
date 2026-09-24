@@ -1,5 +1,5 @@
 import { User, AuditLog } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 
 export interface PlatformMetrics {
   totalUsers: number;

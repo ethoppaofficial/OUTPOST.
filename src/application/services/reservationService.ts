@@ -1,5 +1,5 @@
 import { Reservation, Invoice, PaymentReceipt, ReservationStatus } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 
 class ReservationService {
   public getReservationsForStudent(studentId: string): Reservation[] {
@@ -70,26 +70,7 @@ class ReservationService {
   }
 
   public cancelReservation(reservationId: string, reason?: string): { success: boolean; message?: string } {
-    const res = repository.getReservationById(reservationId);
-    if (!res) return { success: false, message: 'Reservation not found.' };
-
-    res.status = 'cancelled';
-    res.cancellationReason = reason || 'Cancelled by student';
-
-    // Release hold
-    const property = repository.getPropertyById(res.propertyId);
-    if (property) {
-      const room = property.rooms.find((r) => r.id === res.unitId);
-      if (room) {
-        room.availableSpaces = Math.min(room.totalCapacity, room.availableSpaces + 1);
-        property.availableSpaces = property.rooms.reduce((acc, r) => acc + r.availableSpaces, 0);
-        repository.updateProperty(property);
-      }
-    }
-
-    const reservations = repository.getReservations().map((r) => (r.id === res.id ? res : r));
-    localStorage.setItem('outpost_reservations_v1', JSON.stringify(reservations));
-    return { success: true };
+    return repository.cancelReservation(reservationId, reason);
   }
 
   public getReceiptsForLandlord(landlordId: string): PaymentReceipt[] {

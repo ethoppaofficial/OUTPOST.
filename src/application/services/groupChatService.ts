@@ -1,5 +1,5 @@
 import { AccommodationGroup, GroupInvitation, GroupJoinRequest, StudentProfile, User } from '../../domain/types';
-import { repository } from '../../infrastructure/repositories/localStorageRepository';
+import { repository } from '../../infrastructure/repositories';
 import { appEventBus } from '../../infrastructure/events/eventBus';
 
 export class GroupChatService {

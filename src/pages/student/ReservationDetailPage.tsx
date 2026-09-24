@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
+import { storageService } from '../../infrastructure/firebase/storageService';
 import { ReservationStatusBadge, ReceiptStatusBadge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 
@@ -34,6 +35,8 @@ export const ReservationDetailPage: React.FC = () => {
   const [reference, setReference] = useState('');
   const [amountPaid, setAmountPaid] = useState<number>(reservation?.amount || 0);
   const [fileName, setFileName] = useState('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -54,34 +57,52 @@ export const ReservationDetailPage: React.FC = () => {
   const diffDays = Math.floor(diffHours / 24);
   const remainingHours = diffHours % 24;
 
-  const handleUploadReceipt = (e: React.FormEvent) => {
+  const handleUploadReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reference.trim()) {
       setError('Please provide the transaction reference or session ID.');
       return;
     }
 
-    const simUrl = `https://outpost-storage.ng/receipts/${reservation.id}_${Date.now()}.png`;
+    setUploading(true);
+    setError(null);
 
-    const res = reservationService.uploadPaymentReceipt({
-      reservationId: reservation.id,
-      invoiceId: reservation.invoiceId,
-      studentId: session.user.id,
-      landlordId: reservation.landlordId,
-      fileUrl: simUrl,
-      paymentReference: reference.trim(),
-      payerBankName: payerBank,
-      amountPaid: Number(amountPaid),
-    });
+    try {
+      let receiptUrl = `https://outpost-storage.ng/receipts/${reservation.id}_${Date.now()}.png`;
+      let finalSize = 1024 * 400;
 
-    if (res.success && res.receipt) {
-      setReceipt(res.receipt);
-      setReservation(reservationService.getReservationById(reservation.id));
-      setUploadModalOpen(false);
-      setSuccess('Payment receipt submitted successfully! Landlord has been notified for confirmation.');
-      setTimeout(() => setSuccess(null), 5000);
-    } else {
-      setError(res.error || 'Failed to submit receipt.');
+      if (receiptFile) {
+        const uploadRes = await storageService.uploadPaymentReceipt(reservation.id, receiptFile, fileName || receiptFile.name);
+        receiptUrl = uploadRes.url;
+        finalSize = uploadRes.fileSize;
+      }
+
+      const res = await reservationService.uploadPaymentReceipt({
+        reservationId: reservation.id,
+        invoiceId: reservation.invoiceId,
+        studentId: session.user.id,
+        landlordId: reservation.landlordId,
+        fileUrl: receiptUrl,
+        fileName: fileName || 'payment_receipt.png',
+        fileSize: finalSize,
+        paymentReference: reference.trim(),
+        payerBankName: payerBank,
+        amountPaid: Number(amountPaid),
+      });
+
+      if (res.success && res.receipt) {
+        setReceipt(res.receipt);
+        setReservation(reservationService.getReservationById(reservation.id));
+        setUploadModalOpen(false);
+        setSuccess('Payment receipt submitted successfully! Landlord has been notified for confirmation.');
+        setTimeout(() => setSuccess(null), 5000);
+      } else {
+        setError(res.error || 'Failed to submit receipt.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to upload receipt to storage.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -324,6 +345,7 @@ export const ReservationDetailPage: React.FC = () => {
               accept=".png,.jpg,.jpeg,.pdf"
               onChange={(e) => {
                 if (e.target.files && e.target.files[0]) {
+                  setReceiptFile(e.target.files[0]);
                   setFileName(e.target.files[0].name);
                 }
               }}
