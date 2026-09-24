@@ -11,12 +11,12 @@ export const NewPropertyPage: React.FC = () => {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [university, setUniversity] = useState('UNILAG');
-  const [campus, setCampus] = useState('Akoka Main Campus');
+  const [university, setUniversity] = useState('Bayero University Kano (BUK)');
+  const [campus, setCampus] = useState('New Campus (Gwarzo Road)');
   const [address, setAddress] = useState('');
-  const [neighbourhood, setNeighbourhood] = useState('Akoka');
-  const [city, setCity] = useState('Lagos');
-  const [distanceKm, setDistanceKm] = useState(0.8);
+  const [neighbourhood, setNeighbourhood] = useState('Dambare');
+  const [city, setCity] = useState('Kano');
+  const [distanceKm, setDistanceKm] = useState(0.5);
 
   const [propertyType, setPropertyType] = useState('Hostel');
   const [accommodationType, setAccommodationType] = useState('Single Room');
@@ -164,10 +164,7 @@ export const NewPropertyPage: React.FC = () => {
                 onChange={(e) => setUniversity(e.target.value)}
                 className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
               >
-                <option value="UNILAG">University of Lagos (UNILAG)</option>
-                <option value="UI">University of Ibadan (UI)</option>
-                <option value="OAU">Obafemi Awolowo University (OAU)</option>
-                <option value="Covenant">Covenant University (CU)</option>
+                <option value="Bayero University Kano (BUK)">Bayero University Kano (BUK)</option>
               </select>
             </div>
 
@@ -192,24 +189,25 @@ export const NewPropertyPage: React.FC = () => {
               required
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              placeholder="e.g. 14 University Road, Akoka"
+              placeholder="e.g. Plot 18, Dambare Off-Campus Layout, Gwarzo Road"
               className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="font-semibold text-slate-700 dark:text-slate-300">Neighbourhood</label>
-              <input
-                type="text"
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Off-Campus Settlement</label>
+              <select
                 value={neighbourhood}
                 onChange={(e) => setNeighbourhood(e.target.value)}
-                placeholder="e.g. Akoka / Abule-Oja"
                 className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-              />
+              >
+                <option value="Dambare">Dambare</option>
+                <option value="Rimin Gata">Rimin Gata</option>
+              </select>
             </div>
             <div className="space-y-1.5">
-              <label className="font-semibold text-slate-700 dark:text-slate-300">City</label>
+              <label className="font-semibold text-slate-700 dark:text-slate-300">City / State</label>
               <input
                 type="text"
                 value={city}

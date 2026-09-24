@@ -17,6 +17,11 @@ class ChatService {
     return repository.getConversations(userId);
   }
 
+  public getUnreadMessageCount(userId: string): number {
+    const list = this.getConversations(userId);
+    return list.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+  }
+
   public getConversationById(id: string): Conversation | undefined {
     return repository.getConversationById(id);
   }

@@ -35,7 +35,7 @@ export const LandlordPropertiesPage: React.FC = () => {
           <Building2 className="w-8 h-8 text-slate-400 mx-auto" />
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Properties Listed Yet</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            List your student hostel near UNILAG, UI, OAU, or Covenant to begin accepting verified reservations.
+            List your student hostel or apartment near BUK New Campus (Dambare or Rimin Gata) to begin accepting verified reservations.
           </p>
           <Link
             to="/landlord/properties/new"

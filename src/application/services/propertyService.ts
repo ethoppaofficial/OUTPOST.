@@ -9,13 +9,16 @@ export interface PropertyFilterParams {
   university?: string;
   campus?: string;
   neighbourhood?: string;
+  locationIds?: string[];
+  locations?: string[];
   minPrice?: number;
   maxPrice?: number;
   maxDistanceKm?: number;
   onlyVerifiedLandlord?: boolean;
   onlyApproved?: boolean;
+  availabilityOnly?: boolean;
   amenities?: string[];
-  sortBy?: 'relevance' | 'price_asc' | 'price_desc' | 'newest' | 'distance';
+  sortBy?: 'relevance' | 'price_asc' | 'price_desc' | 'newest' | 'distance' | 'availability';
 }
 
 class PropertyService {
@@ -27,13 +30,27 @@ class PropertyService {
       list = list.filter((p) => p.verificationStatus === 'approved');
     }
 
+    // Location ID filtering (Dambare, Rimin Gata, or combined)
+    if (params.locationIds && params.locationIds.length > 0) {
+      list = list.filter((p) => p.locationId && params.locationIds!.includes(p.locationId));
+    } else if (params.locations && params.locations.length > 0) {
+      const targetLocs = params.locations.map((l) => l.toLowerCase());
+      list = list.filter((p) =>
+        targetLocs.some((tl) => p.neighbourhood.toLowerCase().includes(tl))
+      );
+    }
+
     if (params.query && params.query.trim()) {
       const q = params.query.toLowerCase().trim();
       list = list.filter(
         (p) =>
           p.title.toLowerCase().includes(q) ||
+          p.description.toLowerCase().includes(q) ||
           p.neighbourhood.toLowerCase().includes(q) ||
           p.city.toLowerCase().includes(q) ||
+          p.propertyType.toLowerCase().includes(q) ||
+          p.accommodationType.toLowerCase().includes(q) ||
+          p.amenities.some((a) => a.toLowerCase().includes(q)) ||
           p.campus.toLowerCase().includes(q) ||
           p.university.toLowerCase().includes(q) ||
           p.address.toLowerCase().includes(q)
@@ -78,6 +95,10 @@ class PropertyService {
       list = list.filter((p) => p.landlordVerified);
     }
 
+    if (params.availabilityOnly) {
+      list = list.filter((p) => p.availableSpaces > 0);
+    }
+
     if (params.amenities && params.amenities.length > 0) {
       list = list.filter((p) =>
         params.amenities!.every((a) => p.amenities.some((pa) => pa.toLowerCase().includes(a.toLowerCase())))
@@ -95,14 +116,19 @@ class PropertyService {
       case 'distance':
         list.sort((a, b) => a.distanceKm - b.distanceKm);
         break;
+      case 'availability':
+        list.sort((a, b) => b.availableSpaces - a.availableSpaces);
+        break;
       case 'newest':
         list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         break;
       default:
-        // Relevance: verified landlords and high availability first
+        // Relevance: verified landlords, available spaces, and proximity
         list.sort((a, b) => {
           if (a.landlordVerified && !b.landlordVerified) return -1;
           if (!a.landlordVerified && b.landlordVerified) return 1;
+          if (a.availableSpaces > 0 && b.availableSpaces === 0) return -1;
+          if (a.availableSpaces === 0 && b.availableSpaces > 0) return 1;
           return a.distanceKm - b.distanceKm;
         });
         break;
@@ -130,8 +156,11 @@ class PropertyService {
     const landlord = repository.getLandlordProfile(landlordId);
     const slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(100 + Math.random() * 900);
 
+    const locationId = data.locationId || (data.neighbourhood?.toLowerCase().includes('rimin') ? 'loc-rimin-gata' : 'loc-dambare');
+
     const newProp: Property = {
       ...data,
+      locationId,
       id: `prop-${Date.now()}`,
       landlordId,
       landlordName: landlord?.legalName || 'Landlord',

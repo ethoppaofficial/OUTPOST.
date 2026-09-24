@@ -88,7 +88,7 @@ export const NewGroupPage: React.FC = () => {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. UNILAG Law Scholars Cohort"
+            placeholder="e.g. BUK Level 300 Scholars Cohort"
             maxLength={60}
             required
             className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"

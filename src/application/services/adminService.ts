@@ -55,7 +55,7 @@ class AdminService {
     let list = repository.getUsers().map((u) => {
       const studentProfile = repository.getStudentProfile(u.id);
       const landlordProfile = repository.getLandlordProfile(u.id);
-      const name = studentProfile?.fullName || landlordProfile?.legalName || (u.role === 'admin' ? 'Dr. Olamide Vance' : u.email.split('@')[0]);
+      const name = studentProfile?.fullName || landlordProfile?.legalName || (u.role === 'admin' ? 'Platform Administrator' : u.email.split('@')[0]);
       return {
         ...u,
         name,
@@ -98,7 +98,7 @@ class AdminService {
     repository.logAudit({
       action: newStatus === 'suspended' ? 'SUSPEND_USER' : 'ACTIVATE_USER',
       actorId: adminId,
-      actorName: 'Dr. Olamide Vance',
+      actorName: 'Platform Administrator',
       actorRole: 'admin',
       targetEntity: 'User',
       targetId: userId,

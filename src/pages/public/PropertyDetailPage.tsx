@@ -123,6 +123,10 @@ export const PropertyDetailPage: React.FC = () => {
           )}
           <Badge variant="neutral">{property.propertyType}</Badge>
           <Badge variant="info">{property.genderPolicy}</Badge>
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+            <MapPin className="w-3 h-3 text-emerald-500" />
+            Off-Campus: {property.neighbourhood}
+          </span>
         </div>
 
         <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
@@ -139,6 +143,19 @@ export const PropertyDetailPage: React.FC = () => {
             <span className="font-medium text-emerald-600 dark:text-emerald-400">
               {property.distanceKm} km from {property.campus}
             </span>
+          </div>
+        </div>
+
+        {/* Off-Campus Settlement Area Notice */}
+        <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 flex items-start gap-3 text-xs">
+          <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-semibold text-slate-900 dark:text-white">
+              Off-Campus Area: {property.neighbourhood} Settlement (Gwarzo Road corridor)
+            </span>
+            <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+              This property is situated in {property.neighbourhood}, an established student community adjacent to Bayero University Kano (BUK) New Campus. This is private, verified student housing, independent of university-managed dormitories.
+            </p>
           </div>
         </div>
       </div>

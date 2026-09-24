@@ -76,8 +76,8 @@ export const LoginPage: React.FC = () => {
             type="button"
             onClick={() => {
               setRoleTab(r);
-              if (r === 'student') setEmail('tunde.student@unilag.edu.ng');
-              else if (r === 'landlord') setEmail('emeka.landlord@outpost.ng');
+              if (r === 'student') setEmail('aliyu.abubakar@buk.edu.ng');
+              else if (r === 'landlord') setEmail('garba.dambare@outpost.ng');
               else if (r === 'admin') setEmail('admin@outpost.ng');
             }}
             className={`flex-1 py-2 rounded-lg capitalize transition ${
@@ -192,26 +192,26 @@ export const LoginPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             <button
               type="button"
-              onClick={() => quickFill('tunde.student@unilag.edu.ng', 'student')}
+              onClick={() => quickFill('aliyu.abubakar@buk.edu.ng', 'student')}
               className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
             >
-              <span className="font-semibold block">Tunde (Verified)</span>
-              <span className="text-[10px] text-slate-400">UNILAG Student</span>
+              <span className="font-semibold block">Aliyu (Verified)</span>
+              <span className="text-[10px] text-slate-400">BUK Student</span>
             </button>
             <button
               type="button"
-              onClick={() => quickFill('ibrahim.musa@oau.edu.ng', 'student')}
+              onClick={() => quickFill('ibrahim.musa@buk.edu.ng', 'student')}
               className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
             >
               <span className="font-semibold block">Ibrahim (Pending)</span>
-              <span className="text-[10px] text-slate-400">OAU Student</span>
+              <span className="text-[10px] text-slate-400">BUK Student</span>
             </button>
             <button
               type="button"
-              onClick={() => quickFill('emeka.landlord@outpost.ng', 'landlord')}
+              onClick={() => quickFill('garba.dambare@outpost.ng', 'landlord')}
               className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-left border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
             >
-              <span className="font-semibold block">Chief Emeka</span>
+              <span className="font-semibold block">Alhaji Garba</span>
               <span className="text-[10px] text-slate-400">Verified Landlord</span>
             </button>
             <button

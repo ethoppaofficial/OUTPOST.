@@ -28,7 +28,23 @@ export type StudentDocumentType =
   | 'admission_letter'
   | 'school_fees_receipt';
 
-export type VerificationReviewStatus = 'pending' | 'approved' | 'rejected';
+export type VerificationReviewStatus = 'pending' | 'approved' | 'rejected' | 'resubmission_required';
+
+export interface HousingLocation {
+  id: string;
+  name: 'Dambare' | 'Rimin Gata';
+  city: 'Kano';
+  state: 'Kano State';
+  country: 'Nigeria';
+  isOffCampus: true;
+  institutionContext?: 'Bayero University Kano';
+  description: string;
+  aliases: string[];
+  distanceEstimate?: string;
+  latitude?: number;
+  longitude?: number;
+  isActive: boolean;
+}
 
 export type ReservationStatus =
   | 'pending_payment'
@@ -163,6 +179,7 @@ export interface UnitOrRoom {
 
 export interface Property {
   id: string;
+  locationId: string;
   landlordId: string;
   landlordName: string;
   landlordVerified: boolean;

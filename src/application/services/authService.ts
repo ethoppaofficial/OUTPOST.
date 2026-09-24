@@ -29,7 +29,7 @@ class AuthService {
       const landlord = repository.getLandlordProfile(user.id);
       if (landlord) displayName = landlord.legalName;
     } else if (user.role === 'admin') {
-      displayName = 'Dr. Olamide Vance (Platform Administrator)';
+      displayName = 'Platform Administrator';
     }
 
     return { user, displayName };

@@ -228,6 +228,7 @@ export const SEED_LANDLORD_PROFILES: LandlordProfile[] = [
 export const SEED_PROPERTIES: Property[] = [
   {
     id: 'prop-1',
+    locationId: 'loc-dambare',
     landlordId: 'user-landlord-1',
     landlordName: 'Alhaji Garba Dambare',
     landlordVerified: true,
@@ -284,6 +285,7 @@ export const SEED_PROPERTIES: Property[] = [
   },
   {
     id: 'prop-2',
+    locationId: 'loc-dambare',
     landlordId: 'user-landlord-1',
     landlordName: 'Alhaji Garba Dambare',
     landlordVerified: true,
@@ -336,6 +338,7 @@ export const SEED_PROPERTIES: Property[] = [
   },
   {
     id: 'prop-3',
+    locationId: 'loc-rimin-gata',
     landlordId: 'user-landlord-2',
     landlordName: 'Malama Amina Rimin Gata',
     landlordVerified: false,
@@ -387,6 +390,7 @@ export const SEED_PROPERTIES: Property[] = [
   },
   {
     id: 'prop-4',
+    locationId: 'loc-rimin-gata',
     landlordId: 'user-landlord-1',
     landlordName: 'Alhaji Garba Dambare',
     landlordVerified: true,
@@ -441,6 +445,7 @@ export const SEED_PROPERTIES: Property[] = [
   },
   {
     id: 'prop-5',
+    locationId: 'loc-dambare',
     landlordId: 'user-landlord-1',
     landlordName: 'Alhaji Garba Dambare',
     landlordVerified: true,
@@ -490,6 +495,7 @@ export const SEED_PROPERTIES: Property[] = [
   },
   {
     id: 'prop-6',
+    locationId: 'loc-rimin-gata',
     landlordId: 'user-landlord-1',
     landlordName: 'Alhaji Garba Dambare',
     landlordVerified: true,

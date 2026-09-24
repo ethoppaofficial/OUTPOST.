@@ -149,7 +149,7 @@ export const UserSearchPage: React.FC = () => {
                 No verified student found with registration number "{regNumber}"
               </p>
               <p className="text-[11px]">
-                Please ensure you entered the exact matriculation format (e.g. UNILAG/2023/4821).
+                Please ensure you entered the exact matriculation format (e.g. BUK/22/SCI/01842).
               </p>
             </div>
           )}

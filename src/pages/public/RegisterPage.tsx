@@ -11,11 +11,11 @@ export const RegisterPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   // Student specifics
-  const [university, setUniversity] = useState('UNILAG');
-  const [campus, setCampus] = useState('Akoka Main Campus');
+  const [university, setUniversity] = useState('Bayero University Kano (BUK)');
+  const [campus, setCampus] = useState('New Campus (Gwarzo Road)');
   const [registrationNumber, setRegistrationNumber] = useState('');
   const [studyLevel, setStudyLevel] = useState('200 Level');
-  const [programme, setProgramme] = useState('Computer Engineering');
+  const [programme, setProgramme] = useState('Computer Science');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>('Male');
   // Landlord specifics
   const [legalName, setLegalName] = useState('');
@@ -130,7 +130,7 @@ export const RegisterPage: React.FC = () => {
                 required
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Babatunde Fashanu"
+                placeholder="e.g. Aliyu Abubakar"
                 className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
               />
             </div>
@@ -143,7 +143,7 @@ export const RegisterPage: React.FC = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@university.edu.ng"
+                  placeholder="name@buk.edu.ng"
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
@@ -184,10 +184,7 @@ export const RegisterPage: React.FC = () => {
                       onChange={(e) => setUniversity(e.target.value)}
                       className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                     >
-                      <option value="UNILAG">University of Lagos (UNILAG)</option>
-                      <option value="UI">University of Ibadan (UI)</option>
-                      <option value="OAU">Obafemi Awolowo University (OAU)</option>
-                      <option value="Covenant">Covenant University (CU)</option>
+                      <option value="Bayero University Kano (BUK)">Bayero University Kano (BUK)</option>
                     </select>
                   </div>
 
@@ -198,7 +195,7 @@ export const RegisterPage: React.FC = () => {
                       required
                       value={registrationNumber}
                       onChange={(e) => setRegistrationNumber(e.target.value.toUpperCase())}
-                      placeholder="e.g. UNILAG/2023/9921"
+                      placeholder="e.g. BUK/23/SCI/01842"
                       className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white"
                     />
                   </div>
