@@ -4,6 +4,7 @@ import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-re
 import { authService } from '../../application/services/authService';
 import { propertyService } from '../../application/services/propertyService';
 import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
+import { PropertyImageCaptureUpload } from '../../components/property/PropertyImageCaptureUpload';
 import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
 
@@ -65,7 +66,11 @@ export const NewPropertyPage: React.FC = () => {
     'Study Desk & Chair',
   ]);
 
-  const [imageUrl, setImageUrl] = useState('https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=800');
+  const [images, setImages] = useState<string[]>([
+    'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=1000&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?w=1000&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000&auto=format&fit=crop&q=80',
+  ]);
   const [rules, setRules] = useState('No smoking inside building\nVisitors must depart before 10pm\nQuiet hours 11pm - 6am');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -97,6 +102,11 @@ export const NewPropertyPage: React.FC = () => {
 
     if (!title.trim() || !address.trim()) {
       setError('Please provide property title and physical address.');
+      return;
+    }
+
+    if (images.length < 3) {
+      setError('Please provide at least 3 photos (and up to 5 photos) for property verification.');
       return;
     }
 
@@ -164,7 +174,7 @@ export const NewPropertyPage: React.FC = () => {
       ],
       amenities: selectedAmenities,
       houseRules: houseRulesArray,
-      images: [imageUrl],
+      images: images,
     });
 
     setSubmitting(false);
@@ -417,13 +427,12 @@ export const NewPropertyPage: React.FC = () => {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Featured Image URL</label>
-            <input
-              type="url"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+          <div className="space-y-1.5 pt-2">
+            <PropertyImageCaptureUpload
+              images={images}
+              onChange={setImages}
+              minImages={3}
+              maxImages={5}
             />
           </div>
         </div>

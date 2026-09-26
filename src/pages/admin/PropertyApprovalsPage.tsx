@@ -172,6 +172,33 @@ export const PropertyApprovalsPage: React.FC = () => {
                 ))}
               </div>
 
+              {/* Submitted Photos Review Strip */}
+              {prop.images && prop.images.length > 0 && (
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    <span>Inspection Photographs ({prop.images.length} photos submitted)</span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Click to expand</span>
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    {prop.images.map((img, i) => (
+                      <a
+                        key={i}
+                        href={img}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="relative w-20 h-14 rounded-xl overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-700 group hover:ring-2 hover:ring-emerald-500 transition-all"
+                        title={`View photo ${i + 1}`}
+                      >
+                        <img src={img} alt={`Property Photo ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        <span className="absolute bottom-1 right-1 px-1 rounded text-[9px] bg-slate-950/70 text-white font-medium">
+                          {i === 0 ? 'Cover' : `#${i + 1}`}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Moderation Controls */}
               <div className="pt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-800 text-xs">
                 <span className="text-slate-400">
