@@ -1,47 +1,229 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function isAuthenticated() {
+    // Firebase Storage rules provide object-level access control. Keep private
+    // verification documents and payment receipts in non-public paths.
+    function signedIn() {
       return request.auth != null;
     }
 
+    function userDoc(userId) {
+      return firestore.get(/databases/(default)/documents/users/$(userId));
+    }
+
+    function userExists(userId) {
+      return firestore.exists(/databases/(default)/documents/users/$(userId));
+    }
+
+    function userRole(userId) {
+      return userExists(userId) ? userDoc(userId).data.get('role', '') : '';
+    }
+
+    function accountIsActive(userId) {
+      return userExists(userId)
+        && userDoc(userId).data.get('accountStatus', 'active') != 'suspended'
+        && userDoc(userId).data.get('status', 'active') != 'suspended';
+    }
+
     function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.role == 'admin' ||
-        request.auth.token.email == 'ethoppaofficial@gmail.com' ||
-        request.auth.token.email == 'admin@outpost.ng'
-      );
+      return signedIn()
+        && accountIsActive(request.auth.uid)
+        && (
+          request.auth.token.get('role', '') == 'admin'
+          || userRole(request.auth.uid) == 'admin'
+        );
     }
 
+    function isStudent() {
+      return signedIn()
+        && accountIsActive(request.auth.uid)
+        && (
+          request.auth.token.get('role', '') == 'student'
+          || userRole(request.auth.uid) == 'student'
+        );
+    }
+
+    function isLandlord() {
+      return signedIn()
+        && accountIsActive(request.auth.uid)
+        && (
+          request.auth.token.get('role', '') == 'landlord'
+          || userRole(request.auth.uid) == 'landlord'
+        );
+    }
+
+    function propertyDoc(propertyId) {
+      return firestore.get(/databases/(default)/documents/properties/$(propertyId));
+    }
+
+    function locationDoc(propertyId) {
+      return firestore.get(/databases/(default)/documents/propertyLocations/$(propertyId));
+    }
+
+    function propertyExists(propertyId) {
+      return firestore.exists(/databases/(default)/documents/properties/$(propertyId));
+    }
+
+    function locationExists(propertyId) {
+      return firestore.exists(/databases/(default)/documents/propertyLocations/$(propertyId));
+    }
+
+    function propertyIsPublic(propertyId) {
+      return propertyExists(propertyId)
+        && locationExists(propertyId)
+        && propertyDoc(propertyId).data.get('verificationStatus', '') == 'approved'
+        && propertyDoc(propertyId).data.get('isActive', true) == true
+        && locationDoc(propertyId).data.get('verificationStatus', '') == 'verified'
+        && locationDoc(propertyId).data.get('publicLatitude', null) is number
+        && locationDoc(propertyId).data.get('publicLongitude', null) is number
+        && locationDoc(propertyId).data.get('area', '') in ['Dambare', 'Rimin Gata']
+        && locationDoc(propertyId).data.get('state', 'Kano State') == 'Kano State';
+    }
+
+    function ownsProperty(propertyId) {
+      return isLandlord()
+        && propertyExists(propertyId)
+        && propertyDoc(propertyId).data.get('landlordId', '') == request.auth.uid;
+    }
+
+    function reservationDoc(reservationId) {
+      return firestore.get(/databases/(default)/documents/reservations/$(reservationId));
+    }
+
+    function reservationExists(reservationId) {
+      return firestore.exists(/databases/(default)/documents/reservations/$(reservationId));
+    }
+
+    function receiptParticipant(reservationId) {
+      return reservationExists(reservationId)
+        && (
+          reservationDoc(reservationId).data.get('studentId', '') == request.auth.uid
+          || reservationDoc(reservationId).data.get('landlordId', '') == request.auth.uid
+          || isAdmin()
+        );
+    }
+
+    function validImage() {
+      return request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')
+        && request.resource.size <= 10 * 1024 * 1024;
+    }
+
+    function validDocument() {
+      return (
+        request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')
+        || request.resource.contentType == 'application/pdf'
+      ) && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    function validReceipt() {
+      return (
+        request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')
+        || request.resource.contentType == 'application/pdf'
+      ) && request.resource.size <= 10 * 1024 * 1024;
+    }
+
+    // ----------------------------------------------------------------------
     // Public property images
-    match /property-images/{imageId} {
-      allow read: if true;
-      allow write: if isAuthenticated() && (request.auth.token.role == 'landlord' || isAdmin());
+    // Path: property-images/{propertyId}/{fileName}
+    // ----------------------------------------------------------------------
+    match /property-images/{propertyId}/{fileName} {
+      // Images are public only when both property and location verification
+      // have completed. Otherwise the owner/admin can inspect them privately.
+      allow read: if propertyIsPublic(propertyId) || ownsProperty(propertyId) || isAdmin();
+
+      allow create, update: if (ownsProperty(propertyId) || isAdmin())
+        && validImage();
+
+      allow delete: if ownsProperty(propertyId) || isAdmin();
     }
 
-    // Private Student Verification Documents (Only student owner & admin)
+    // Legacy one-level path is denied. Migrate existing files to the scoped
+    // property-images/{propertyId}/{fileName} structure.
+    match /property-images/{fileName} {
+      allow read, write: if false;
+    }
+
+    // ----------------------------------------------------------------------
+    // Profile images
+    // Path: profile-images/{userId}/{fileName}
+    // ----------------------------------------------------------------------
+    match /profile-images/{userId}/{fileName} {
+      allow read: if signedIn() && accountIsActive(userId);
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && validImage();
+      allow delete: if signedIn() && request.auth.uid == userId || isAdmin();
+    }
+
+    // ----------------------------------------------------------------------
+    // Student verification documents
+    // Path: student-docs/{studentId}/{documentId}/{fileName}
+    // ----------------------------------------------------------------------
+    match /student-docs/{studentId}/{documentId}/{fileName} {
+      allow read: if signedIn()
+        && (request.auth.uid == studentId || isAdmin());
+
+      allow create, update: if isStudent()
+        && request.auth.uid == studentId
+        && validDocument();
+
+      allow delete: if isAdmin()
+        || (isStudent() && request.auth.uid == studentId);
+    }
+
+    // Deny old two-level student document paths so files cannot bypass the
+    // stronger path contract.
     match /student-docs/{studentId}/{documentId} {
-      allow read: if isAuthenticated() && (request.auth.uid == studentId || isAdmin());
-      allow write: if isAuthenticated() && request.auth.uid == studentId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+      allow read, write: if false;
     }
 
-    // Private Landlord Verification Documents (Only landlord owner & admin)
-    match /landlord-docs/{landlordId}/{documentId} {
-      allow read: if isAuthenticated() && (request.auth.uid == landlordId || isAdmin());
-      allow write: if isAuthenticated() && request.auth.uid == landlordId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+    // ----------------------------------------------------------------------
+    // Landlord verification documents
+    // Path: landlord-docs/{landlordId}/{documentId}/{fileName}
+    // ----------------------------------------------------------------------
+    match /landlord-docs/{landlordId}/{documentId}/{fileName} {
+      allow read: if signedIn()
+        && (request.auth.uid == landlordId || isAdmin());
+
+      allow create, update: if isLandlord()
+        && request.auth.uid == landlordId
+        && validDocument();
+
+      allow delete: if isAdmin()
+        || (isLandlord() && request.auth.uid == landlordId);
     }
 
-    // Private Payment Receipts (Only student, property landlord, or admin)
-    match /receipts/{reservationId}/{receiptId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated()
-                   && request.resource.size < 10 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+    // ----------------------------------------------------------------------
+    // Private payment receipts
+    // Path: receipts/{reservationId}/{receiptId}/{fileName}
+    // ----------------------------------------------------------------------
+    match /receipts/{reservationId}/{receiptId}/{fileName} {
+      allow read: if receiptParticipant(reservationId);
+
+      allow create, update: if isStudent()
+        && reservationExists(reservationId)
+        && reservationDoc(reservationId).data.get('studentId', '') == request.auth.uid
+        && reservationDoc(reservationId).data.get('status', '') in [
+          'pending_payment', 'receipt_submitted'
+        ]
+        && validReceipt();
+
+      allow delete: if isAdmin()
+        || (
+          isStudent()
+          && reservationExists(reservationId)
+          && reservationDoc(reservationId).data.get('studentId', '') == request.auth.uid
+          && reservationDoc(reservationId).data.get('status', '') == 'pending_payment'
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Deny every unrecognised path by default.
+    // ----------------------------------------------------------------------
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -1,8 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import * as maplibregl from 'maplibre-gl';
+import { maplibregl, initMaplibreWorker } from '../../infrastructure/config/maplibreSetup';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Property } from '../../domain/types';
-import { mapConfig, OPEN_STREET_MAP_FALLBACK_STYLE } from '../../infrastructure/config/mapConfig';
+import {
+  mapConfig,
+  OPEN_STREET_MAP_FALLBACK_STYLE,
+  getEffectiveMapStyle,
+  getEffectiveAttribution,
+  subscribeToMapConfig,
+} from '../../infrastructure/config/mapConfig';
+import { MapStyleSelector } from './MapStyleSelector';
 import { BUK_NEW_CAMPUS_GATE, AREA_CENTERS } from '../../domain/geoUtils';
 import {
   MapPin,
@@ -44,8 +51,27 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
 
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [activeStyleUrl, setActiveStyleUrl] = useState<string>(mapConfig.styleUrl);
+  const [activeStyleUrl, setActiveStyleUrl] = useState<string | any>(() => getEffectiveMapStyle());
   const [isUsingFallback, setIsUsingFallback] = useState(false);
+  const [attributionText, setAttributionText] = useState(() => getEffectiveAttribution());
+
+  // Subscribe to reactive Map Configuration changes (e.g., MapTiler key, style change)
+  useEffect(() => {
+    const unsubscribe = subscribeToMapConfig(() => {
+      const newStyle = getEffectiveMapStyle();
+      setActiveStyleUrl(newStyle);
+      setIsUsingFallback(false);
+      setAttributionText(getEffectiveAttribution());
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.setStyle(newStyle);
+        } catch (e) {
+          console.warn('Could not update map style dynamically:', e);
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Initialize Map
   useEffect(() => {
@@ -352,22 +378,24 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         )}
         <div className="px-2 py-1 rounded-md bg-white/90 dark:bg-slate-900/90 text-slate-600 dark:text-slate-300 backdrop-blur-xs border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center gap-1.5">
           <Layers className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-          <span className="truncate">{mapConfig.attribution}</span>
+          <span className="truncate">{attributionText}</span>
         </div>
       </div>
 
-      {/* Map Reset View & Context Controls */}
+      {/* Map Reset View, Style Selector & Context Controls */}
       <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
         <button
           onClick={handleResetView}
           title="Reset map view to Dambare / BUK corridor"
-          className="p-2 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium flex items-center gap-1.5 transition"
+          className="p-2 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
         >
           <RotateCcw className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
           <span className="hidden sm:inline">Reset View</span>
         </button>
 
-        <div className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-800 shadow-md backdrop-blur-xs">
+        <MapStyleSelector />
+
+        <div className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-800 shadow-md backdrop-blur-xs">
           <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
           <span>Bayero Univ. Kano (BUK) Off-Campus Corridor</span>
         </div>

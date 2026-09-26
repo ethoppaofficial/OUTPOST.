@@ -1,225 +1,695 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Global Default-Deny Catch-All Safety Net
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    // ------------------------------------------------------------------------
+    // OUTPOST security model
+    // ------------------------------------------------------------------------
+    // Firestore Rules provide the Firebase equivalent of row-level security.
+    // The client must query collections using the same visibility constraints
+    // used below. Trusted Cloud Functions/Admin SDK operations are responsible
+    // for system transitions such as approval, expiry, inventory release, and
+    // notification dispatch.
+    // ------------------------------------------------------------------------
 
-    // Helper functions
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function self(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userDoc(userId) {
+      return get(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function userExists(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId));
+    }
+
+    function accountIsActive(userId) {
+      return userExists(userId)
+        && userDoc(userId).data.get('accountStatus', 'active') != 'suspended'
+        && userDoc(userId).data.get('status', 'active') != 'suspended';
+    }
+
+    function hasRole(role) {
+      return signedIn()
+        && (
+          request.auth.token.get('role', '') == role
+          || (
+            userExists(request.auth.uid)
+            && userDoc(request.auth.uid).data.get('role', '') == role
+          )
+        );
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'ethoppaofficial@gmail.com' ||
-        request.auth.token.email == 'admin@outpost.ng' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
-      );
-    }
-
-    function isLandlord() {
-      return isSignedIn() && (
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'landlord'
-      );
+      return hasRole('admin') && accountIsActive(request.auth.uid);
     }
 
     function isStudent() {
-      return isSignedIn() && (
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student'
-      );
+      return hasRole('student') && accountIsActive(request.auth.uid);
     }
 
-    // Connection testing
-    match /test/{docId} {
-      allow read, write: if true;
+    function isLandlord() {
+      return hasRole('landlord') && accountIsActive(request.auth.uid);
     }
 
-    // Users Collection
+    function isAdminOrSelf(userId) {
+      return isAdmin() || self(userId);
+    }
+
+    function propertyDoc(propertyId) {
+      return get(/databases/$(database)/documents/properties/$(propertyId));
+    }
+
+    function propertyExists(propertyId) {
+      return exists(/databases/$(database)/documents/properties/$(propertyId));
+    }
+
+    function locationDoc(propertyId) {
+      return get(/databases/$(database)/documents/propertyLocations/$(propertyId));
+    }
+
+    function locationExists(propertyId) {
+      return exists(/databases/$(database)/documents/propertyLocations/$(propertyId));
+    }
+
+    function propertyIsApproved(propertyId) {
+      return propertyExists(propertyId)
+        && propertyDoc(propertyId).data.get('verificationStatus', '') == 'approved'
+        && propertyDoc(propertyId).data.get('isActive', true) == true;
+    }
+
+    function locationIsVerified(propertyId) {
+      return locationExists(propertyId)
+        && locationDoc(propertyId).data.get('verificationStatus', '') == 'verified';
+    }
+
+    function propertyIsPublic(propertyId) {
+      return propertyIsApproved(propertyId) && locationIsVerified(propertyId);
+    }
+
+    function publicProperty(data) {
+      return data.get('verificationStatus', '') == 'approved'
+        && data.get('isActive', true) == true
+        && data.get('locationVerificationStatus', '') == 'verified'
+        && data.get('publicLatitude', null) is number
+        && data.get('publicLongitude', null) is number
+        && data.get('area', '') in ['Dambare', 'Rimin Gata']
+        && data.get('state', 'Kano State') == 'Kano State';
+    }
+
+    function validArea(data) {
+      return data.get('area', '') in ['Dambare', 'Rimin Gata']
+        && data.get('city', 'Kano') == 'Kano'
+        && data.get('state', 'Kano State') == 'Kano State'
+        && data.get('isOffCampus', true) == true;
+    }
+
+    function validCoordinate(data, latitudeField, longitudeField) {
+      return data.get(latitudeField, null) is number
+        && data.get(longitudeField, null) is number
+        && data.get(latitudeField, 0) >= -90
+        && data.get(latitudeField, 0) <= 90
+        && data.get(longitudeField, 0) >= -180
+        && data.get(longitudeField, 0) <= 180;
+    }
+
+    function unchanged(data, field) {
+      return data.get(field, null) == resource.data.get(field, null);
+    }
+
+    function conversationDoc(conversationId) {
+      return get(/databases/$(database)/documents/conversations/$(conversationId));
+    }
+
+    function conversationParticipant(conversationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/conversations/$(conversationId))
+        && request.auth.uid in conversationDoc(conversationId).data.get('participantIds', []);
+    }
+
+    // ------------------------------------------------------------------------
+    // No test bypass exists in production rules.
+    // ------------------------------------------------------------------------
+    match /test/{document=**} {
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------------
+    // Users and profiles
+    // ------------------------------------------------------------------------
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isOwner(userId) || isAdmin();
+      // A user can read their private account record. Admins may administer it.
+      // Public discovery must use /publicProfiles instead.
+      allow read: if isAdminOrSelf(userId);
+
+      allow create: if isAdmin()
+        || (
+          self(userId)
+          && request.resource.data.get('role', 'student') == 'student'
+          && request.resource.data.get('accountStatus', 'email_unverified') in [
+            'email_unverified', 'profile_pending', 'active'
+          ]
+        );
+
+      allow update: if isAdmin()
+        || (
+          self(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'fullName', 'phoneNumber', 'avatarUrl', 'lastLoginAt', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isAdmin();
     }
 
-    // Student Profiles & Documents
+    match /publicProfiles/{userId} {
+      allow read: if signedIn() && accountIsActive(userId);
+
+      allow create, update: if self(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'avatarUrl', 'bio', 'role', 'isDiscoverable', 'updatedAt'
+        ])
+        && request.resource.data.get('role', resource.data.get('role', 'student'))
+          == resource.data.get('role', 'student');
+
+      allow delete: if self(userId) || isAdmin();
+    }
+
     match /studentProfiles/{userId} {
-      allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) || isAdmin();
+      allow read: if self(userId) || isAdmin();
+
+      allow create: if self(userId)
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAdmin()
+        || (
+          self(userId)
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'fullName', 'phone', 'registrationNumber', 'institutionName',
+            'university', 'campus', 'studyLevel', 'programme', 'gender',
+            'preferredLocation', 'bio', 'updatedAt'
+          ])
+          && request.resource.data.get('isProfileVerified', false)
+            == resource.data.get('isProfileVerified', false)
+        );
+
       allow delete: if isAdmin();
     }
 
-    // Sensitive Student Verification Documents (Strict Private Access)
-    match /studentVerificationDocuments/{docId} {
-      allow read: if isSignedIn() && (resource.data.studentId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
-      allow update, delete: if isAdmin();
-    }
-
-    // Landlord Profiles & Verifications
     match /landlordProfiles/{userId} {
-      allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) || isAdmin();
+      allow read: if self(userId) || isAdmin();
+
+      allow create: if self(userId)
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAdmin()
+        || (
+          self(userId)
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'legalName', 'businessName', 'phoneNumber', 'contactAddress',
+            'updatedAt'
+          ])
+          && request.resource.data.get('verificationStatus', 'not_started')
+            == resource.data.get('verificationStatus', 'not_started')
+        );
+
       allow delete: if isAdmin();
     }
 
-    // Properties: Public approved listings readable by all; landlords manage their own; admin verifies
+    // ------------------------------------------------------------------------
+    // Verification documents and submissions
+    // ------------------------------------------------------------------------
+    match /studentVerificationDocuments/{documentId} {
+      allow read: if signedIn()
+        && (resource.data.get('studentId', '') == request.auth.uid || isAdmin());
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.documentType in [
+          'student_id', 'admission_letter', 'school_fees_receipt'
+        ]
+        && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewerId']);
+
+      allow update: if isAdmin()
+        || (
+          isStudent()
+          && resource.data.studentId == request.auth.uid
+          && resource.data.status == 'rejected'
+          && request.resource.data.studentId == resource.data.studentId
+          && request.resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'documentUrl', 'fileName', 'fileSize', 'uploadedAt', 'status'
+          ])
+        );
+
+      allow delete: if isAdmin()
+        || (isStudent() && resource.data.studentId == request.auth.uid
+          && resource.data.status == 'rejected');
+    }
+
+    match /landlordVerificationDocuments/{documentId} {
+      allow read: if signedIn()
+        && (resource.data.get('landlordId', '') == request.auth.uid || isAdmin());
+
+      allow create: if isLandlord()
+        && request.resource.data.landlordId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewerId']);
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin()
+        || (isLandlord() && resource.data.landlordId == request.auth.uid
+          && resource.data.status == 'rejected');
+    }
+
+    // ------------------------------------------------------------------------
+    // Housing locations: the public map is gated by verified location status.
+    // One document per property: propertyLocations/{propertyId}.
+    // ------------------------------------------------------------------------
+    match /propertyLocations/{propertyId} {
+      allow read: if isAdmin()
+        || (
+          signedIn()
+          && propertyIsPublic(propertyId)
+          && resource.data.get('verificationStatus', '') == 'verified'
+        )
+        || (
+          signedIn()
+          && resource.data.get('submittedBy', '') == request.auth.uid
+        );
+
+      allow create: if isLandlord()
+        && propertyExists(propertyId)
+        && propertyDoc(propertyId).data.landlordId == request.auth.uid
+        && request.resource.data.propertyId == propertyId
+        && request.resource.data.submittedBy == request.auth.uid
+        && request.resource.data.verificationStatus == 'pending'
+        && validArea(request.resource.data)
+        && validCoordinate(request.resource.data, 'latitude', 'longitude')
+        && request.resource.data.get('precision', '') in [
+          'exact_building', 'nearby_building', 'street', 'neighbourhood'
+        ]
+        && !request.resource.data.keys().hasAny([
+          'reviewedBy', 'reviewedAt', 'reviewReason'
+        ]);
+
+      allow update: if isAdmin()
+        || (
+          isLandlord()
+          && resource.data.submittedBy == request.auth.uid
+          && resource.data.verificationStatus in ['pending', 'rejected']
+          && request.resource.data.propertyId == resource.data.propertyId
+          && request.resource.data.submittedBy == resource.data.submittedBy
+          && request.resource.data.verificationStatus == 'pending'
+          && validArea(request.resource.data)
+          && validCoordinate(request.resource.data, 'latitude', 'longitude')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'area', 'city', 'state', 'country', 'latitude', 'longitude',
+            'publicLatitude', 'publicLongitude', 'geohash', 'publicGeohash',
+            'source', 'precision', 'publicLocationLabel', 'formattedAddress',
+            'submittedAt', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isAdmin()
+        || (
+          isLandlord()
+          && resource.data.submittedBy == request.auth.uid
+          && resource.data.verificationStatus != 'verified'
+        );
+    }
+
+    match /locations/{locationId} {
+      allow read: if signedIn() && resource.data.get('isActive', true) == true;
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------------
+    // Properties
+    // ------------------------------------------------------------------------
     match /properties/{propertyId} {
-      allow read: if resource.data.verificationStatus == 'approved' || (isSignedIn() && (resource.data.landlordId == request.auth.uid || isAdmin()));
-      allow create: if (isLandlord() || isAdmin()) && request.resource.data.landlordId == request.auth.uid;
-      allow update: if (isSignedIn() && resource.data.landlordId == request.auth.uid) || isAdmin();
+      // Public list queries must include the approved/active/location-safe
+      // constraints. The location fields are duplicated here deliberately so a
+      // public property query does not require a Firestore join.
+      allow read: if publicProperty(resource.data)
+        || isAdmin()
+        || (signedIn() && resource.data.get('landlordId', '') == request.auth.uid);
+
+      allow create: if isLandlord()
+        && request.resource.data.landlordId == request.auth.uid
+        && request.resource.data.verificationStatus == 'draft'
+        && request.resource.data.get('locationVerificationStatus', 'pending') == 'pending';
+
+      allow update: if isAdmin()
+        || (
+          isLandlord()
+          && resource.data.landlordId == request.auth.uid
+          && request.resource.data.landlordId == resource.data.landlordId
+          && request.resource.data.verificationStatus in ['draft', 'rejected']
+          && request.resource.data.get('locationVerificationStatus', 'pending')
+            == resource.data.get('locationVerificationStatus', 'pending')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'title', 'description', 'propertyType', 'accommodationType',
+            'genderPolicy', 'address', 'city', 'neighbourhood', 'campus',
+            'distanceKm', 'price', 'pricePerSession', 'billingPeriod',
+            'depositAmount', 'utilitiesIncluded', 'amenities', 'houseRules',
+            'images', 'totalCapacity', 'availableSpaces', 'updatedAt',
+            'locationId', 'locationLabel'
+          ])
+        );
+
+      allow delete: if isAdmin()
+        || (
+          isLandlord()
+          && resource.data.landlordId == request.auth.uid
+          && resource.data.verificationStatus == 'draft'
+        );
+    }
+
+    match /properties/{propertyId}/units/{unitId} {
+      allow read: if propertyIsPublic(propertyId)
+        || isAdmin()
+        || (signedIn()
+          && propertyExists(propertyId)
+          && propertyDoc(propertyId).data.landlordId == request.auth.uid);
+
+      allow create: if isLandlord()
+        && propertyExists(propertyId)
+        && propertyDoc(propertyId).data.landlordId == request.auth.uid
+        && request.resource.data.propertyId == propertyId;
+
+      allow update: if isAdmin()
+        || (
+          isLandlord()
+          && propertyExists(propertyId)
+          && propertyDoc(propertyId).data.landlordId == request.auth.uid
+          && request.resource.data.propertyId == resource.data.propertyId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'type', 'pricePerSession', 'updatedAt'
+          ])
+        );
+
       allow delete: if isAdmin();
     }
 
-    // Reservations & Holds
+    // ------------------------------------------------------------------------
+    // Reservations, invoices, receipts
+    // ------------------------------------------------------------------------
     match /reservations/{reservationId} {
-      allow read: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.landlordId == request.auth.uid ||
-        isAdmin()
-      );
-      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.landlordId == request.auth.uid ||
-        isAdmin()
-      );
+      allow read: if signedIn()
+        && (
+          resource.data.get('studentId', '') == request.auth.uid
+          || resource.data.get('landlordId', '') == request.auth.uid
+          || isAdmin()
+        );
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending_payment'
+        && request.resource.data.get('holdExpiresAt', request.time)
+          >= request.time
+        && request.resource.data.get('holdExpiresAt', request.time)
+          <= request.time + duration.value(7, 'd')
+        && propertyIsPublic(request.resource.data.propertyId)
+        && propertyDoc(request.resource.data.propertyId).data.landlordId
+          == request.resource.data.landlordId;
+
+      // Status changes, inventory release, expiry, confirmation, and invoice
+      // transitions must be performed by trusted backend code. A client may
+      // cancel only its own pending hold if the product permits cancellation.
+      allow update: if isAdmin()
+        || (
+          isStudent()
+          && resource.data.studentId == request.auth.uid
+          && resource.data.status == 'pending_payment'
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'cancellationReason', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isAdmin();
     }
 
-    // Invoices
     match /invoices/{invoiceId} {
-      allow read: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.landlordId == request.auth.uid ||
-        isAdmin()
-      );
-      allow write: if isAdmin() || (isSignedIn() && request.resource.data.landlordId == request.auth.uid);
+      allow read: if signedIn()
+        && (
+          resource.data.get('studentId', '') == request.auth.uid
+          || resource.data.get('landlordId', '') == request.auth.uid
+          || isAdmin()
+        );
+
+      allow create: if isAdmin()
+        || (
+          signedIn()
+          && request.resource.data.studentId == request.auth.uid
+          && request.resource.data.status == 'unpaid'
+        );
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
-    // Payment Receipts (Strict Landlord & Student Only)
     match /paymentReceipts/{receiptId} {
-      allow read: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.landlordId == request.auth.uid ||
-        isAdmin()
-      );
-      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.landlordId == request.auth.uid ||
-        isAdmin()
-      );
+      allow read: if signedIn()
+        && (
+          resource.data.get('studentId', '') == request.auth.uid
+          || resource.data.get('landlordId', '') == request.auth.uid
+          || isAdmin()
+        );
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending_review'
+        && exists(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId))
+        && get(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.studentId == request.auth.uid
+        && request.resource.data.landlordId == get(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.landlordId;
+
+      allow update: if isAdmin()
+        || (
+          isLandlord()
+          && resource.data.landlordId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'rejectionReason', 'reviewedAt', 'reviewedBy'
+          ])
+        );
+
+      allow delete: if isAdmin();
     }
 
-    // Roommate Preferences & Requests
+    // ------------------------------------------------------------------------
+    // Roommate data
+    // ------------------------------------------------------------------------
     match /roommatePreferences/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isOwner(userId);
+      allow read, write: if self(userId) || isAdmin();
     }
 
     match /roommateRequests/{requestId} {
-      allow read: if isSignedIn() && (
-        resource.data.senderId == request.auth.uid ||
-        resource.data.receiverId == request.auth.uid ||
-        isAdmin()
-      );
-      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.senderId == request.auth.uid ||
-        resource.data.receiverId == request.auth.uid
-      );
+      allow read: if signedIn()
+        && (
+          resource.data.get('senderId', '') == request.auth.uid
+          || resource.data.get('receiverId', '') == request.auth.uid
+          || isAdmin()
+        );
+
+      allow create: if isStudent()
+        && request.resource.data.senderId == request.auth.uid;
+
+      allow update: if signedIn()
+        && (
+          isAdmin()
+          || resource.data.senderId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid
+        );
+
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.senderId == request.auth.uid);
     }
 
-    // Accommodation Groups
+    // ------------------------------------------------------------------------
+    // Groups and group membership
+    // ------------------------------------------------------------------------
     match /accommodationGroups/{groupId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.leaderId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.leaderId == request.auth.uid ||
-        (resource.data.adminIds != null && request.auth.uid in resource.data.adminIds) ||
-        request.auth.uid in resource.data.memberIds ||
-        isAdmin()
-      );
-      allow delete: if isSignedIn() && (resource.data.leaderId == request.auth.uid || isAdmin());
+      allow read: if signedIn()
+        && (
+          request.auth.uid in resource.data.get('memberIds', [])
+          || isAdmin()
+        );
+
+      allow create: if isStudent()
+        && request.resource.data.leaderId == request.auth.uid
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.adminIds == [request.auth.uid];
+
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid in resource.data.get('adminIds', [])
+          && request.resource.data.leaderId == resource.data.leaderId
+          && request.resource.data.memberIds.size() <= resource.data.get('maxCapacity', 4)
+          && request.resource.data.adminIds.size() > 0
+        );
+
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.leaderId == request.auth.uid);
     }
 
-    // Group Join Requests
+    match /accommodationGroups/{groupId}/members/{userId} {
+      allow read: if signedIn()
+        && (
+          isAdmin()
+          || request.auth.uid == userId
+          || request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(groupId)).data.get('memberIds', [])
+        );
+
+      allow write: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(groupId)).data.get('adminIds', [])
+        );
+    }
+
     match /groupJoinRequests/{requestId} {
-      allow read: if isSignedIn() && (
-        resource.data.userId == request.auth.uid ||
-        isAdmin() ||
-        request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.memberIds
-      );
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.memberIds
-      );
+      allow read: if signedIn()
+        && (
+          resource.data.get('userId', '') == request.auth.uid
+          || isAdmin()
+          || request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.get('adminIds', [])
+        );
+
+      allow create: if isStudent()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && (
+            resource.data.userId == request.auth.uid
+            || request.auth.uid in get(/databases/$(database)/documents/accommodationGroups/$(resource.data.groupId)).data.get('adminIds', [])
+          )
+        );
+
       allow delete: if isAdmin();
     }
 
-    // Real-Time Chat & Conversations (Strict Participant Access)
+    // ------------------------------------------------------------------------
+    // Chat
+    // ------------------------------------------------------------------------
     match /conversations/{conversationId} {
-      allow read: if isSignedIn() && request.auth.uid in resource.data.participantIds;
-      allow create: if isSignedIn() && request.auth.uid in request.resource.data.participantIds;
-      allow update: if isSignedIn() && request.auth.uid in resource.data.participantIds;
-    }
+      allow read: if conversationParticipant(conversationId) || isAdmin();
 
-    // Messages with participant-checked read, strict sender creation, and 15-min author-only edit
-    match /messages/{messageId} {
-      allow read: if isSignedIn() && (
-        resource.data.senderId == request.auth.uid ||
-        isAdmin() ||
-        request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participantIds
-      );
-      allow create: if isSignedIn() && 
-        request.resource.data.senderId == request.auth.uid &&
-        request.auth.uid in get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participantIds;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        // Sender editing within 15 minutes, preserving sender and conversation identity
-        (
-          resource.data.senderId == request.auth.uid &&
-          request.resource.data.senderId == resource.data.senderId &&
-          request.resource.data.conversationId == resource.data.conversationId
-        ) ||
-        // Or marking as read by a participant
-        (
-          request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participantIds &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'deliveryStatus', 'readAt', 'updatedAt'])
-        )
-      );
+      allow create: if signedIn()
+        && request.auth.uid in request.resource.data.get('participantIds', [])
+        && request.resource.data.createdBy == request.auth.uid;
+
+      allow update: if conversationParticipant(conversationId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastMessageId', 'lastMessageText', 'lastMessageTimestamp',
+          'lastMessageAt', 'updatedAt', 'archivedAt', 'isMuted', 'isPinned'
+        ]);
+
       allow delete: if isAdmin();
     }
 
-    // Typing and Presence indicators
+    match /conversations/{conversationId}/messages/{messageId} {
+      allow read: if conversationParticipant(conversationId) || isAdmin();
+
+      allow create: if conversationParticipant(conversationId)
+        && request.resource.data.conversationId == conversationId
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 2000;
+
+      allow update: if isAdmin()
+        || (
+          conversationParticipant(conversationId)
+          && resource.data.senderId == request.auth.uid
+          && request.time < resource.data.createdAt + duration.value(15, 'm')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'isEdited', 'editedAt', 'updatedAt'
+          ])
+          && request.resource.data.senderId == resource.data.senderId
+          && request.resource.data.conversationId == resource.data.conversationId
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow read: if conversationParticipant(resource.data.conversationId) || isAdmin();
+      allow create: if conversationParticipant(request.resource.data.conversationId)
+        && request.resource.data.senderId == request.auth.uid;
+      allow update: if isAdmin()
+        || (
+          conversationParticipant(resource.data.conversationId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'status', 'deliveryStatus', 'readAt', 'isEdited', 'editedAt', 'updatedAt'
+          ])
+          && (
+            resource.data.senderId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'deliveryStatus', 'readAt', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isAdmin();
+    }
+
     match /typingStates/{stateId} {
-      allow read, write: if isSignedIn();
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
     }
 
     match /presenceStates/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isOwner(userId) || isAdmin();
+      allow read: if signedIn();
+      allow create, update: if self(userId)
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if self(userId) || isAdmin();
     }
 
-    // In-App Notifications
+    // ------------------------------------------------------------------------
+    // Notifications and audit logs
+    // ------------------------------------------------------------------------
     match /notifications/{notificationId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn();
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isRead', 'readAt'
+        ]);
+
+      // System notifications are created by trusted Cloud Functions/Admin SDK.
+      allow create: if false;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
 
-    // Audit Logs
     match /auditLogs/{logId} {
       allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /expirationEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // Default-deny safety net for every collection not explicitly listed.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -24,8 +24,8 @@ export class StorageService {
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Student document');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = `doc_${Date.now()}_${cleanName}`;
-    const storagePath = `student-docs/${studentId}/${docId}`;
+    const docId = `doc_${Date.now()}`;
+    const storagePath = `student-docs/${studentId}/${docId}/${cleanName}`;
 
     if (appConfig.backendMode === 'mock') {
       return {
@@ -70,8 +70,8 @@ export class StorageService {
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Landlord document');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = `landlord_${Date.now()}_${cleanName}`;
-    const storagePath = `landlord-docs/${landlordId}/${docId}`;
+    const docId = `landlord_${Date.now()}`;
+    const storagePath = `landlord-docs/${landlordId}/${docId}/${cleanName}`;
 
     if (appConfig.backendMode === 'mock') {
       return {
@@ -116,8 +116,8 @@ export class StorageService {
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Payment receipt');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const receiptId = `receipt_${Date.now()}_${cleanName}`;
-    const storagePath = `receipts/${reservationId}/${receiptId}`;
+    const receiptId = `receipt_${Date.now()}`;
+    const storagePath = `receipts/${reservationId}/${receiptId}/${cleanName}`;
 
     if (appConfig.backendMode === 'mock') {
       return {
@@ -151,15 +151,18 @@ export class StorageService {
 
   /**
    * Upload Public Property Image
-   * Max 5MB, Image only. Path: property-images/{imageId}
+   * Max 10MB, Image only. Path: property-images/{propertyId}/{fileName}
    */
-  async uploadPropertyImage(file: File | Blob, originalFileName: string): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Property image');
+  async uploadPropertyImage(
+    file: File | Blob,
+    originalFileName: string,
+    propertyId: string = 'pending_submission'
+  ): Promise<FileUploadResult> {
+    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Property image');
     this.validateFileType(file.type, ['image/'], 'Property image');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const imageId = `prop_img_${Date.now()}_${cleanName}`;
-    const storagePath = `property-images/${imageId}`;
+    const storagePath = `property-images/${propertyId}/${Date.now()}_${cleanName}`;
 
     if (appConfig.backendMode === 'mock') {
       return {

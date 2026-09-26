@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as maplibregl from 'maplibre-gl';
+import { maplibregl, initMaplibreWorker } from '../../infrastructure/config/maplibreSetup';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
 import { mapConfig, OPEN_STREET_MAP_FALLBACK_STYLE } from '../../infrastructure/config/mapConfig';

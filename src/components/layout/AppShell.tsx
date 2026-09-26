@@ -177,6 +177,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       items: [
         { id: 'dash', label: 'Overview', to: '/student/dashboard', icon: Home, exact: true },
         { id: 'browse', label: 'Browse Accommodations', to: '/student/properties', icon: Compass },
+        { id: 'map', label: 'BUK Verified Map', to: '/map', icon: MapPin },
         { id: 'res', label: 'My Reservations', to: '/student/reservations', icon: CalendarCheck },
       ],
     },

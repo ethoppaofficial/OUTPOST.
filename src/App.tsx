@@ -11,6 +11,7 @@ import { LoginPage } from './pages/public/LoginPage';
 import { RegisterPage } from './pages/public/RegisterPage';
 import { ForgotPasswordPage } from './pages/public/ForgotPasswordPage';
 import { UnauthorizedPage } from './pages/public/UnauthorizedPage';
+import { StudentHousingMapPage } from './pages/public/StudentHousingMapPage';
 
 // Student pages
 import { StudentDashboard } from './pages/student/StudentDashboard';
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/properties" element={<PropertiesPage />} />
           <Route path="/properties/:id" element={<PropertyDetailPage />} />
+          <Route path="/map" element={<StudentHousingMapPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
