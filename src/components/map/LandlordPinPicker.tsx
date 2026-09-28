@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { maplibregl, initMaplibreWorker } from '../../infrastructure/config/maplibreSetup';
+import { maplibregl } from '../../infrastructure/config/maplibreSetup';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
+import { HousingArea, LocationPrecision } from '../../domain/types';
 import {
   mapConfig,
-  OPEN_STREET_MAP_FALLBACK_STYLE,
-  getEffectiveMapStyle,
+  getMaptilerApiKey,
   subscribeToMapConfig,
+  applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
-import { AREA_CENTERS, BUK_NEW_CAMPUS_GATE, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
-import { MapPin, Shield, Info, Check, Navigation, AlertCircle } from 'lucide-react';
+import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
+import { MapPin, Shield, Check, Navigation, AlertTriangle } from 'lucide-react';
 
 interface LandlordPinPickerProps {
   initialArea: HousingArea;
@@ -48,20 +48,75 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
   const [currentLng, setCurrentLng] = useState<number>(initialLongitude ?? defaultCoords.longitude);
   const [area, setArea] = useState<HousingArea>(initialArea);
   const [precision, setPrecision] = useState<LocationPrecision>(initialPrecision);
+  const [mapKeyMissing, setMapKeyMissing] = useState(!getMaptilerApiKey());
+
+  // Subscribe to config changes
+  useEffect(() => {
+    const unsubscribe = subscribeToMapConfig(() => {
+      setMapKeyMissing(!getMaptilerApiKey());
+      if (mapRef.current && mapConfig.styleUrl) {
+        try {
+          mapRef.current.setStyle(mapConfig.styleUrl);
+        } catch (e) {
+          console.warn('Could not update style in LandlordPinPicker', e);
+        }
+      }
+      if (mapRef.current) {
+        applyMapTilerBuildingsLayer(mapRef.current);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Sync with prop changes (e.g. When landlord selects an address search suggestion)
+  useEffect(() => {
+    if (initialLatitude !== undefined && initialLongitude !== undefined) {
+      if (initialLatitude !== currentLat || initialLongitude !== currentLng) {
+        setCurrentLat(initialLatitude);
+        setCurrentLng(initialLongitude);
+        if (markerRef.current) {
+          markerRef.current.setLngLat([initialLongitude, initialLatitude]);
+        }
+        if (mapRef.current) {
+          mapRef.current.flyTo({ center: [initialLongitude, initialLatitude], zoom: 16 });
+        }
+      }
+    }
+  }, [initialLatitude, initialLongitude]);
+
+  useEffect(() => {
+    setArea(initialArea);
+  }, [initialArea]);
+
+  useEffect(() => {
+    if (initialPrecision) {
+      setPrecision(initialPrecision);
+    }
+  }, [initialPrecision]);
 
   // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
+    const styleUrl = mapConfig.styleUrl;
+    if (!styleUrl) {
+      setMapKeyMissing(true);
+      return;
+    }
+
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: mapConfig.styleUrl || OPEN_STREET_MAP_FALLBACK_STYLE,
+      style: styleUrl,
       center: [currentLng, currentLat],
       zoom: 15,
       attributionControl: false,
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+
+    map.on('load', () => {
+      applyMapTilerBuildingsLayer(map);
+    });
 
     // Create Pin marker element
     const el = document.createElement('div');
@@ -104,23 +159,16 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
       });
     }
 
+    map.on('error', () => {
+      if (!getMaptilerApiKey()) {
+        setMapKeyMissing(true);
+      }
+    });
+
     return () => {
       marker.remove();
       map.remove();
     };
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = subscribeToMapConfig(() => {
-      if (mapRef.current) {
-        try {
-          mapRef.current.setStyle(getEffectiveMapStyle());
-        } catch (e) {
-          console.warn('Could not update style in LandlordPinPicker', e);
-        }
-      }
-    });
-    return unsubscribe;
   }, []);
 
   const updateCoordinates = (
@@ -149,90 +197,85 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     });
   };
 
-  const handleSelectArea = (newArea: HousingArea) => {
-    setArea(newArea);
-    const center = AREA_CENTERS[newArea];
-    setCurrentLat(center.latitude);
-    setCurrentLng(center.longitude);
-
-    if (mapRef.current && markerRef.current) {
-      mapRef.current.easeTo({
-        center: [center.longitude, center.latitude],
-        zoom: 15,
-        duration: 600,
-      });
-      markerRef.current.setLngLat([center.longitude, center.latitude]);
-    }
-
-    updateCoordinates(center.latitude, center.longitude, newArea, precision);
-  };
-
   const handleSelectPrecision = (newPrecision: LocationPrecision) => {
     setPrecision(newPrecision);
     updateCoordinates(currentLat, currentLng, area, newPrecision);
+  };
+
+  const handleDeviceGPS = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        if (markerRef.current && mapRef.current) {
+          markerRef.current.setLngLat([longitude, latitude]);
+          mapRef.current.flyTo({ center: [longitude, latitude], zoom: 17 });
+          updateCoordinates(latitude, longitude, area, precision);
+        }
+      },
+      (err) => {
+        alert(`Location permission denied or unavailable: ${err.message}. Place marker manually.`);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const geohash = encodeGeohash(currentLat, currentLng);
   const publicCoords = computePublicCoordinates(currentLat, currentLng, precision, area);
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      {/* Area Quick Selector */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-          Case-Study Off-Campus Area (Kano State)
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          {(['Dambare', 'Rimin Gata'] as HousingArea[]).map((a) => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => handleSelectArea(a)}
-              disabled={readOnly}
-              className={`p-3 rounded-xl border text-xs font-medium text-left flex items-start gap-2.5 transition ${
-                area === a
-                  ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300 ring-1 ring-emerald-500'
-                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-slate-300'
-              }`}
-            >
-              <MapPin className={`w-4 h-4 flex-shrink-0 mt-0.5 ${area === a ? 'text-emerald-600' : 'text-slate-400'}`} />
-              <div>
-                <span className="font-bold block">{a}</span>
-                <span className="text-[11px] text-slate-500 block">
-                  {a === 'Dambare' ? 'Opposite BUK New Campus' : 'West off Gwarzo Road'}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Map Instruction Hint */}
-      {!readOnly && (
-        <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Navigation className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-            <span>Click map or drag the pin directly onto your property building</span>
-          </div>
-          <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-            {currentLat.toFixed(4)}, {currentLng.toFixed(4)}
-          </span>
-        </div>
-      )}
-
-      {/* Interactive MapLibre Pin Picker Canvas */}
-      <div className="relative h-64 sm:h-72 w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-inner">
+    <div className={`space-y-3 ${className}`}>
+      {/* Map Canvas */}
+      <div className="relative w-full h-80 sm:h-96 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950">
         <div ref={mapContainerRef} className="w-full h-full" />
+
+        {/* Missing key message */}
+        {mapKeyMissing && (
+          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 text-center z-20">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-amber-300 dark:border-amber-800 max-w-sm space-y-2">
+              <AlertTriangle className="w-6 h-6 text-amber-500 mx-auto" />
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Map configuration is incomplete. Please contact the administrator.
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Ensure VITE_MAPTILER_API_KEY is configured in your environment.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Floating Instruction Banner */}
+        <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200/90 dark:border-slate-800 shadow-md backdrop-blur-xs">
+          <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+          <span>Click map or drag marker to property building</span>
+        </div>
+
+        {/* Use GPS Button */}
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={handleDeviceGPS}
+            title="Use Device GPS Location"
+            className="absolute bottom-3 right-3 z-10 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-md hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Navigation className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Use GPS</span>
+          </button>
+        )}
       </div>
 
-      {/* Privacy Precision Setting */}
-      <div className="space-y-2 pt-1">
+      {/* Privacy & Precision Control */}
+      <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2.5">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Public Location Privacy Precision</span>
-          </label>
-          <span className="text-[10px] text-slate-400">Protects student residential gate privacy</span>
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
+            <Shield className="w-4 h-4 text-emerald-600" />
+            <span>Public Location Precision</span>
+          </div>
+          <span className="text-[10px] text-slate-500 font-medium">Controls student-facing coordinate jitter</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -296,3 +339,5 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     </div>
   );
 };
+
+export default LandlordPinPicker;

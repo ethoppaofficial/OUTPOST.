@@ -1,104 +1,60 @@
 /**
  * OUTPOST MapLibre & MapTiler Centralized Configuration
  *
- * Configures the map tile provider, MapTiler Streets visual style,
- * and key resolution.
+ * Configures MapLibre GL JS, MapTiler Streets vector tiles,
+ * and MapTiler Geocoding API.
  */
 
-const envApiKey = (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim();
+const LOCAL_STORAGE_KEY_MAPTILER = 'outpost_maptiler_api_key';
+const LOCAL_STORAGE_KEY_3D_BUILDINGS = 'outpost_maptiler_3d_buildings';
+const listeners: Array<() => void> = [];
 
-export const MAPTILER_STREETS_BASE_URL = 'https://api.maptiler.com/maps/streets-v2/style.json?key=';
-
-// High-fidelity fallback vector style matching Google Maps palette
-// (soft greens for landscapes, bright yellows for highways, detailed building footprints)
-export const OPEN_FREE_MAP_BRIGHT_URL = 'https://tiles.openfreemap.org/styles/bright';
-export const OPEN_FREE_MAP_LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
-
-// OpenStreetMap standard raster tile fallback style spec (MapLibre Style Specification v8)
-export const OPEN_STREET_MAP_FALLBACK_STYLE: any = {
-  version: 8,
-  name: 'OpenStreetMap Carto Fallback',
-  sources: {
-    'osm-tiles': {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
-    },
-  },
-  layers: [
-    {
-      id: 'osm-tiles-layer',
-      type: 'raster',
-      source: 'osm-tiles',
-      minzoom: 0,
-      maxzoom: 19,
-    },
-  ],
-};
-
-export interface MapStylePreset {
-  id: string;
-  name: string;
-  badge: string;
-  description: string;
-  requiresKey: boolean;
-  attribution: string;
-  getStyleUrl: (key?: string) => string | any;
+export function getMaptilerApiKey(): string | undefined {
+  const envKey = (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim();
+  if (envKey) return envKey;
+  try {
+    const local = localStorage.getItem(LOCAL_STORAGE_KEY_MAPTILER)?.trim();
+    if (local) return local;
+  } catch {
+    // Ignore storage restrictions
+  }
+  return undefined;
 }
 
-export const MAP_STYLE_PRESETS: MapStylePreset[] = [
-  {
-    id: 'maptiler-streets',
-    name: 'MapTiler Streets',
-    badge: 'Google Maps Match',
-    description:
-      'Closest visual match to Google Maps. Features identical soft greens for landscapes, bright yellows for major highways, and highly detailed building layouts. (Requires free API key) General navigation, street-level accuracy, and business discovery.',
-    requiresKey: true,
-    attribution: '© MapTiler © OpenStreetMap contributors | OUTPOST BUK Corridor',
-    getStyleUrl: (key) => {
-      const activeKey = key || getMaptilerApiKey();
-      if (!activeKey) {
-        return OPEN_FREE_MAP_BRIGHT_URL;
-      }
-      return `${MAPTILER_STREETS_BASE_URL}${encodeURIComponent(activeKey.trim())}`;
-    },
-  },
-  {
-    id: 'streets-bright',
-    name: 'Streets Bright (Vector)',
-    badge: 'Google Maps Visuals (No Key)',
-    description:
-      'High-definition vector style matching Google Maps palette: soft greens for landscapes, bright yellows for highways, and crisp building footprints without an API key.',
-    requiresKey: false,
-    attribution: '© OpenMapTiles © OpenFreeMap © OpenStreetMap contributors',
-    getStyleUrl: () => OPEN_FREE_MAP_BRIGHT_URL,
-  },
-  {
-    id: 'liberty',
-    name: 'Liberty Vector',
-    badge: 'Modern Clean',
-    description: 'Clean modern cartography with prominent university corridors and off-campus zones.',
-    requiresKey: false,
-    attribution: '© OpenFreeMap © OpenStreetMap contributors',
-    getStyleUrl: () => OPEN_FREE_MAP_LIBERTY_URL,
-  },
-  {
-    id: 'osm-carto',
-    name: 'OpenStreetMap Carto',
-    badge: 'Raster Fallback',
-    description: 'Standard OpenStreetMap cartographic raster tiles with 100% global uptime.',
-    requiresKey: false,
-    attribution: '© OpenStreetMap contributors',
-    getStyleUrl: () => OPEN_STREET_MAP_FALLBACK_STYLE,
-  },
-];
+export function setMaptilerApiKey(key: string): void {
+  try {
+    if (key.trim()) {
+      localStorage.setItem(LOCAL_STORAGE_KEY_MAPTILER, key.trim());
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_KEY_MAPTILER);
+    }
+    notifyMapConfigChanged();
+  } catch (err) {
+    console.warn('Could not save MapTiler API key to localStorage', err);
+  }
+}
 
-const LOCAL_STORAGE_KEY_MAPTILER = 'outpost_maptiler_api_key';
-const LOCAL_STORAGE_KEY_STYLE_ID = 'outpost_selected_map_style';
+export function is3DBuildingsEnabled(): boolean {
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY_3D_BUILDINGS);
+    return saved !== null ? saved === 'true' : true; // Enabled by default
+  } catch {
+    return true;
+  }
+}
 
-const listeners: Array<() => void> = [];
+export function set3DBuildingsEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY_3D_BUILDINGS, String(enabled));
+    notifyMapConfigChanged();
+  } catch (err) {
+    console.warn('Could not save 3D buildings preference', err);
+  }
+}
+
+export function isMapTilerConfigured(): boolean {
+  return Boolean(getMaptilerApiKey());
+}
 
 export function subscribeToMapConfig(callback: () => void): () => void {
   listeners.push(callback);
@@ -118,105 +74,141 @@ export function notifyMapConfigChanged(): void {
   });
 }
 
-/**
- * Retrieve MapTiler API Key from Vite environment variable or user localStorage
- */
-export function getMaptilerApiKey(): string {
-  if (envApiKey) return envApiKey;
-  try {
-    return localStorage.getItem(LOCAL_STORAGE_KEY_MAPTILER)?.trim() || '';
-  } catch {
-    return '';
-  }
-}
+export const MAPTILER_STREETS_BASE_URL = 'https://api.maptiler.com/maps/streets-v2/style.json?key=';
+export const MAPTILER_GEOCODING_BASE_URL = 'https://api.maptiler.com/geocoding';
+export const MAPTILER_BUILDINGS_TILES_CLOUD_URL = 'https://cloud.maptiler.com/tiles/buildings/';
+export const MAPTILER_BUILDINGS_TILES_JSON_BASE_URL = 'https://api.maptiler.com/tiles/buildings/tiles.json?key=';
 
-/**
- * Persist user-entered MapTiler key and notify all active map instances
- */
-export function setMaptilerApiKey(key: string): void {
-  try {
-    if (key.trim()) {
-      localStorage.setItem(LOCAL_STORAGE_KEY_MAPTILER, key.trim());
-    } else {
-      localStorage.removeItem(LOCAL_STORAGE_KEY_MAPTILER);
-    }
-    notifyMapConfigChanged();
-  } catch (err) {
-    console.warn('Could not save MapTiler API key to localStorage', err);
-  }
-}
-
-/**
- * Check if a valid MapTiler API key is configured
- */
-export function isMapTilerConfigured(): boolean {
-  return Boolean(getMaptilerApiKey());
-}
-
-/**
- * Get active selected style ID
- */
-export function getActiveMapStyleId(): string {
-  try {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY_STYLE_ID);
-    if (stored && MAP_STYLE_PRESETS.some((p) => p.id === stored)) {
-      return stored;
-    }
-  } catch {
-    // ignore
-  }
-
-  // If MapTiler key is configured, use MapTiler Streets by default
-  if (getMaptilerApiKey()) {
-    return 'maptiler-streets';
-  }
-  return 'streets-bright';
-}
-
-/**
- * Set active selected style ID
- */
-export function setActiveMapStyleId(styleId: string): void {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY_STYLE_ID, styleId);
-    notifyMapConfigChanged();
-  } catch (err) {
-    console.warn('Could not save style preference', err);
-  }
-}
-
-/**
- * Get effective MapLibre style: MapTiler Streets if key present, else high-fidelity Bright vector style
- */
-export function getEffectiveMapStyle(): string | any {
-  const activeId = getActiveMapStyleId();
-  const preset = MAP_STYLE_PRESETS.find((p) => p.id === activeId) || MAP_STYLE_PRESETS[0];
-  return preset.getStyleUrl(getMaptilerApiKey());
-}
-
-export function getEffectiveAttribution(): string {
-  const activeId = getActiveMapStyleId();
-  const preset = MAP_STYLE_PRESETS.find((p) => p.id === activeId);
-  return preset?.attribution || '© MapTiler © OpenStreetMap contributors | OUTPOST BUK Corridor';
-}
-
-/**
- * Centralized map configuration object as specified in prompt:
- * { apiKey, styleUrl, attribution, providerName }
- */
 export const mapConfig = {
-  apiKey: envApiKey || undefined,
+  get apiKey(): string | undefined {
+    return getMaptilerApiKey();
+  },
 
-  styleUrl: envApiKey
-    ? `${MAPTILER_STREETS_BASE_URL}${envApiKey}`
-    : OPEN_FREE_MAP_BRIGHT_URL,
+  get styleUrl(): string | undefined {
+    const key = getMaptilerApiKey();
+    return key
+      ? `${MAPTILER_STREETS_BASE_URL}${encodeURIComponent(key)}`
+      : undefined;
+  },
+
+  get buildingsTilesUrl(): string | undefined {
+    const key = getMaptilerApiKey();
+    return key
+      ? `${MAPTILER_BUILDINGS_TILES_JSON_BASE_URL}${encodeURIComponent(key)}`
+      : undefined;
+  },
+
+  buildingsCloudUrl: MAPTILER_BUILDINGS_TILES_CLOUD_URL,
+
+  geocodingBaseUrl: MAPTILER_GEOCODING_BASE_URL,
 
   attribution: '© MapTiler © OpenStreetMap contributors',
 
   providerName: 'MapTiler',
 
   // Centered on Dambare / BUK New Campus corridor in Kano, Nigeria
-  // MapLibre format: [longitude, latitude]
+  // MapLibre coordinate order: [longitude, latitude]
   defaultCenter: [8.4140, 11.9815] as [number, number],
-  defaultZoom: 14.5,
+  defaultZoom: 15,
 };
+
+export function getEffectiveMapStyle(): string | undefined {
+  return mapConfig.styleUrl;
+}
+
+export function getEffectiveAttribution(): string {
+  return mapConfig.attribution;
+}
+
+/**
+ * Injects MapTiler Buildings tiles (https://cloud.maptiler.com/tiles/buildings/)
+ * as an interactive 3D fill-extrusion layer on the MapLibre map instance.
+ */
+export function applyMapTilerBuildingsLayer(map: any): void {
+  const apiKey = getMaptilerApiKey();
+  if (!map || !map.isStyleLoaded || !map.isStyleLoaded()) {
+    return;
+  }
+
+  if (!apiKey || !is3DBuildingsEnabled()) {
+    if (map.getLayer && map.getLayer('3d-buildings')) {
+      try {
+        map.removeLayer('3d-buildings');
+      } catch (e) {
+        // Ignore removal error
+      }
+    }
+    return;
+  }
+
+  try {
+    // Add source if missing
+    if (!map.getSource('maptiler-buildings')) {
+      map.addSource('maptiler-buildings', {
+        type: 'vector',
+        url: `${MAPTILER_BUILDINGS_TILES_JSON_BASE_URL}${encodeURIComponent(apiKey)}`,
+      });
+    }
+
+    if (!map.getLayer('3d-buildings')) {
+      // Find the first symbol layer to position 3D buildings underneath street/poi labels
+      const style = map.getStyle ? map.getStyle() : null;
+      let labelLayerId: string | undefined;
+      if (style && Array.isArray(style.layers)) {
+        for (const layer of style.layers) {
+          if (layer.type === 'symbol' && layer.layout?.['text-field']) {
+            labelLayerId = layer.id;
+            break;
+          }
+        }
+      }
+
+      map.addLayer(
+        {
+          id: '3d-buildings',
+          source: 'maptiler-buildings',
+          'source-layer': 'building',
+          type: 'fill-extrusion',
+          minzoom: 13,
+          paint: {
+            'fill-extrusion-color': [
+              'interpolate',
+              ['linear'],
+              ['coalesce', ['get', 'render_height'], ['get', 'height'], 0],
+              0,
+              '#e2e8f0',
+              15,
+              '#cbd5e1',
+              30,
+              '#94a3b8',
+              50,
+              '#64748b',
+            ],
+            'fill-extrusion-height': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              13,
+              0,
+              14,
+              ['coalesce', ['get', 'render_height'], ['get', 'height'], 6],
+            ],
+            'fill-extrusion-base': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              13,
+              0,
+              14,
+              ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+            ],
+            'fill-extrusion-opacity': 0.85,
+          },
+        },
+        labelLayerId
+      );
+    }
+  } catch (err) {
+    console.warn('Could not apply MapTiler 3D buildings layer:', err);
+  }
+}

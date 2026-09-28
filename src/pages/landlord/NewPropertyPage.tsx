@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Search, Navigation, AlertTriangle, MapPin, Loader2, X } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { propertyService } from '../../application/services/propertyService';
 import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
 import { LandlordPinPlacementMapModal, PinLocationValue } from '../../components/map/LandlordPinPlacementMapModal';
 import { PropertyImageCaptureUpload } from '../../components/property/PropertyImageCaptureUpload';
-import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
+import { HousingArea, LocationPrecision, PropertyLocation, GeocodingSuggestion } from '../../domain/types';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
+import { searchAddress, resultMentionsArea, getPrecisionLabel } from '../../application/services/geocodingService';
 
 export const NewPropertyPage: React.FC = () => {
   const session = authService.getSession();
@@ -80,6 +81,66 @@ export const NewPropertyPage: React.FC = () => {
   const [rules, setRules] = useState('No smoking inside building\nVisitors must depart before 10pm\nQuiet hours 11pm - 6am');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Address geocoding states
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<GeocodingSuggestion[]>([]);
+  const [geocodingWarning, setGeocodingWarning] = useState<string | null>(null);
+  const [geocodingSuccess, setGeocodingSuccess] = useState<string | null>(null);
+
+  const handleSearchAddress = async () => {
+    if (!address.trim()) {
+      setError('Please type a property address to search.');
+      return;
+    }
+    setIsSearchingAddress(true);
+    setError(null);
+    setGeocodingWarning(null);
+    try {
+      const results = await searchAddress(address, locationData.area);
+      setAddressSuggestions(results);
+      if (results.length === 0) {
+        setGeocodingWarning(
+          `No matching geocoding results found in ${locationData.area}. Please refine the address text or place the pin manually on the map.`
+        );
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Address search failed. Please try again.');
+    } finally {
+      setIsSearchingAddress(false);
+    }
+  };
+
+  const handleSelectSuggestion = (suggestion: GeocodingSuggestion) => {
+    const [longitude, latitude] = suggestion.center;
+
+    if (!resultMentionsArea(suggestion, locationData.area)) {
+      setGeocodingWarning(
+        `Notice: Selected result (${suggestion.placeName}) may be outside ${locationData.area}. Please verify or adjust the marker to the building.`
+      );
+    } else {
+      setGeocodingWarning(null);
+    }
+
+    const precisionInfo = getPrecisionLabel(suggestion.placeType);
+    const pub = computePublicCoordinates(latitude, longitude, precisionInfo.precision, locationData.area);
+
+    setLocationData({
+      area: locationData.area,
+      latitude,
+      longitude,
+      geohash: encodeGeohash(latitude, longitude),
+      precision: precisionInfo.precision,
+      publicLatitude: pub.publicLatitude,
+      publicLongitude: pub.publicLongitude,
+      publicLocationLabel: pub.publicLocationLabel,
+    });
+
+    setAddress(suggestion.placeName);
+    setAddressSuggestions([]);
+    setGeocodingSuccess(`Marker positioned at: ${suggestion.placeName}`);
+    setTimeout(() => setGeocodingSuccess(null), 4000);
+  };
 
   const availableAmenities = [
     'Solar Inverter Backup',
@@ -270,16 +331,150 @@ export const NewPropertyPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Full Physical Address</label>
-            <input
-              type="text"
-              required
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="e.g. Plot 18, Dambare Off-Campus Layout, Gwarzo Road"
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-            />
+          {/* Case Study Area & Typed Address Geocoding */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white pb-1 border-b border-slate-200 dark:border-slate-700">
+              <MapPin className="w-4 h-4 text-emerald-600" />
+              <span>Property Location & Address Geocoding</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Select Case-Study Area
+                </label>
+                <select
+                  value={locationData.area}
+                  onChange={(e) => {
+                    const newArea = e.target.value as HousingArea;
+                    const center = AREA_CENTERS[newArea];
+                    const pub = computePublicCoordinates(center.latitude, center.longitude, locationData.precision, newArea);
+                    setLocationData({
+                      area: newArea,
+                      latitude: center.latitude,
+                      longitude: center.longitude,
+                      geohash: encodeGeohash(center.latitude, center.longitude),
+                      precision: locationData.precision,
+                      publicLatitude: pub.publicLatitude,
+                      publicLongitude: pub.publicLongitude,
+                      publicLocationLabel: pub.publicLocationLabel,
+                    });
+                    setNeighbourhood(newArea);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-bold text-slate-800 dark:text-slate-200"
+                >
+                  <option value="Dambare">Dambare, Kano State, Nigeria</option>
+                  <option value="Rimin Gata">Rimin Gata, Kano State, Nigeria</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Full Property Address
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="e.g. Plot 18, Dambare Off-Campus Layout, Gwarzo Road"
+                    className="flex-1 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSearchAddress}
+                    disabled={isSearchingAddress}
+                    className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer flex-shrink-0"
+                  >
+                    {isSearchingAddress ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Search className="w-3.5 h-3.5" />
+                    )}
+                    <span>Search Address</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Geocoding Warning or Success */}
+            {geocodingWarning && (
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <span>{geocodingWarning}</span>
+              </div>
+            )}
+
+            {geocodingSuccess && (
+              <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>{geocodingSuccess}</span>
+              </div>
+            )}
+
+            {/* Search Results Suggestion List */}
+            {addressSuggestions.length > 0 && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+                <div className="px-3 py-2 bg-slate-100/70 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex justify-between items-center">
+                  <span>Search results ({addressSuggestions.length})</span>
+                  <span>Select matching location</span>
+                </div>
+                {addressSuggestions.map((item) => {
+                  const info = getPrecisionLabel(item.placeType);
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
+                          {item.placeName}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {info.label} • {locationData.area}, Kano State
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSuggestion(item)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs cursor-pointer flex-shrink-0"
+                      >
+                        Select
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Selected Location Details */}
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Selected Location
+                </span>
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <span>
+                    Latitude: <strong className="font-mono text-slate-900 dark:text-white">{locationData.latitude.toFixed(6)}</strong>
+                  </span>
+                  <span>
+                    Longitude: <strong className="font-mono text-slate-900 dark:text-white">{locationData.longitude.toFixed(6)}</strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    {locationData.precision === 'exact_building' ? 'Exact building' : 'Street-level / Nearby'}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsPinModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+              >
+                Adjust marker on map
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

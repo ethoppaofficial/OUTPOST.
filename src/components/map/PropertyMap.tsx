@@ -4,10 +4,11 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Property } from '../../domain/types';
 import {
   mapConfig,
-  OPEN_STREET_MAP_FALLBACK_STYLE,
   getEffectiveMapStyle,
   getEffectiveAttribution,
   subscribeToMapConfig,
+  getMaptilerApiKey,
+  applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { MapStyleSelector } from './MapStyleSelector';
 import { BUK_NEW_CAMPUS_GATE, AREA_CENTERS } from '../../domain/geoUtils';
@@ -62,12 +63,15 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
       setActiveStyleUrl(newStyle);
       setIsUsingFallback(false);
       setAttributionText(getEffectiveAttribution());
-      if (mapInstanceRef.current) {
+      if (mapInstanceRef.current && newStyle) {
         try {
           mapInstanceRef.current.setStyle(newStyle);
         } catch (e) {
           console.warn('Could not update map style dynamically:', e);
         }
+      }
+      if (mapInstanceRef.current) {
+        applyMapTilerBuildingsLayer(mapInstanceRef.current);
       }
     });
     return unsubscribe;
@@ -81,7 +85,12 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
     let map: maplibregl.Map | null = null;
 
     try {
-      const styleToLoad = isUsingFallback ? OPEN_STREET_MAP_FALLBACK_STYLE : activeStyleUrl;
+      const styleToLoad = activeStyleUrl;
+
+      if (!styleToLoad) {
+        setMapError('Map configuration is incomplete. Please contact the administrator.');
+        return;
+      }
 
       map = new maplibregl.Map({
         container: mapContainerRef.current,
@@ -101,6 +110,9 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         setMapLoaded(true);
         setMapError(null);
         map?.resize();
+        if (map) {
+          applyMapTilerBuildingsLayer(map);
+        }
       });
 
       map.on('error', (e) => {

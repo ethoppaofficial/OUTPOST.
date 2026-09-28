@@ -11,12 +11,15 @@ import {
 } from 'firebase/firestore';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { db } from '../../infrastructure/firebase/firebaseConfig';
+import { propertyService } from '../../application/services/propertyService';
 import {
-  getEffectiveMapStyle,
-  getEffectiveAttribution,
+  mapConfig,
+  getMaptilerApiKey,
   subscribeToMapConfig,
+  applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { MapStyleSelector } from './MapStyleSelector';
+import { AlertTriangle, MapPin, Building2, ExternalLink } from 'lucide-react';
 
 export type HousingArea = 'Dambare' | 'Rimin Gata';
 
@@ -37,8 +40,12 @@ export interface VerifiedMapProperty {
   pricePerSession?: number;
   currency?: string;
   availableSpaces?: number;
+  totalCapacity?: number;
   images?: string[];
   slug?: string;
+  fullAddress?: string;
+  nearestLandmark?: string;
+  directions?: string;
 }
 
 export interface StudentVerifiedPropertiesMapProps {
@@ -51,11 +58,6 @@ export interface StudentVerifiedPropertiesMapProps {
   >;
   onPropertyOpen?: (property: VerifiedMapProperty) => void;
 }
-
-const DEFAULT_STYLE_URL =
-  'https://tiles.openfreemap.org/styles/liberty';
-const DEFAULT_ATTRIBUTION =
-  '© OpenFreeMap, © OpenStreetMap contributors';
 
 function isValidCoordinate(latitude: unknown, longitude: unknown): boolean {
   return (
@@ -75,8 +77,7 @@ function toVerifiedProperty(
 ): VerifiedMapProperty | null {
   const data = snapshot.data();
 
-  // These checks are repeated client-side for defensive rendering. Firestore
-  // rules remain the authoritative access-control layer.
+  // Defensive validation: authoritative layer is Firestore rules
   if (
     data.verificationStatus !== 'approved' ||
     data.locationVerificationStatus !== 'verified' ||
@@ -101,35 +102,53 @@ function toVerifiedProperty(
     pricePerSession: typeof data.pricePerSession === 'number' ? data.pricePerSession : undefined,
     currency: data.currency ?? 'NGN',
     availableSpaces: typeof data.availableSpaces === 'number' ? data.availableSpaces : undefined,
+    totalCapacity: typeof data.totalCapacity === 'number' ? data.totalCapacity : undefined,
     images: Array.isArray(data.images) ? data.images.filter((item) => typeof item === 'string') : [],
     slug: data.slug,
+    fullAddress: data.fullAddress || data.address,
+    nearestLandmark: data.nearestLandmark,
+    directions: data.directions,
   };
 }
 
-function createPropertyMarker(property: VerifiedMapProperty): HTMLButtonElement {
-  const marker = document.createElement('button');
-  marker.type = 'button';
-  marker.className =
-    'outpost-property-marker h-8 w-8 rounded-full border-4 border-white bg-emerald-600 shadow-lg transition-transform hover:scale-110 focus:outline-none focus:ring-4 focus:ring-emerald-300';
-  marker.setAttribute('aria-label', `Open ${property.title}`);
-  marker.title = property.title;
-  return marker;
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
-function formatPrice(value?: number, currency = 'NGN'): string {
-  if (value === undefined) return 'Price on request';
+function createPropertyMarker(property: VerifiedMapProperty): HTMLButtonElement {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.className =
+    'outpost-map-pin h-8 w-8 rounded-full border-2 border-white bg-emerald-600 shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer flex items-center justify-center text-white';
+  element.setAttribute('aria-label', `Verified property: ${property.title}`);
+  element.innerHTML = `
+    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+      <circle cx="12" cy="10" r="3"/>
+    </svg>
+  `;
+  return element;
+}
+
+function formatPrice(price?: number, currency = 'NGN'): string {
+  if (typeof price !== 'number') return 'Contact landlord';
   return new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency,
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(price);
 }
 
 export const StudentVerifiedPropertiesMap: React.FC<
   StudentVerifiedPropertiesMapProps
 > = ({
   mapStyleUrl,
-  mapAttribution,
+  mapAttribution = mapConfig.attribution,
   initialArea = 'Dambare',
   caseStudyViewports,
   onPropertyOpen,
@@ -143,25 +162,22 @@ export const StudentVerifiedPropertiesMap: React.FC<
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMapKey, setHasMapKey] = useState(Boolean(getMaptilerApiKey()));
 
-  const [activeStyle, setActiveStyle] = useState<string | any>(
-    () => mapStyleUrl || getEffectiveMapStyle(),
-  );
-  const [activeAttribution, setActiveAttribution] = useState<string>(
-    () => mapAttribution || getEffectiveAttribution(),
-  );
+  const activeStyle = mapStyleUrl || mapConfig.styleUrl;
 
   useEffect(() => {
     const unsubscribe = subscribeToMapConfig(() => {
-      const nextStyle = getEffectiveMapStyle();
-      setActiveStyle(nextStyle);
-      setActiveAttribution(getEffectiveAttribution());
-      if (mapRef.current) {
+      setHasMapKey(Boolean(getMaptilerApiKey()));
+      if (mapRef.current && mapConfig.styleUrl) {
         try {
-          mapRef.current.setStyle(nextStyle);
+          mapRef.current.setStyle(mapConfig.styleUrl);
         } catch (e) {
           console.warn('Could not update map style dynamically:', e);
         }
+      }
+      if (mapRef.current) {
+        applyMapTilerBuildingsLayer(mapRef.current);
       }
     });
     return unsubscribe;
@@ -172,11 +188,52 @@ export const StudentVerifiedPropertiesMap: React.FC<
     [area, properties],
   );
 
-  // Firestore rules enforce this same public visibility contract. The query is
-  // intentionally limited to the two supported off-campus case-study areas.
+  // Firestore rules enforce this same public visibility contract.
   useEffect(() => {
     setLoading(true);
     setError(null);
+
+    const loadFallbackFromRepository = () => {
+      try {
+        const localProps = propertyService
+          .getAllProperties()
+          .filter(
+            (p) =>
+              p.verificationStatus === 'approved' &&
+              (p.locationVerificationStatus === 'verified' ||
+                p.location?.verificationStatus === 'verified') &&
+              p.isActive !== false &&
+              ['Dambare', 'Rimin Gata'].includes(p.area || p.location?.area || '') &&
+              isValidCoordinate(
+                p.publicLatitude ?? p.location?.publicLatitude,
+                p.publicLongitude ?? p.location?.publicLongitude
+              )
+          )
+          .map((p) => ({
+            id: p.id,
+            title: p.title,
+            area: (p.area || p.location?.area || 'Dambare') as HousingArea,
+            publicLatitude: (p.publicLatitude ?? p.location?.publicLatitude)!,
+            publicLongitude: (p.publicLongitude ?? p.location?.publicLongitude)!,
+            publicLocationPrecision: p.location?.precision,
+            publicLocationLabel: p.location?.publicLocationLabel,
+            propertyType: p.propertyType,
+            accommodationType: p.accommodationType,
+            pricePerSession: p.pricePerSession,
+            currency: 'NGN',
+            availableSpaces: p.availableSpaces,
+            totalCapacity: p.totalCapacity,
+            images: p.images,
+            slug: p.slug,
+            fullAddress: p.fullAddress || p.address,
+            nearestLandmark: p.nearestLandmark,
+            directions: p.directions,
+          }));
+        setProperties(localProps);
+      } catch (e) {
+        console.warn('Could not load fallback verified properties:', e);
+      }
+    };
 
     const propertiesQuery = query(
       collection(db, 'properties'),
@@ -193,18 +250,28 @@ export const StudentVerifiedPropertiesMap: React.FC<
         const next = snapshot.docs
           .map(toVerifiedProperty)
           .filter((property): property is VerifiedMapProperty => property !== null);
-        setProperties(next);
+        if (next.length > 0) {
+          setProperties(next);
+        } else {
+          loadFallbackFromRepository();
+        }
         setLoading(false);
       },
       () => {
-        setError('Verified accommodation could not be loaded. Please retry.');
+        loadFallbackFromRepository();
         setLoading(false);
       },
     );
   }, []);
 
+  // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
+
+    if (!activeStyle) {
+      setError('Map configuration is incomplete. Please contact the administrator.');
+      return;
+    }
 
     const viewport = caseStudyViewports[initialArea];
     const map = new maplibregl.Map({
@@ -218,8 +285,16 @@ export const StudentVerifiedPropertiesMap: React.FC<
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     mapRef.current = map;
 
+    map.on('load', () => {
+      applyMapTilerBuildingsLayer(map);
+    });
+
     const handleMapError = () => {
-      setError('The map tiles could not be loaded. The verified property list is still available.');
+      if (!getMaptilerApiKey()) {
+        setError('Map configuration is incomplete. Please contact the administrator.');
+      } else {
+        setError('The map tiles could not be loaded. The verified property list is still available.');
+      }
     };
     map.on('error', handleMapError);
 
@@ -231,8 +306,9 @@ export const StudentVerifiedPropertiesMap: React.FC<
       map.remove();
       mapRef.current = null;
     };
-  }, [caseStudyViewports, initialArea, mapStyleUrl]);
+  }, [caseStudyViewports, initialArea, activeStyle]);
 
+  // Handle area change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -241,6 +317,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
     map.flyTo({ center: viewport.center, zoom: viewport.zoom, essential: true });
   }, [area, caseStudyViewports]);
 
+  // Update Markers when properties change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -266,16 +343,33 @@ export const StudentVerifiedPropertiesMap: React.FC<
         return;
       }
 
+      const landmarkHtml = property.nearestLandmark
+        ? `<div class="text-[10px] text-slate-500">Landmark: <span class="text-slate-700 dark:text-slate-300 font-medium">${escapeHtml(property.nearestLandmark)}</span></div>`
+        : '';
+
+      const spacesHtml = property.availableSpaces !== undefined
+        ? `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">${property.availableSpaces} spaces left</span>`
+        : '';
+
+      const directionsHtml = property.directions
+        ? `<div class="text-[10px] text-slate-500 line-clamp-1 italic">${escapeHtml(property.directions)}</div>`
+        : '';
+
       const popup = new maplibregl.Popup({
         closeButton: true,
         closeOnClick: false,
         maxWidth: '280px',
       }).setHTML(`
-        <div class="p-2 space-y-1">
-          <strong class="text-xs font-bold text-slate-900 block">${escapeHtml(property.title)}</strong>
-          <div class="text-[11px] text-slate-500">${escapeHtml(property.area)}, Kano State</div>
-          <div class="text-xs font-bold text-emerald-600">${escapeHtml(formatPrice(property.pricePerSession, property.currency))}</div>
-          <button data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details mt-2 w-full py-1 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
+        <div class="p-2 space-y-1.5 text-left">
+          <strong class="text-xs font-bold text-slate-900 block leading-tight">${escapeHtml(property.title)}</strong>
+          <div class="text-[11px] text-slate-500 font-medium">${escapeHtml(property.area)}, Kano State</div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-bold text-emerald-600">${escapeHtml(formatPrice(property.pricePerSession, property.currency))}</span>
+            ${spacesHtml}
+          </div>
+          ${landmarkHtml}
+          ${directionsHtml}
+          <button data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details mt-2 w-full py-1.5 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
         </div>
       `);
 
@@ -300,6 +394,13 @@ export const StudentVerifiedPropertiesMap: React.FC<
       markersRef.current.set(property.id, marker);
       popupsRef.current.set(property.id, popup);
     });
+
+    // Fit map bounds to visible properties if more than 1 exists
+    if (visibleProperties.length > 1) {
+      const bounds = new maplibregl.LngLatBounds();
+      visibleProperties.forEach((p) => bounds.extend([p.publicLongitude, p.publicLatitude]));
+      map.fitBounds(bounds, { padding: 45, maxZoom: 16 });
+    }
   }, [onPropertyOpen, visibleProperties]);
 
   const selectProperty = (property: VerifiedMapProperty) => {
@@ -346,6 +447,14 @@ export const StudentVerifiedPropertiesMap: React.FC<
         </div>
       </div>
 
+      {/* Missing Key State */}
+      {!hasMapKey && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <span>Map configuration is incomplete. Please contact the administrator.</span>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
           {error}
@@ -353,10 +462,11 @@ export const StudentVerifiedPropertiesMap: React.FC<
       )}
 
       <div className="grid min-h-[560px] grid-cols-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:grid-cols-[minmax(0,1fr)_360px]">
+        {/* Map Canvas */}
         <div className="relative min-h-[420px] bg-slate-200 dark:bg-slate-800">
           <div ref={mapContainerRef} className="absolute inset-0" />
           <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-[10px] text-slate-600 shadow dark:bg-slate-900/90 dark:text-slate-300">
-            {activeAttribution}
+            {mapAttribution}
           </div>
           {loading && (
             <div className="absolute inset-0 grid place-items-center bg-white/60 dark:bg-slate-950/50">
@@ -367,6 +477,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
           )}
         </div>
 
+        {/* Listings Aside */}
         <aside className="max-h-[560px] overflow-y-auto border-t border-slate-200 dark:border-slate-800 lg:border-l lg:border-t-0">
           <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
             <p className="text-sm font-bold text-slate-900 dark:text-white">
@@ -379,61 +490,65 @@ export const StudentVerifiedPropertiesMap: React.FC<
 
           {!loading && visibleProperties.length === 0 && (
             <div className="p-5 text-sm text-slate-500 dark:text-slate-400">
-              No verified properties are currently available in {area}. Properties remain hidden until their public location is approved.
+              No verified properties are currently available in {area}. Properties remain hidden until their public location is approved by an administrator.
             </div>
           )}
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {visibleProperties.map((property) => (
-              <button
+              <li
                 key={property.id}
-                type="button"
                 onClick={() => selectProperty(property)}
-                className={`block w-full p-4 text-left transition hover:bg-emerald-50 dark:hover:bg-emerald-950/20 cursor-pointer ${
-                  selectedId === property.id ? 'bg-emerald-50 dark:bg-emerald-950/30' : ''
+                className={`p-4 transition cursor-pointer ${
+                  selectedId === property.id
+                    ? 'bg-emerald-50/70 dark:bg-emerald-950/30'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 }`}
               >
-                <div className="flex gap-3">
-                  {property.images?.[0] && (
-                    <img
-                      src={property.images[0]}
-                      alt=""
-                      className="h-16 w-16 rounded-lg object-cover"
-                      loading="lazy"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-bold text-slate-900 dark:text-white">
-                      {property.title}
-                    </h3>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      {property.publicLocationLabel || `${property.area}, Kano State`}
-                    </p>
-                    <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                      {formatPrice(property.pricePerSession, property.currency)}
-                    </p>
-                  </div>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    {property.title}
+                  </h3>
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">
+                    {formatPrice(property.pricePerSession, property.currency)}
+                  </span>
                 </div>
-              </button>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {property.propertyType ?? 'Hostel'} · {property.accommodationType ?? 'Student unit'}
+                </p>
+                {property.nearestLandmark && (
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                    📍 {property.nearestLandmark}
+                  </p>
+                )}
+                {property.directions && (
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 italic">
+                    "{property.directions}"
+                  </p>
+                )}
+                <div className="mt-3 flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">
+                    {property.availableSpaces !== undefined ? `${property.availableSpaces} spaces available` : 'Available'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPropertyOpen?.(property);
+                    }}
+                    className="font-bold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>View details</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </button>
+                </div>
+              </li>
             ))}
-          </div>
+          </ul>
         </aside>
       </div>
     </section>
   );
 };
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>'"]/g, (character) => {
-    const entities: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      "'": '&#39;',
-      '"': '&quot;',
-    };
-    return entities[character];
-  });
-}
 
 export default StudentVerifiedPropertiesMap;

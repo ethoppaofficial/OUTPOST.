@@ -1,4 +1,14 @@
-import { Property, PropertyType, AccommodationType, GenderPolicy, PropertyVerificationStatus, PropertyLocation, HousingArea } from '../../domain/types';
+import {
+  Property,
+  PropertyType,
+  AccommodationType,
+  GenderPolicy,
+  PropertyVerificationStatus,
+  PropertyLocation,
+  HousingArea,
+  LocationPrecision,
+  LocationSource,
+} from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { encodeGeohash, computePublicCoordinates, AREA_CENTERS } from '../../domain/geoUtils';
 
@@ -213,11 +223,125 @@ class PropertyService {
       landlordVerified: landlord?.verificationStatus === 'approved',
       slug,
       verificationStatus: 'pending', // submitted for admin approval
+      locationVerificationStatus: 'pending',
+      // Public coordinates are strictly held until administrator verification
+      publicLatitude: undefined,
+      publicLongitude: undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     return repository.createProperty(newProp);
+  }
+
+  public approvePropertyLocation(
+    propertyId: string,
+    adminId: string,
+    reviewedCoords?: { latitude: number; longitude: number; precision?: LocationPrecision }
+  ): Property {
+    const existing = repository.getPropertyById(propertyId);
+    if (!existing) throw new Error(`Property ${propertyId} not found`);
+
+    const lat = reviewedCoords?.latitude ?? existing.latitude ?? existing.location?.latitude;
+    const lng = reviewedCoords?.longitude ?? existing.longitude ?? existing.location?.longitude;
+    const prec = reviewedCoords?.precision ?? existing.locationPrecision ?? existing.location?.precision ?? 'nearby_building';
+    const area = existing.area || (existing.neighbourhood?.includes('Rimin') ? 'Rimin Gata' : 'Dambare');
+
+    if (lat === undefined || lng === undefined) {
+      throw new Error('Cannot approve property location without valid coordinates.');
+    }
+
+    const pub = computePublicCoordinates(lat, lng, prec, area, propertyId);
+    const now = new Date().toISOString();
+
+    const updatedLoc: PropertyLocation = {
+      ...(existing.location || {
+        id: `loc-${Date.now()}`,
+        propertyId,
+        locationId: existing.locationId || 'loc-dambare',
+        city: 'Kano',
+        state: 'Kano State',
+        country: 'Nigeria',
+        source: 'admin_adjusted' as LocationSource,
+        createdAt: now,
+      }),
+      area,
+      latitude: lat,
+      longitude: lng,
+      geohash: encodeGeohash(lat, lng),
+      precision: prec,
+      verificationStatus: 'verified',
+      locationVerificationStatus: 'verified',
+      publicLatitude: pub.publicLatitude,
+      publicLongitude: pub.publicLongitude,
+      publicLocationLabel: pub.publicLocationLabel,
+      reviewedBy: adminId,
+      reviewedAt: now,
+      locationReviewedBy: adminId,
+      locationReviewedAt: now,
+      updatedAt: now,
+    };
+
+    const updatedProperty: Property = {
+      ...existing,
+      location: updatedLoc,
+      latitude: lat,
+      longitude: lng,
+      publicLatitude: pub.publicLatitude,
+      publicLongitude: pub.publicLongitude,
+      locationPrecision: prec,
+      locationVerificationStatus: 'verified',
+      verificationStatus: 'approved',
+      isActive: true,
+      locationReviewedBy: adminId,
+      locationReviewedAt: now,
+      updatedAt: now,
+    };
+
+    return repository.updateProperty(updatedProperty);
+  }
+
+  public rejectPropertyLocation(
+    propertyId: string,
+    adminId: string,
+    reason: string
+  ): Property {
+    if (!reason || !reason.trim()) {
+      throw new Error('Rejection reason is required.');
+    }
+
+    const existing = repository.getPropertyById(propertyId);
+    if (!existing) throw new Error(`Property ${propertyId} not found`);
+
+    const now = new Date().toISOString();
+    const updatedProperty: Property = {
+      ...existing,
+      locationVerificationStatus: 'rejected',
+      locationReviewReason: reason.trim(),
+      locationReviewedBy: adminId,
+      locationReviewedAt: now,
+      publicLatitude: undefined,
+      publicLongitude: undefined,
+      updatedAt: now,
+    };
+
+    if (updatedProperty.location) {
+      updatedProperty.location = {
+        ...updatedProperty.location,
+        verificationStatus: 'rejected',
+        locationVerificationStatus: 'rejected',
+        publicLatitude: undefined,
+        publicLongitude: undefined,
+        reviewedBy: adminId,
+        reviewedAt: now,
+        locationReviewedBy: adminId,
+        locationReviewedAt: now,
+        locationReviewReason: reason.trim(),
+        updatedAt: now,
+      };
+    }
+
+    return repository.updateProperty(updatedProperty);
   }
 
   public updatePropertyLocation(propertyId: string, locationData: Partial<PropertyLocation>): Property {

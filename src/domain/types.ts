@@ -53,6 +53,18 @@ export type LocationPrecision =
   | 'street'
   | 'neighbourhood';
 
+export interface GeocodingSuggestion {
+  id: string;
+  placeName: string;
+  center: [number, number]; // [longitude, latitude]
+  longitude: number;
+  latitude: number;
+  relevance?: number;
+  placeType?: string[];
+  text?: string;
+  address?: string;
+}
+
 export interface PropertyLocationDetails {
   area: HousingArea;
   city: 'Kano' | string;
