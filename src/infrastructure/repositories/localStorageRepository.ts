@@ -143,12 +143,26 @@ export class LocalStorageRepository {
 
   public getActiveUserId(): string {
     const stored = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-    return stored ? JSON.parse(stored) : 'user-student-1';
+    if (!stored) return '';
+    try {
+      return JSON.parse(stored) || '';
+    } catch {
+      return '';
+    }
   }
 
   public setActiveUserId(userId: string): void {
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, JSON.stringify(userId));
+    if (!userId) {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    } else {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, JSON.stringify(userId));
+    }
     appEventBus.publish('userChanged', userId);
+  }
+
+  public clearActiveUserId(): void {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    appEventBus.publish('userChanged', '');
   }
 
   // Student Profiles

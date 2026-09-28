@@ -19,42 +19,87 @@ export interface AuthSession {
 class AuthService {
   public getCurrentUser(): User {
     const id = repository.getActiveUserId();
-    const user = repository.getUserById(id);
-    if (user) return user;
+    if (id) {
+      const user = repository.getUserById(id);
+      if (user) return user;
+    }
 
-    // Fallback to active student
-    const all = repository.getUsers();
-    const fallback = all.find((u) => u.role === 'student') || all[0];
-    if (fallback) {
-      repository.setActiveUserId(fallback.id);
-      return fallback;
+    if (auth.currentUser) {
+      const fbUser = auth.currentUser;
+      const byUid = repository.getUserById(fbUser.uid);
+      if (byUid) return byUid;
+      return {
+        id: fbUser.uid,
+        email: fbUser.email || '',
+        role: 'student',
+        accountStatus: 'active',
+        emailVerified: fbUser.emailVerified,
+        createdAt: new Date().toISOString(),
+      };
     }
 
     return {
-      id: 'user-student-1',
-      email: 'student@outpost.ng',
+      id: '',
+      email: '',
       role: 'student',
-      accountStatus: 'active',
-      emailVerified: true,
-      createdAt: new Date().toISOString(),
+      accountStatus: 'email_unverified',
+      emailVerified: false,
+      createdAt: '',
     };
   }
 
-  public getSession(): AuthSession {
-    const user = this.getCurrentUser();
-    let displayName = user.email;
+  public getAuthenticatedUser(): User | null {
+    const id = repository.getActiveUserId();
+    if (!id) {
+      if (auth.currentUser) {
+        return repository.getUserById(auth.currentUser.uid) || {
+          id: auth.currentUser.uid,
+          email: auth.currentUser.email || '',
+          role: 'student',
+          accountStatus: 'active',
+          emailVerified: auth.currentUser.emailVerified,
+          createdAt: new Date().toISOString(),
+        };
+      }
+      return null;
+    }
+    const user = repository.getUserById(id);
+    return user && user.id ? user : null;
+  }
 
-    if (user.role === 'student') {
-      const student = repository.getStudentProfile(user.id);
+  public isAuthenticated(): boolean {
+    return Boolean(this.getAuthenticatedUser());
+  }
+
+  public getSession(): AuthSession {
+    const authUser = this.getAuthenticatedUser();
+    if (!authUser) {
+      return {
+        user: {
+          id: '',
+          email: '',
+          role: 'student',
+          accountStatus: 'email_unverified',
+          emailVerified: false,
+          createdAt: '',
+        },
+        displayName: '',
+      };
+    }
+
+    let displayName = authUser.email;
+
+    if (authUser.role === 'student') {
+      const student = repository.getStudentProfile(authUser.id);
       if (student) displayName = student.fullName;
-    } else if (user.role === 'landlord') {
-      const landlord = repository.getLandlordProfile(user.id);
+    } else if (authUser.role === 'landlord') {
+      const landlord = repository.getLandlordProfile(authUser.id);
       if (landlord) displayName = landlord.legalName;
-    } else if (user.role === 'admin') {
+    } else if (authUser.role === 'admin') {
       displayName = 'Platform Administrator';
     }
 
-    return { user, displayName };
+    return { user: authUser, displayName };
   }
 
   /**
@@ -417,7 +462,7 @@ class AuthService {
     try {
       await fbSignOut(auth);
     } catch {}
-    repository.setActiveUserId('user-student-1');
+    repository.clearActiveUserId();
   }
 }
 

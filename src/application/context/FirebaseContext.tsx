@@ -143,6 +143,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           console.warn('Local user session setup notice:', err);
         }
       } else {
+        repository.clearActiveUserId();
         setCurrentUser(null);
       }
       setLoading(false);
@@ -159,8 +160,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const userDocRef = doc(db, 'users', user.uid);
       const snap = await getDoc(userDocRef);
 
-      let role = preferredRole;
-      if (
+      let role: UserRole = preferredRole === 'landlord' ? 'landlord' : 'student';
+      if (snap.exists() && snap.data()?.role) {
+        role = snap.data().role as UserRole;
+      } else if (
         user.email === 'admin@outpost.ng' ||
         user.email === 'ethoppaofficial@gmail.com' ||
         user.email === 'mrrex0312@gmail.com'
