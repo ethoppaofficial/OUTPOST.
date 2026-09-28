@@ -59,19 +59,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
+        let role: UserRole = 'student';
+        if (
+          user.email === 'admin@outpost.ng' ||
+          user.email === 'ethoppaofficial@gmail.com' ||
+          user.email === 'mrrex0312@gmail.com'
+        ) {
+          role = 'admin';
+        }
+
         // Sync user document in Firestore
         try {
           const userDocRef = doc(db, 'users', user.uid);
           const snap = await getDoc(userDocRef);
-
-          let role: UserRole = 'student';
-          if (
-            user.email === 'admin@outpost.ng' ||
-            user.email === 'ethoppaofficial@gmail.com' ||
-            user.email === 'mrrex0312@gmail.com'
-          ) {
-            role = 'admin';
-          }
 
           if (!snap.exists()) {
             await setDoc(userDocRef, {
@@ -79,6 +79,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               email: user.email || '',
               fullName: user.displayName || 'OUTPOST User',
               role,
+              accountStatus: 'active',
               avatarUrl: user.photoURL || '',
               isActive: true,
               emailVerified: user.emailVerified,
@@ -90,7 +91,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               role = data.role as UserRole;
             }
           }
+        } catch (err) {
+          console.warn('Firestore user profile sync notice:', err);
+        }
 
+        try {
           let localUser = repository.getUserById(user.uid);
           if (!localUser) {
             localUser = {
@@ -99,7 +104,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               role,
               accountStatus: 'active',
               emailVerified: user.emailVerified,
-              avatarUrl: user.photoURL || undefined,
+              ...(user.photoURL ? { avatarUrl: user.photoURL } : {}),
               createdAt: new Date().toISOString(),
             };
             await repository.createUser(localUser);
@@ -135,7 +140,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           repository.setActiveUserId(user.uid);
           setCurrentUser(localUser);
         } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+          console.warn('Local user session setup notice:', err);
         }
       } else {
         setCurrentUser(null);

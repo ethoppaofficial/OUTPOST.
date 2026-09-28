@@ -28,6 +28,25 @@ import {
   VerificationReviewStatus,
 } from '../../domain/types';
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      const cleaned: Record<string, any> = {};
+      for (const [k, v] of Object.entries(value as Record<string, any>)) {
+        if (v !== undefined) {
+          cleaned[k] = stripUndefined(v);
+        }
+      }
+      return cleaned as T;
+    }
+  }
+  return value;
+}
+
 export class FirebaseRepository extends LocalStorageRepository {
   private isLiveInitialized = false;
 
@@ -38,14 +57,34 @@ export class FirebaseRepository extends LocalStorageRepository {
     }
   }
 
+  private canSyncToFirestore(targetOwnerId?: string): boolean {
+    if (!auth.currentUser) return false;
+    if (!targetOwnerId) return true;
+    const email = auth.currentUser.email || '';
+    const isBootstrappedAdmin =
+      email === 'mrrex0312@gmail.com' ||
+      email === 'ethoppaofficial@gmail.com' ||
+      email === 'admin@outpost.ng';
+    return auth.currentUser.uid === targetOwnerId || isBootstrappedAdmin;
+  }
+
   public override async init(): Promise<void> {
     if (this.isLiveInitialized) return;
     this.isLiveInitialized = true;
 
     try {
-      // 1. Real-time Properties Listener: syncs any landlord listing or admin approval
-      onSnapshot(
+      // 1. Real-time Public Verified Properties Listener matching Firestore security rules
+      const publicPropsQuery = query(
         collection(db, 'properties'),
+        where('verificationStatus', '==', 'approved'),
+        where('locationVerificationStatus', '==', 'verified'),
+        where('area', 'in', ['Dambare', 'Rimin Gata']),
+        where('state', '==', 'Kano State'),
+        where('isActive', '==', true)
+      );
+
+      onSnapshot(
+        publicPropsQuery,
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             const prop = change.doc.data() as Property;
@@ -63,26 +102,6 @@ export class FirebaseRepository extends LocalStorageRepository {
           console.info('Firestore properties listener notice:', err.message);
         }
       );
-
-      // 2. Real-time Reservations Listener
-      onSnapshot(
-        collection(db, 'reservations'),
-        (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            const res = change.doc.data() as Reservation;
-            if (change.type === 'added' || change.type === 'modified') {
-              const reservations = this.getReservations();
-              const idx = reservations.findIndex((r) => r.id === res.id);
-              if (idx >= 0) {
-                reservations[idx] = res;
-              } else {
-                reservations.push(res);
-              }
-            }
-          });
-        },
-        () => {}
-      );
     } catch (e) {
       console.warn('Firebase init snapshot listeners notice:', e);
     }
@@ -91,12 +110,14 @@ export class FirebaseRepository extends LocalStorageRepository {
   // Authoritative Firestore User Creation & Sync
   public override createUser(user: User): User {
     const created = super.createUser(user);
+    if (!this.canSyncToFirestore(user.id)) return created;
+
     setDoc(
       doc(db, 'users', user.id),
-      {
+      stripUndefined({
         ...user,
         serverCreatedAt: serverTimestamp(),
-      },
+      }),
       { merge: true }
     ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${user.id}`));
     return created;
@@ -104,22 +125,26 @@ export class FirebaseRepository extends LocalStorageRepository {
 
   public override updateUser(user: User): User {
     const updated = super.updateUser(user);
-    updateDoc(doc(db, 'users', user.id), {
+    if (!this.canSyncToFirestore(user.id)) return updated;
+
+    updateDoc(doc(db, 'users', user.id), stripUndefined({
       ...user,
       updatedAt: serverTimestamp(),
-    }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${user.id}`));
+    })).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${user.id}`));
     return updated;
   }
 
   // Student Profiles & Documents
   public override saveStudentProfile(profile: StudentProfile): StudentProfile {
     const saved = super.saveStudentProfile(profile);
+    if (!this.canSyncToFirestore(profile.userId)) return saved;
+
     setDoc(
       doc(db, 'studentProfiles', profile.userId),
-      {
+      stripUndefined({
         ...profile,
         updatedAt: serverTimestamp(),
-      },
+      }),
       { merge: true }
     ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `studentProfiles/${profile.userId}`));
     return saved;
@@ -134,10 +159,12 @@ export class FirebaseRepository extends LocalStorageRepository {
     documentUrl: string;
   }): StudentVerificationDocument {
     const newDoc = super.addStudentDocument(docData);
-    setDoc(doc(db, 'studentVerificationDocuments', newDoc.id), {
+    if (!this.canSyncToFirestore(docData.studentId)) return newDoc;
+
+    setDoc(doc(db, 'studentVerificationDocuments', newDoc.id), stripUndefined({
       ...newDoc,
       serverUploadedAt: serverTimestamp(),
-    }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `studentVerificationDocuments/${newDoc.id}`));
+    })).catch((err) => handleFirestoreError(err, OperationType.WRITE, `studentVerificationDocuments/${newDoc.id}`));
     return newDoc;
   }
 
@@ -148,10 +175,10 @@ export class FirebaseRepository extends LocalStorageRepository {
     rejectionReason?: string
   ): StudentVerificationDocument | undefined {
     const reviewed = super.reviewStudentDocument(docId, status, reviewerId, rejectionReason);
-    if (reviewed) {
+    if (reviewed && this.canSyncToFirestore()) {
       updateDoc(doc(db, 'studentVerificationDocuments', docId), {
         status,
-        reviewerId,
+        reviewerId: auth.currentUser?.uid || reviewerId,
         reviewedAt: serverTimestamp(),
         rejectionReason: rejectionReason || null,
       }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `studentVerificationDocuments/${docId}`));
@@ -162,12 +189,14 @@ export class FirebaseRepository extends LocalStorageRepository {
   // Landlord Profiles & Verifications
   public override saveLandlordProfile(profile: LandlordProfile): LandlordProfile {
     const saved = super.saveLandlordProfile(profile);
+    if (!this.canSyncToFirestore(profile.userId)) return saved;
+
     setDoc(
       doc(db, 'landlordProfiles', profile.userId),
-      {
+      stripUndefined({
         ...profile,
         updatedAt: serverTimestamp(),
-      },
+      }),
       { merge: true }
     ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `landlordProfiles/${profile.userId}`));
     return saved;
@@ -180,12 +209,12 @@ export class FirebaseRepository extends LocalStorageRepository {
     reason?: string
   ): LandlordProfile | undefined {
     const reviewed = super.reviewLandlordVerification(userId, decision, reviewerId, reason);
-    if (reviewed) {
+    if (reviewed && this.canSyncToFirestore()) {
       updateDoc(doc(db, 'landlordProfiles', userId), {
         verificationStatus: decision,
         verifiedAt: decision === 'approved' ? serverTimestamp() : null,
         rejectionReason: reason || null,
-        reviewedBy: reviewerId,
+        reviewedBy: auth.currentUser?.uid || reviewerId,
       }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `landlordProfiles/${userId}`));
     }
     return reviewed;
@@ -194,19 +223,23 @@ export class FirebaseRepository extends LocalStorageRepository {
   // Properties
   public override createProperty(prop: Property): Property {
     const created = super.createProperty(prop);
-    setDoc(doc(db, 'properties', prop.id), {
+    if (!this.canSyncToFirestore(prop.landlordId)) return created;
+
+    setDoc(doc(db, 'properties', prop.id), stripUndefined({
       ...prop,
       serverCreatedAt: serverTimestamp(),
-    }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `properties/${prop.id}`));
+    })).catch((err) => handleFirestoreError(err, OperationType.WRITE, `properties/${prop.id}`));
     return created;
   }
 
   public override updateProperty(prop: Property): Property {
     const updated = super.updateProperty(prop);
-    setDoc(doc(db, 'properties', prop.id), {
+    if (!this.canSyncToFirestore(prop.landlordId)) return updated;
+
+    setDoc(doc(db, 'properties', prop.id), stripUndefined({
       ...prop,
       serverUpdatedAt: serverTimestamp(),
-    }, { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `properties/${prop.id}`));
+    }), { merge: true }).catch((err) => handleFirestoreError(err, OperationType.WRITE, `properties/${prop.id}`));
     return updated;
   }
 
@@ -218,23 +251,23 @@ export class FirebaseRepository extends LocalStorageRepository {
     groupId?: string
   ): { success: boolean; reservation?: Reservation; invoice?: any; error?: string } {
     const result = super.createReservation(studentId, propertyId, unitId, groupId);
-    if (result.success && result.reservation) {
+    if (result.success && result.reservation && this.canSyncToFirestore(studentId)) {
       const res = result.reservation;
-      setDoc(doc(db, 'reservations', res.id), {
+      setDoc(doc(db, 'reservations', res.id), stripUndefined({
         ...res,
         serverCreatedAt: serverTimestamp(),
-      }).catch((err) => console.warn('Reservation Firestore write error:', err));
+      })).catch((err) => console.warn('Reservation Firestore write error:', err));
 
       if (result.invoice) {
-        setDoc(doc(db, 'invoices', result.invoice.id), {
+        setDoc(doc(db, 'invoices', result.invoice.id), stripUndefined({
           ...result.invoice,
           serverCreatedAt: serverTimestamp(),
-        }).catch(() => {});
+        })).catch(() => {});
       }
 
       const prop = this.getPropertyById(propertyId);
-      if (prop) {
-        setDoc(doc(db, 'properties', propertyId), prop, { merge: true }).catch(() => {});
+      if (prop && this.canSyncToFirestore(prop.landlordId)) {
+        setDoc(doc(db, 'properties', propertyId), stripUndefined(prop), { merge: true }).catch(() => {});
       }
     }
     return result;
@@ -242,7 +275,7 @@ export class FirebaseRepository extends LocalStorageRepository {
 
   public override cancelReservation(reservationId: string, reason?: string): { success: boolean; message?: string } {
     const result = super.cancelReservation(reservationId, reason);
-    if (result.success) {
+    if (result.success && this.canSyncToFirestore()) {
       updateDoc(doc(db, 'reservations', reservationId), {
         status: 'cancelled',
         cancellationReason: reason || 'Cancelled by student',
@@ -255,11 +288,11 @@ export class FirebaseRepository extends LocalStorageRepository {
   // Payment Receipts
   public override uploadPaymentReceipt(receiptData: any): { success: boolean; receipt?: PaymentReceipt; error?: string } {
     const result = super.uploadPaymentReceipt(receiptData);
-    if (result.success && result.receipt) {
-      setDoc(doc(db, 'paymentReceipts', result.receipt.id), {
+    if (result.success && result.receipt && this.canSyncToFirestore(result.receipt.studentId)) {
+      setDoc(doc(db, 'paymentReceipts', result.receipt.id), stripUndefined({
         ...result.receipt,
         serverUploadedAt: serverTimestamp(),
-      }).catch(() => {});
+      })).catch(() => {});
 
       updateDoc(doc(db, 'reservations', result.receipt.reservationId), {
         status: 'receipt_submitted',
@@ -276,11 +309,11 @@ export class FirebaseRepository extends LocalStorageRepository {
     rejectionReason?: string
   ): { success: boolean; error?: string } {
     const result = super.reviewPaymentReceipt(receiptId, decision, landlordId, rejectionReason);
-    if (result.success) {
+    if (result.success && this.canSyncToFirestore(landlordId)) {
       updateDoc(doc(db, 'paymentReceipts', receiptId), {
         status: decision,
         reviewedAt: serverTimestamp(),
-        reviewedBy: landlordId,
+        reviewedBy: auth.currentUser?.uid || landlordId,
         rejectionReason: rejectionReason || null,
       }).catch(() => {});
 
@@ -304,20 +337,27 @@ export class FirebaseRepository extends LocalStorageRepository {
     options?: { replyTo?: MessageReplyReference; mentions?: MessageMention[] }
   ): ChatMessage {
     const message = super.sendMessage(conversationId, senderId, text, options);
-    setDoc(doc(db, 'messages', message.id), {
-      ...message,
-      serverCreatedAt: serverTimestamp(),
-    }).catch(() => {});
+    if (this.canSyncToFirestore(senderId)) {
+      setDoc(doc(db, 'messages', message.id), stripUndefined({
+        ...message,
+        serverCreatedAt: serverTimestamp(),
+      })).catch(() => {});
 
-    updateDoc(doc(db, 'conversations', conversationId), {
-      lastMessageText: text,
-      lastMessageTimestamp: serverTimestamp(),
-    }).catch(() => {});
+      updateDoc(doc(db, 'conversations', conversationId), {
+        lastMessageText: text,
+        lastMessageTimestamp: serverTimestamp(),
+      }).catch(() => {});
+    }
 
     return message;
   }
 
   public subscribeToMessages(conversationId: string, callback: (messages: ChatMessage[]) => void): () => void {
+    if (!auth.currentUser) {
+      callback(this.getMessages(conversationId));
+      return () => {};
+    }
+
     const q = query(
       collection(db, 'messages'),
       where('conversationId', '==', conversationId),
@@ -345,10 +385,12 @@ export class FirebaseRepository extends LocalStorageRepository {
   // Notifications
   public override createNotification(notification: Omit<AppNotification, 'id' | 'createdAt'>): AppNotification {
     const notif = super.createNotification(notification);
-    setDoc(doc(db, 'notifications', notif.id), {
-      ...notif,
-      serverCreatedAt: serverTimestamp(),
-    }).catch(() => {});
+    if (this.canSyncToFirestore(notification.userId)) {
+      setDoc(doc(db, 'notifications', notif.id), stripUndefined({
+        ...notif,
+        serverCreatedAt: serverTimestamp(),
+      })).catch(() => {});
+    }
     return notif;
   }
 }

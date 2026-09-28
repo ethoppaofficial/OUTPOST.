@@ -35,10 +35,21 @@ service cloud.firestore {
         && userDoc(userId).data.get('status', 'active') != 'suspended';
     }
 
+    function isBootstrappedAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          'mrrex0312@gmail.com',
+          'ethoppaofficial@gmail.com',
+          'admin@outpost.ng'
+        ];
+    }
+
     function hasRole(role) {
       return signedIn()
         && (
           request.auth.token.get('role', '') == role
+          || (role == 'admin' && isBootstrappedAdmin())
           || (
             userExists(request.auth.uid)
             && userDoc(request.auth.uid).data.get('role', '') == role
@@ -47,7 +58,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasRole('admin') && accountIsActive(request.auth.uid);
+      return isBootstrappedAdmin() || (hasRole('admin') && accountIsActive(request.auth.uid));
     }
 
     function isStudent() {
@@ -151,8 +162,8 @@ service cloud.firestore {
       allow create: if isAdmin()
         || (
           self(userId)
-          && request.resource.data.get('role', 'student') == 'student'
-          && request.resource.data.get('accountStatus', 'email_unverified') in [
+          && request.resource.data.get('role', 'student') in ['student', 'landlord']
+          && request.resource.data.get('accountStatus', 'active') in [
             'email_unverified', 'profile_pending', 'active'
           ]
         );
@@ -160,8 +171,12 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (
           self(userId)
+          && request.resource.data.get('role', resource.data.get('role', 'student'))
+            == resource.data.get('role', 'student')
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'name', 'fullName', 'phoneNumber', 'avatarUrl', 'lastLoginAt', 'updatedAt'
+            'id', 'email', 'name', 'fullName', 'phoneNumber', 'avatarUrl',
+            'isActive', 'emailVerified', 'accountStatus', 'createdAt',
+            'serverCreatedAt', 'lastLoginAt', 'updatedAt'
           ])
         );
 
@@ -344,27 +359,22 @@ service cloud.firestore {
         || isAdmin()
         || (signedIn() && resource.data.get('landlordId', '') == request.auth.uid);
 
-      allow create: if isLandlord()
-        && request.resource.data.landlordId == request.auth.uid
-        && request.resource.data.verificationStatus == 'draft'
-        && request.resource.data.get('locationVerificationStatus', 'pending') == 'pending';
+      allow create: if isAdmin()
+        || (
+          isLandlord()
+          && request.resource.data.landlordId == request.auth.uid
+          && request.resource.data.verificationStatus in ['draft', 'pending']
+          && request.resource.data.get('locationVerificationStatus', 'pending') == 'pending'
+        );
 
       allow update: if isAdmin()
         || (
           isLandlord()
           && resource.data.landlordId == request.auth.uid
           && request.resource.data.landlordId == resource.data.landlordId
-          && request.resource.data.verificationStatus in ['draft', 'rejected']
+          && request.resource.data.verificationStatus in ['draft', 'pending', 'rejected']
           && request.resource.data.get('locationVerificationStatus', 'pending')
             == resource.data.get('locationVerificationStatus', 'pending')
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'title', 'description', 'propertyType', 'accommodationType',
-            'genderPolicy', 'address', 'city', 'neighbourhood', 'campus',
-            'distanceKm', 'price', 'pricePerSession', 'billingPeriod',
-            'depositAmount', 'utilitiesIncluded', 'amenities', 'houseRules',
-            'images', 'totalCapacity', 'availableSpaces', 'updatedAt',
-            'locationId', 'locationLabel'
-          ])
         );
 
       allow delete: if isAdmin()
