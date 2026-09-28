@@ -104,7 +104,7 @@ export const NewGroupPage: React.FC = () => {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            placeholder="Introduce your study habits, target location, and expectations (e.g. quiet studying, non-smokers, looking around Akoka)."
+            placeholder="Introduce your study habits, target location, and expectations (e.g. quiet studying, non-smokers, looking around Dambare or Rimin Gata)."
             className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
           />
         </div>

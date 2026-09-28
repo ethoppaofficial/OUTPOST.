@@ -2,9 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { maplibregl } from '../../infrastructure/config/maplibreSetup';
 import type { Map, Marker, MapMouseEvent } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import {
+  getEffectiveMapStyle,
+  getEffectiveAttribution,
+  subscribeToMapConfig,
+} from '../../infrastructure/config/mapConfig';
 
 export type HousingArea = 'Dambare' | 'Rimin Gata';
-export type LocationSource = 'manual_pin' | 'device_gps' | 'geocoded_address';
+export type LocationSource =
+  | 'manual_pin'
+  | 'device_gps'
+  | 'address_search'
+  | 'geocoded_address';
 export type LocationPrecision =
   | 'exact_building'
   | 'nearby_building'
@@ -37,11 +46,6 @@ export interface LandlordPinPlacementMapModalProps {
   }) => Promise<string | undefined>;
 }
 
-const DEFAULT_STYLE_URL =
-  'https://tiles.openfreemap.org/styles/liberty';
-const DEFAULT_ATTRIBUTION =
-  '© OpenFreeMap, © OpenStreetMap contributors';
-
 function isValidCoordinate(latitude: number, longitude: number): boolean {
   return (
     Number.isFinite(latitude) &&
@@ -70,8 +74,8 @@ export const LandlordPinPlacementMapModal: React.FC<
   area,
   caseStudyViewport,
   initialLocation,
-  mapStyleUrl = DEFAULT_STYLE_URL,
-  mapAttribution = DEFAULT_ATTRIBUTION,
+  mapStyleUrl = getEffectiveMapStyle(),
+  mapAttribution = getEffectiveAttribution(),
   onClose,
   onConfirm,
   onReverseGeocode,

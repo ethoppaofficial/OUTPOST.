@@ -2,7 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { maplibregl, initMaplibreWorker } from '../../infrastructure/config/maplibreSetup';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
-import { mapConfig, OPEN_STREET_MAP_FALLBACK_STYLE } from '../../infrastructure/config/mapConfig';
+import {
+  mapConfig,
+  OPEN_STREET_MAP_FALLBACK_STYLE,
+  getEffectiveMapStyle,
+  subscribeToMapConfig,
+} from '../../infrastructure/config/mapConfig';
 import { AREA_CENTERS, BUK_NEW_CAMPUS_GATE, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
 import { MapPin, Shield, Info, Check, Navigation, AlertCircle } from 'lucide-react';
 
@@ -103,6 +108,19 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
       marker.remove();
       map.remove();
     };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToMapConfig(() => {
+      if (mapRef.current) {
+        try {
+          mapRef.current.setStyle(getEffectiveMapStyle());
+        } catch (e) {
+          console.warn('Could not update style in LandlordPinPicker', e);
+        }
+      }
+    });
+    return unsubscribe;
   }, []);
 
   const updateCoordinates = (

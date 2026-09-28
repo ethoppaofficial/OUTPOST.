@@ -13,7 +13,7 @@ export const RoommatePreferencesPage: React.FC = () => {
   const [minBudget, setMinBudget] = useState(initial?.minBudget || 300000);
   const [maxBudget, setMaxBudget] = useState(initial?.maxBudget || 650000);
   const [preferredNeighbourhoodsStr, setPreferredNeighbourhoodsStr] = useState(
-    initial?.preferredNeighbourhoods?.join(', ') || 'Akoka, Yaba, Abule-Oja'
+    initial?.preferredNeighbourhoods?.join(', ') || 'Dambare, Rimin Gata'
   );
   const [moveInPeriod, setMoveInPeriod] = useState<RoommatePreference['moveInPeriod']>(
     initial?.moveInPeriod || 'Immediate'
@@ -56,7 +56,7 @@ export const RoommatePreferencesPage: React.FC = () => {
       studentId: session.user.id,
       minBudget: Number(minBudget),
       maxBudget: Number(maxBudget),
-      preferredNeighbourhoods: neighbourhoods.length > 0 ? neighbourhoods : ['Akoka', 'Yaba'],
+      preferredNeighbourhoods: neighbourhoods.length > 0 ? neighbourhoods : ['Dambare', 'Rimin Gata'],
       moveInPeriod,
       studyHabits,
       sleepSchedule,
@@ -136,7 +136,7 @@ export const RoommatePreferencesPage: React.FC = () => {
                   type="text"
                   value={preferredNeighbourhoodsStr}
                   onChange={(e) => setPreferredNeighbourhoodsStr(e.target.value)}
-                  placeholder="e.g. Akoka, Yaba, Abule-Oja"
+                  placeholder="e.g. Dambare, Rimin Gata"
                   className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                 />
               </div>

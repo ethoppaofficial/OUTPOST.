@@ -209,7 +209,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
     const viewport = caseStudyViewports[initialArea];
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: mapStyleUrl,
+      style: activeStyle,
       center: viewport.center,
       zoom: viewport.zoom,
       attributionControl: false,
@@ -323,23 +323,26 @@ export const StudentVerifiedPropertiesMap: React.FC<
             Only approved properties with administrator-verified public locations are shown.
           </p>
         </div>
-        <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Case-study area">
-          {(['Dambare', 'Rimin Gata'] as HousingArea[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={area === item}
-              onClick={() => setArea(item)}
-              className={`rounded-lg px-3 py-2 text-sm font-semibold transition cursor-pointer ${
-                area === item
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-              }`}
-            >
-              {item}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <MapStyleSelector />
+          <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Case-study area">
+            {(['Dambare', 'Rimin Gata'] as HousingArea[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={area === item}
+                onClick={() => setArea(item)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition cursor-pointer ${
+                  area === item
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -353,7 +356,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
         <div className="relative min-h-[420px] bg-slate-200 dark:bg-slate-800">
           <div ref={mapContainerRef} className="absolute inset-0" />
           <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-[10px] text-slate-600 shadow dark:bg-slate-900/90 dark:text-slate-300">
-            {mapAttribution}
+            {activeAttribution}
           </div>
           {loading && (
             <div className="absolute inset-0 grid place-items-center bg-white/60 dark:bg-slate-950/50">

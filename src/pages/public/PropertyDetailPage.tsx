@@ -273,6 +273,52 @@ export const PropertyDetailPage: React.FC = () => {
               />
             </div>
 
+            {/* Address, Landmark & Directions Information */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white">
+                <Navigation className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Physical Address & Campus Transit Guide</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block">Address & Area</span>
+                  <p className="font-medium text-slate-800 dark:text-slate-200 mt-0.5">
+                    {property.fullAddress || property.address || `${property.neighbourhood}, Kano`}
+                  </p>
+                  {property.streetOrRoad && (
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Street: <span className="text-slate-700 dark:text-slate-300 font-medium">{property.streetOrRoad}</span>
+                    </p>
+                  )}
+                </div>
+
+                {property.nearestLandmark && (
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block">Nearest Landmark</span>
+                    <p className="font-medium text-slate-800 dark:text-slate-200 mt-0.5">
+                      {property.nearestLandmark}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {property.directions && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block">Written Directions from BUK Gate</span>
+                  <p className="text-slate-700 dark:text-slate-300 mt-0.5 leading-relaxed bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-700">
+                    {property.directions}
+                  </p>
+                </div>
+              )}
+
+              {property.locationNote && (
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">Access Note:</span> {property.locationNote}
+                </div>
+              )}
+            </div>
+
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex items-start gap-2.5">
               <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
               <div>

@@ -26,6 +26,7 @@ export const PropertyApprovalsPage: React.FC = () => {
       ? {
           ...prop.location,
           verificationStatus: 'verified' as const,
+          locationVerificationStatus: 'verified' as const,
           reviewedBy: 'user-admin-1',
           reviewedAt: new Date().toISOString(),
         }
@@ -33,6 +34,10 @@ export const PropertyApprovalsPage: React.FC = () => {
 
     propertyService.updateProperty(prop.id, {
       verificationStatus: 'approved',
+      locationVerificationStatus: 'verified',
+      isActive: true,
+      publicLatitude: prop.location?.publicLatitude ?? prop.publicLatitude,
+      publicLongitude: prop.location?.publicLongitude ?? prop.publicLongitude,
       location: updatedLocation,
     });
     setProperties(propertyService.getAllProperties());
@@ -146,6 +151,27 @@ export const PropertyApprovalsPage: React.FC = () => {
                     <span>Source: <strong className="text-slate-700 dark:text-slate-300">{loc.source}</strong></span>
                     <span>Public Label: <strong className="text-slate-700 dark:text-slate-300">{loc.publicLocationLabel}</strong></span>
                   </div>
+
+                  {(prop.streetOrRoad || prop.nearestLandmark || prop.directions) && (
+                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] space-y-1">
+                      {prop.streetOrRoad && (
+                        <div>
+                          <span className="text-slate-500">Street / Road:</span> <strong className="text-slate-800 dark:text-slate-200">{prop.streetOrRoad}</strong>
+                        </div>
+                      )}
+                      {prop.nearestLandmark && (
+                        <div>
+                          <span className="text-slate-500">Nearest Landmark:</span> <strong className="text-slate-800 dark:text-slate-200">{prop.nearestLandmark}</strong>
+                        </div>
+                      )}
+                      {prop.directions && (
+                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 mt-1">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300 block mb-0.5">Written Directions:</span>
+                          <span className="text-slate-600 dark:text-slate-400">{prop.directions}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Collapsible Mini MapLibre GL instance */}
                   {isMapExpanded && (

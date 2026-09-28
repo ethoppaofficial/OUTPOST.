@@ -1,19 +1,18 @@
 /**
- * OUTPOST MapLibre & MapTiler Configuration
+ * OUTPOST MapLibre & MapTiler Centralized Configuration
  *
- * Configures the map tile provider, vector style presets,
- * Google Maps visual matching (soft greens, bright yellow highways, detailed buildings),
- * and MapTiler Streets API key management.
+ * Configures the map tile provider, MapTiler Streets visual style,
+ * and key resolution.
  */
 
-// Closest visual match to Google Maps (No API key required)
-// Features identical soft greens for landscapes, bright yellows for major highways, and detailed building layouts.
-export const OPEN_FREE_MAP_BRIGHT_URL = 'https://tiles.openfreemap.org/styles/bright';
-export const OPEN_FREE_MAP_LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
+const envApiKey = (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim();
+
 export const MAPTILER_STREETS_BASE_URL = 'https://api.maptiler.com/maps/streets-v2/style.json?key=';
 
-// Default vector style URL
-export const DEFAULT_MAP_STYLE_URL = OPEN_FREE_MAP_BRIGHT_URL;
+// High-fidelity fallback vector style matching Google Maps palette
+// (soft greens for landscapes, bright yellows for highways, detailed building footprints)
+export const OPEN_FREE_MAP_BRIGHT_URL = 'https://tiles.openfreemap.org/styles/bright';
+export const OPEN_FREE_MAP_LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 // OpenStreetMap standard raster tile fallback style spec (MapLibre Style Specification v8)
 export const OPEN_STREET_MAP_FALLBACK_STYLE: any = {
@@ -61,7 +60,6 @@ export const MAP_STYLE_PRESETS: MapStylePreset[] = [
     getStyleUrl: (key) => {
       const activeKey = key || getMaptilerApiKey();
       if (!activeKey) {
-        // Graceful fallback to Bright (identical aesthetic without key)
         return OPEN_FREE_MAP_BRIGHT_URL;
       }
       return `${MAPTILER_STREETS_BASE_URL}${encodeURIComponent(activeKey.trim())}`;
@@ -110,7 +108,7 @@ export function subscribeToMapConfig(callback: () => void): () => void {
   };
 }
 
-function notifyListeners(): void {
+export function notifyMapConfigChanged(): void {
   listeners.forEach((fn) => {
     try {
       fn();
@@ -121,11 +119,10 @@ function notifyListeners(): void {
 }
 
 /**
- * Retrieve MapTiler API Key from Vite env or user localStorage
+ * Retrieve MapTiler API Key from Vite environment variable or user localStorage
  */
 export function getMaptilerApiKey(): string {
-  const envKey = (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim();
-  if (envKey) return envKey;
+  if (envApiKey) return envApiKey;
   try {
     return localStorage.getItem(LOCAL_STORAGE_KEY_MAPTILER)?.trim() || '';
   } catch {
@@ -134,7 +131,7 @@ export function getMaptilerApiKey(): string {
 }
 
 /**
- * Persist MapTiler API Key entered by user
+ * Persist user-entered MapTiler key and notify all active map instances
  */
 export function setMaptilerApiKey(key: string): void {
   try {
@@ -143,14 +140,21 @@ export function setMaptilerApiKey(key: string): void {
     } else {
       localStorage.removeItem(LOCAL_STORAGE_KEY_MAPTILER);
     }
-    notifyListeners();
+    notifyMapConfigChanged();
   } catch (err) {
     console.warn('Could not save MapTiler API key to localStorage', err);
   }
 }
 
 /**
- * Get selected style ID
+ * Check if a valid MapTiler API key is configured
+ */
+export function isMapTilerConfigured(): boolean {
+  return Boolean(getMaptilerApiKey());
+}
+
+/**
+ * Get active selected style ID
  */
 export function getActiveMapStyleId(): string {
   try {
@@ -162,76 +166,57 @@ export function getActiveMapStyleId(): string {
     // ignore
   }
 
-  // If user or env has MapTiler API key, prefer MapTiler Streets by default!
+  // If MapTiler key is configured, use MapTiler Streets by default
   if (getMaptilerApiKey()) {
     return 'maptiler-streets';
   }
-
-  // Otherwise default to the Google Maps visual match (Streets Bright)
   return 'streets-bright';
 }
 
 /**
- * Set selected style ID
+ * Set active selected style ID
  */
 export function setActiveMapStyleId(styleId: string): void {
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY_STYLE_ID, styleId);
-    notifyListeners();
+    notifyMapConfigChanged();
   } catch (err) {
     console.warn('Could not save style preference', err);
   }
 }
 
 /**
- * Get the currently resolved style URL (or style spec object)
+ * Get effective MapLibre style: MapTiler Streets if key present, else high-fidelity Bright vector style
  */
 export function getEffectiveMapStyle(): string | any {
-  // Check if an explicit VITE_MAP_STYLE_URL override is present in environment
-  const envStyleUrl = import.meta.env.VITE_MAP_STYLE_URL?.trim();
-  if (envStyleUrl && envStyleUrl !== 'https://demotiles.maplibre.org/style.json') {
-    return envStyleUrl;
-  }
-
   const activeId = getActiveMapStyleId();
-  const preset = MAP_STYLE_PRESETS.find((p) => p.id === activeId) || MAP_STYLE_PRESETS[1];
+  const preset = MAP_STYLE_PRESETS.find((p) => p.id === activeId) || MAP_STYLE_PRESETS[0];
   return preset.getStyleUrl(getMaptilerApiKey());
 }
 
-/**
- * Get the active attribution text
- */
 export function getEffectiveAttribution(): string {
   const activeId = getActiveMapStyleId();
   const preset = MAP_STYLE_PRESETS.find((p) => p.id === activeId);
-  return preset?.attribution || '© MapTiler © OpenMapTiles © OpenStreetMap contributors';
+  return preset?.attribution || '© MapTiler © OpenStreetMap contributors | OUTPOST BUK Corridor';
 }
 
-export interface MapConfig {
-  styleUrl: string;
-  attribution: string;
-  providerName: string;
-  hasCustomStyle: boolean;
-  defaultCenter: [number, number]; // [lng, lat]
-  defaultZoom: number;
-}
+/**
+ * Centralized map configuration object as specified in prompt:
+ * { apiKey, styleUrl, attribution, providerName }
+ */
+export const mapConfig = {
+  apiKey: envApiKey || undefined,
 
-export const mapConfig: MapConfig = {
-  get styleUrl() {
-    const style = getEffectiveMapStyle();
-    return typeof style === 'string' ? style : OPEN_FREE_MAP_BRIGHT_URL;
-  },
-  get attribution() {
-    return getEffectiveAttribution();
-  },
-  get providerName() {
-    const activeId = getActiveMapStyleId();
-    if (activeId === 'maptiler-streets') return 'MapTiler Streets';
-    if (activeId === 'streets-bright') return 'Streets Bright (Google Maps Style)';
-    return 'OpenFreeMap';
-  },
-  hasCustomStyle: true,
+  styleUrl: envApiKey
+    ? `${MAPTILER_STREETS_BASE_URL}${envApiKey}`
+    : OPEN_FREE_MAP_BRIGHT_URL,
+
+  attribution: '© MapTiler © OpenStreetMap contributors',
+
+  providerName: 'MapTiler',
+
   // Centered on Dambare / BUK New Campus corridor in Kano, Nigeria
-  defaultCenter: [8.4140, 11.9815], // [longitude, latitude]
+  // MapLibre format: [longitude, latitude]
+  defaultCenter: [8.4140, 11.9815] as [number, number],
   defaultZoom: 14.5,
 };

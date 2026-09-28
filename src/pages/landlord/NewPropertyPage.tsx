@@ -4,6 +4,7 @@ import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-re
 import { authService } from '../../application/services/authService';
 import { propertyService } from '../../application/services/propertyService';
 import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
+import { LandlordPinPlacementMapModal, PinLocationValue } from '../../components/map/LandlordPinPlacementMapModal';
 import { PropertyImageCaptureUpload } from '../../components/property/PropertyImageCaptureUpload';
 import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
@@ -18,6 +19,11 @@ export const NewPropertyPage: React.FC = () => {
   const [university, setUniversity] = useState('Bayero University Kano (BUK)');
   const [campus, setCampus] = useState('New Campus (Gwarzo Road)');
   const [address, setAddress] = useState('');
+  const [streetOrRoad, setStreetOrRoad] = useState('');
+  const [nearestLandmark, setNearestLandmark] = useState('');
+  const [directions, setDirections] = useState('');
+  const [locationNote, setLocationNote] = useState('');
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [neighbourhood, setNeighbourhood] = useState('Dambare');
   const [city, setCity] = useState('Kano');
   const [distanceKm, setDistanceKm] = useState(0.5);
@@ -127,18 +133,33 @@ export const NewPropertyPage: React.FC = () => {
       accommodationType,
       genderPolicy,
       address: address.trim(),
+      fullAddress: address.trim(),
+      streetOrRoad: streetOrRoad.trim(),
+      nearestLandmark: nearestLandmark.trim(),
+      directions: directions.trim(),
+      locationNote: locationNote.trim(),
+      area: locationData.area,
       city: city.trim(),
+      state: 'Kano State',
+      country: 'Nigeria',
       neighbourhood: locationData.area,
       locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
       campus: `${university} (${campus})`,
       university,
       distanceKm: Number(distanceKm),
       pricePerSession: Number(pricePerSession),
-      billingPeriod: 'per academic session',
+      billingPeriod: 'Academic Session (1 Year)',
       depositAmount: Number(depositAmount),
       utilitiesIncluded,
       totalCapacity: Number(roomCapacity),
       availableSpaces: Number(roomCapacity),
+      latitude: locationData.latitude,
+      longitude: locationData.longitude,
+      publicLatitude: locationData.publicLatitude,
+      publicLongitude: locationData.publicLongitude,
+      locationSource: 'manual_pin',
+      locationPrecision: locationData.precision,
+      locationVerificationStatus: 'pending',
       location: {
         id: `loc-${Date.now()}`,
         propertyId: '',
@@ -147,11 +168,17 @@ export const NewPropertyPage: React.FC = () => {
         city: 'Kano',
         state: 'Kano State',
         country: 'Nigeria',
+        fullAddress: address.trim(),
+        streetOrRoad: streetOrRoad.trim(),
+        nearestLandmark: nearestLandmark.trim(),
+        directions: directions.trim(),
+        locationNote: locationNote.trim(),
         latitude: locationData.latitude,
         longitude: locationData.longitude,
         geohash: locationData.geohash,
-        source: 'landlord_pin',
+        source: 'manual_pin',
         verificationStatus: 'pending',
+        locationVerificationStatus: 'pending',
         precision: locationData.precision,
         publicLatitude: locationData.publicLatitude,
         publicLongitude: locationData.publicLongitude,
@@ -255,11 +282,72 @@ export const NewPropertyPage: React.FC = () => {
             />
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Street / Road Name</label>
+              <input
+                type="text"
+                required
+                value={streetOrRoad}
+                onChange={(e) => setStreetOrRoad(e.target.value)}
+                placeholder="e.g. Gwarzo Road / Main Feeder Street"
+                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Nearest Landmark</label>
+              <input
+                type="text"
+                required
+                value={nearestLandmark}
+                onChange={(e) => setNearestLandmark(e.target.value)}
+                placeholder="e.g. Opposite BUK Old Gate / Beside Al-Hikma Pharmacy"
+                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="font-semibold text-slate-700 dark:text-slate-300">Written Directions for Students</label>
+            <textarea
+              rows={2}
+              required
+              value={directions}
+              onChange={(e) => setDirections(e.target.value)}
+              placeholder="e.g. From BUK New Campus gate, take a Keke towards Dambare market, turn left at second solar streetlight, white 2-storey hostel on right."
+              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="font-semibold text-slate-700 dark:text-slate-300">Gate / Compound Access Note (Optional)</label>
+            <input
+              type="text"
+              value={locationNote}
+              onChange={(e) => setLocationNote(e.target.value)}
+              placeholder="e.g. Gated compound with black sliding gate, 24/7 security guard at entrance"
+              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+            />
+          </div>
+
           {/* Interactive MapLibre Pin Placement */}
           <div className="space-y-2 pt-2">
-            <label className="font-semibold text-slate-700 dark:text-slate-300 block">
-              Property Map Location & Privacy
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="font-semibold text-slate-700 dark:text-slate-300 block">
+                Property Map Location & Privacy
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsPinModalOpen(true)}
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>Full Map Modal / GPS</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Drag the pin or click on the map to mark the property building location in {locationData.area}.
+            </p>
             <LandlordPinPicker
               initialArea={locationData.area}
               initialLatitude={locationData.latitude}
@@ -271,6 +359,45 @@ export const NewPropertyPage: React.FC = () => {
               }}
             />
           </div>
+
+          {/* Landlord Fullscreen Pin Placement Map Modal */}
+          <LandlordPinPlacementMapModal
+            isOpen={isPinModalOpen}
+            area={locationData.area}
+            caseStudyViewport={{
+              center: [
+                AREA_CENTERS[locationData.area]?.longitude || 8.4187,
+                AREA_CENTERS[locationData.area]?.latitude || 11.9842,
+              ],
+              zoom: 15,
+            }}
+            initialLocation={{
+              latitude: locationData.latitude,
+              longitude: locationData.longitude,
+              area: locationData.area,
+              precision: locationData.precision,
+              formattedAddress: address,
+            }}
+            onClose={() => setIsPinModalOpen(false)}
+            onConfirm={(newLoc: PinLocationValue) => {
+              const pub = computePublicCoordinates(newLoc.latitude, newLoc.longitude, newLoc.precision, newLoc.area);
+              setLocationData({
+                area: newLoc.area,
+                latitude: newLoc.latitude,
+                longitude: newLoc.longitude,
+                geohash: encodeGeohash(newLoc.latitude, newLoc.longitude),
+                precision: newLoc.precision,
+                publicLatitude: pub.publicLatitude,
+                publicLongitude: pub.publicLongitude,
+                publicLocationLabel: pub.publicLocationLabel,
+              });
+              if (newLoc.formattedAddress && !address) {
+                setAddress(newLoc.formattedAddress);
+              }
+              setNeighbourhood(newLoc.area);
+              setIsPinModalOpen(false);
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

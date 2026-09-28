@@ -605,6 +605,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40">
                   Dambare & Rimin Gata
                 </span>
+                <Link
+                  to="/map"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-xs ml-1"
+                  title="Explore BUK Verified Accommodations on Interactive Map"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Map</span>
+                </Link>
               </div>
             </div>
 

@@ -33,16 +33,19 @@ export type VerificationReviewStatus = 'pending' | 'approved' | 'rejected' | 're
 export type HousingArea = 'Dambare' | 'Rimin Gata';
 
 export type LocationSource =
+  | 'manual_pin'
+  | 'device_gps'
+  | 'address_search'
+  | 'admin_adjusted'
   | 'landlord_pin'
   | 'geocoded_address'
-  | 'admin_adjusted'
   | 'seed_demo';
 
 export type LocationVerificationStatus =
-  | 'not_submitted'
   | 'pending'
   | 'verified'
-  | 'rejected';
+  | 'rejected'
+  | 'not_submitted';
 
 export type LocationPrecision =
   | 'exact_building'
@@ -50,7 +53,47 @@ export type LocationPrecision =
   | 'street'
   | 'neighbourhood';
 
-export interface PropertyLocation {
+export interface PropertyLocationDetails {
+  area: HousingArea;
+  city: 'Kano' | string;
+  state: 'Kano State' | string;
+  country: 'Nigeria' | string;
+  fullAddress: string;
+  streetOrRoad: string;
+  nearestLandmark: string;
+  directions: string;
+  locationNote?: string;
+
+  // Coordinates use the standard geographic convention:
+  // latitude = north/south, longitude = east/west.
+  latitude?: number;
+  longitude?: number;
+  publicLatitude?: number;
+  publicLongitude?: number;
+  locationSource?: LocationSource;
+  locationPrecision?: LocationPrecision;
+
+  locationVerificationStatus: LocationVerificationStatus;
+  locationSubmittedAt?: string;
+  locationReviewedAt?: string;
+  locationReviewedBy?: string;
+  locationReviewReason?: string;
+}
+
+export interface LocationSubmissionInput {
+  area: HousingArea;
+  fullAddress: string;
+  streetOrRoad: string;
+  nearestLandmark: string;
+  directions: string;
+  locationNote?: string;
+  latitude: number;
+  longitude: number;
+  locationSource: LocationSource;
+  locationPrecision: LocationPrecision;
+}
+
+export interface PropertyLocation extends Partial<PropertyLocationDetails> {
   id: string;
   propertyId: string;
   locationId: string;
@@ -224,7 +267,7 @@ export interface UnitOrRoom {
   pricePerSession: number; // NGN
 }
 
-export interface Property {
+export interface Property extends Partial<PropertyLocationDetails> {
   id: string;
   locationId: string;
   location?: PropertyLocation;
@@ -244,7 +287,7 @@ export interface Property {
   university: string;
   distanceKm: number; // e.g. 0.4 km from campus gate
   pricePerSession: number; // NGN
-  billingPeriod: 'Academic Session (1 Year)' | 'Semester (6 Months)';
+  billingPeriod: 'Academic Session (1 Year)' | 'Semester (6 Months)' | string;
   depositAmount: number;
   utilitiesIncluded: boolean;
   amenities: string[];
@@ -253,6 +296,7 @@ export interface Property {
   totalCapacity: number;
   availableSpaces: number;
   verificationStatus: PropertyVerificationStatus;
+  isActive?: boolean;
   adminFeedback?: string;
   rooms: UnitOrRoom[];
   createdAt: string;
