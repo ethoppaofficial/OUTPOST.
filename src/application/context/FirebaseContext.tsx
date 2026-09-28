@@ -65,7 +65,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const snap = await getDoc(userDocRef);
 
           let role: UserRole = 'student';
-          if (user.email === 'admin@outpost.ng' || user.email === 'ethoppaofficial@gmail.com') {
+          if (
+            user.email === 'admin@outpost.ng' ||
+            user.email === 'ethoppaofficial@gmail.com' ||
+            user.email === 'mrrex0312@gmail.com'
+          ) {
             role = 'admin';
           }
 
@@ -151,7 +155,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const snap = await getDoc(userDocRef);
 
       let role = preferredRole;
-      if (user.email === 'admin@outpost.ng' || user.email === 'ethoppaofficial@gmail.com') {
+      if (
+        user.email === 'admin@outpost.ng' ||
+        user.email === 'ethoppaofficial@gmail.com' ||
+        user.email === 'mrrex0312@gmail.com'
+      ) {
         role = 'admin';
       }
 

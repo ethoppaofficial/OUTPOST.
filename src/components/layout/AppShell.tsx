@@ -478,37 +478,30 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         {session && (
           <div className="p-2.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50">
             {!collapsed ? (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 shadow-2xs">
-                  <img
-                    src={
-                      session.user.avatarUrl ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                    }
-                    alt={session.displayName}
-                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0"
-                  />
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                      {session.displayName}
-                    </span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                      {session.user.email}
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="p-1 text-slate-400 hover:text-rose-600 transition"
-                    title="Sign Out"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
+              <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 shadow-2xs">
+                <img
+                  src={
+                    session.user.avatarUrl ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
+                  }
+                  alt={session.displayName}
+                  className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0"
+                />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                    {session.displayName}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                    {session.user.email}
+                  </span>
                 </div>
-
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] text-slate-500 font-medium">Theme</span>
-                  <ThemeToggle />
-                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-1 text-slate-400 hover:text-rose-600 transition"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2">
@@ -713,10 +706,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 )}
               </div>
 
-              {/* Small screens theme toggle */}
-              <div className="lg:hidden">
-                <ThemeToggle />
-              </div>
+              {/* Theme Toggle */}
+              <ThemeToggle />
             </div>
           </div>
         </header>
