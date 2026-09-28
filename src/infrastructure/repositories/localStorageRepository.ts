@@ -111,7 +111,8 @@ export class LocalStorageRepository {
     save(STORAGE_KEYS.CONVERSATIONS, SEED_CONVERSATIONS);
     save(STORAGE_KEYS.MESSAGES, SEED_MESSAGES);
     save(STORAGE_KEYS.AUDIT_LOGS, SEED_AUDIT_LOGS);
-    save(STORAGE_KEYS.CURRENT_USER_ID, 'user-student-1'); // default to verified student
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    appEventBus.publish('userChanged', '');
   }
 
   // Auth & User Management

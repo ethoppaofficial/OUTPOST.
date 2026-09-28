@@ -54,11 +54,11 @@ export const RoommatesPage: React.FC = () => {
               Compatible Roommates
             </h1>
             <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
-              AI Scoring
+              Rule-Based Scoring
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Explainable compatibility rankings grounded on budget, sleep habits, neatness, and campus proximity
+            Explainable rule-based compatibility rankings grounded on budget, sleep habits, neatness, and campus proximity
           </p>
         </div>
 

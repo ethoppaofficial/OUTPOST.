@@ -83,7 +83,7 @@ export const RoommatePreferencesPage: React.FC = () => {
             Roommate Lifestyle & Compatibility Settings
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Our algorithmic matching engine weights your budget (25%), location (20%), move-in (15%), cleanliness (15%), and sleep schedule (15%).
+            Our explainable rule-based matching engine weights your budget (25%), location (20%), move-in (15%), cleanliness (15%), and sleep schedule (15%).
           </p>
         </div>
       </div>

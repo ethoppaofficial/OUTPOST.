@@ -44,362 +44,380 @@ import { UsersPage } from './pages/admin/UsersPage';
 import { DisputesPage } from './pages/admin/DisputesPage';
 import { ThemeProvider } from './application/context/ThemeContext';
 import { FirebaseProvider } from './application/context/FirebaseContext';
-import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
-import { configValidationError } from './infrastructure/config/appConfig';
 
 export default function App() {
-  if (configValidationError) {
-    return <ConfigErrorScreen />;
-  }
-
   return (
     <FirebaseProvider>
       <ThemeProvider>
         <BrowserRouter>
           <AppShell>
             <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<HomePage />} />
-          <Route path="/properties" element={<PropertiesPage />} />
-          <Route path="/properties/:id" element={<PropertyDetailPage />} />
-          <Route path="/map" element={<StudentHousingMapPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/unauthorized" element={<UnauthorizedPage />} />
+              {/* Public Routes */}
+              <Route path="/" element={<HomePage />} />
+              <Route path="/properties" element={<PropertiesPage />} />
+              <Route path="/properties/:id" element={<PropertyDetailPage />} />
+              <Route path="/map" element={<StudentHousingMapPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
-          {/* Student Routes */}
-          <Route
-            path="/student"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <StudentDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/dashboard"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <StudentDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/properties"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <PropertiesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/properties/:id"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <PropertyDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/verification"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <StudentVerificationPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/profile/verification"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <StudentVerificationPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/roommates"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <RoommatesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/roommates/preferences"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <RoommatePreferencesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/roommates/requests"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <RoommateRequestsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/search"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <UserSearchPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/user-search"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <UserSearchPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/new"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <NewGroupPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/:groupId"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/:groupId/members"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/:groupId/members/:userId"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/:groupId/settings"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/groups/:groupId/chat"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <GroupDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/reservations"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <ReservationsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/reservations/:reservationId"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <ReservationDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/invoices/:invoiceId"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <InvoicePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/chat"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/student/chat/:conversationId"
-            element={
-              <ProtectedRoute allowedRoles={['student']}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
+              {/* Student Routes */}
+              <Route
+                path="/student"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <StudentDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <StudentDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/profile"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <StudentVerificationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/properties"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <PropertiesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/properties/:id"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <PropertyDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/verification"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <StudentVerificationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/profile/verification"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <StudentVerificationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/roommates"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <RoommatesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/roommates/preferences"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <RoommatePreferencesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/roommate-preferences"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <RoommatePreferencesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/roommates/requests"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <RoommateRequestsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/roommate-requests"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <RoommateRequestsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/search"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <UserSearchPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/user-search"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <UserSearchPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/new"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <NewGroupPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/:groupId"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/:groupId/members"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/:groupId/members/:userId"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/:groupId/settings"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/groups/:groupId/chat"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <GroupDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/reservations"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <ReservationsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/reservations/:reservationId"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <ReservationDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/invoices/:invoiceId"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <InvoicePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/chat"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/student/chat/:conversationId"
+                element={
+                  <ProtectedRoute allowedRoles={['student']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Landlord Routes */}
-          <Route
-            path="/landlord"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <LandlordDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/dashboard"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <LandlordDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/properties"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <LandlordPropertiesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/properties/new"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <NewPropertyPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/properties/:propertyId/availability"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <ManageAvailabilityPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/receipts"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <LandlordReceiptsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/verification"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <LandlordVerificationPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/landlord/chat"
-            element={
-              <ProtectedRoute allowedRoles={['landlord']}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
+              {/* Landlord Routes */}
+              <Route
+                path="/landlord"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/properties"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordPropertiesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/properties/new"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <NewPropertyPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/properties/:propertyId/availability"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <ManageAvailabilityPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/receipts"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordReceiptsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/verification"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <LandlordVerificationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/landlord/chat"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Admin Routes */}
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/dashboard"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/verifications"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <VerificationQueuePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/landlord-verifications"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <VerificationQueuePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/properties"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <PropertyApprovalsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/property-verifications"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <PropertyApprovalsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <UsersPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/disputes"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <DisputesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/chat"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
+              {/* Admin Routes */}
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/dashboard"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/verifications"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <VerificationQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/landlord-verifications"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <VerificationQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/properties"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <PropertyApprovalsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/property-verifications"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <PropertyApprovalsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <UsersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/disputes"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <DisputesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/chat"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AppShell>
-    </BrowserRouter>
-  </ThemeProvider>
-</FirebaseProvider>
+              {/* Fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppShell>
+        </BrowserRouter>
+      </ThemeProvider>
+    </FirebaseProvider>
   );
 }

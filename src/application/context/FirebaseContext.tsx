@@ -7,7 +7,6 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, googleAuthProvider, testConnection } from '../../infrastructure/firebase/firebaseConfig';
-import { handleFirestoreError, OperationType } from '../../infrastructure/firebase/errorHandler';
 import { authService } from '../services/authService';
 import { repository } from '../../infrastructure/repositories';
 import { appConfig, configValidationError, BackendMode } from '../../infrastructure/config/appConfig';
@@ -21,8 +20,8 @@ interface FirebaseContextType {
   backendMode: BackendMode;
   isConfigValid: boolean;
   validationError?: string;
-  signInWithGoogle: (preferredRole?: UserRole) => Promise<{ success: boolean; error?: string }>;
-  signInWithEmail: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  signInWithGoogle: (preferredRole?: 'student' | 'landlord') => Promise<{ success: boolean; user?: User; error?: string }>;
+  signInWithEmail: (email: string, password?: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signOut: () => Promise<void>;
   firestoreDatabaseId: string;
 }
@@ -59,88 +58,51 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        let role: UserRole = 'student';
-        if (
-          user.email === 'admin@outpost.ng' ||
-          user.email === 'ethoppaofficial@gmail.com' ||
-          user.email === 'mrrex0312@gmail.com'
-        ) {
-          role = 'admin';
-        }
-
-        // Sync user document in Firestore
         try {
-          const userDocRef = doc(db, 'users', user.uid);
-          const snap = await getDoc(userDocRef);
+          const syncedUser = await authService.syncUserFromFirestore(user);
 
-          if (!snap.exists()) {
-            await setDoc(userDocRef, {
-              id: user.uid,
-              email: user.email || '',
-              fullName: user.displayName || 'OUTPOST User',
-              role,
-              accountStatus: 'active',
-              avatarUrl: user.photoURL || '',
-              isActive: true,
-              emailVerified: user.emailVerified,
-              createdAt: new Date().toISOString(),
+          if (syncedUser.accountStatus === 'suspended') {
+            await fbSignOut(auth);
+            repository.clearActiveUserId();
+            setCurrentUser(null);
+            setLoading(false);
+            return;
+          }
+
+          // Ensure initial profile record exists for new users without auto-verifying credentials
+          if (syncedUser.role === 'student' && !repository.getStudentProfile(user.uid)) {
+            repository.saveStudentProfile({
+              userId: user.uid,
+              fullName: user.displayName || syncedUser.fullName || 'OUTPOST Student',
+              phone: '',
+              registrationNumber: `BUK/PENDING/${user.uid.slice(0, 6).toUpperCase()}`,
+              institutionName: 'Bayero University Kano (BUK)',
+              university: 'Bayero University Kano (BUK)',
+              campus: 'New Campus (Gwarzo Road)',
+              studyLevel: 'Undergraduate (Year 1)',
+              programme: 'General Studies',
+              gender: 'Other',
+              preferredLocation: 'Dambare',
+              bio: 'BUK student member on OUTPOST.',
+              isProfileVerified: false,
             });
-          } else {
-            const data = snap.data();
-            if (data?.role) {
-              role = data.role as UserRole;
-            }
+          } else if (syncedUser.role === 'landlord' && !repository.getLandlordProfile(user.uid)) {
+            repository.saveLandlordProfile({
+              userId: user.uid,
+              legalName: user.displayName || syncedUser.fullName || 'Landlord Partner',
+              phone: '',
+              contactAddress: 'Gwarzo Road Corridor, Kano State',
+              idType: 'National ID (NIN)',
+              idReference: 'PENDING-SUBMISSION',
+              verificationStatus: 'not_started',
+              submittedAt: new Date().toISOString(),
+            });
           }
-        } catch (err) {
-          console.warn('Firestore user profile sync notice:', err);
-        }
 
-        try {
-          let localUser = repository.getUserById(user.uid);
-          if (!localUser) {
-            localUser = {
-              id: user.uid,
-              email: user.email || '',
-              role,
-              accountStatus: 'active',
-              emailVerified: user.emailVerified,
-              ...(user.photoURL ? { avatarUrl: user.photoURL } : {}),
-              createdAt: new Date().toISOString(),
-            };
-            await repository.createUser(localUser);
-
-            if (role === 'student') {
-              await repository.saveStudentProfile({
-                userId: user.uid,
-                fullName: user.displayName || 'OUTPOST Student',
-                phone: '+234 800 000 0000',
-                registrationNumber: `BUK/23/${user.uid.slice(0, 5).toUpperCase()}`,
-                university: 'Bayero University Kano (BUK)',
-                campus: 'New Campus (Gwarzo Road)',
-                studyLevel: 'Undergraduate',
-                programme: 'Computer Science',
-                gender: 'Other',
-                preferredLocation: 'Dambare',
-                bio: 'Authenticated student member.',
-                isProfileVerified: true,
-              });
-            } else if (role === 'landlord') {
-              await repository.saveLandlordProfile({
-                userId: user.uid,
-                legalName: user.displayName || 'Verified Landlord',
-                phone: '+234 800 000 0000',
-                contactAddress: 'Gwarzo Road, Kano, Nigeria',
-                idType: 'National ID (NIN)',
-                idReference: 'NIN-ONLINE-VERIFIED',
-                verificationStatus: 'approved',
-                submittedAt: new Date().toISOString(),
-              });
-            }
-          }
           repository.setActiveUserId(user.uid);
-          setCurrentUser(localUser);
+          setCurrentUser(syncedUser);
         } catch (err) {
-          console.warn('Local user session setup notice:', err);
+          console.warn('Session synchronization notice:', err);
         }
       } else {
         repository.clearActiveUserId();
@@ -152,7 +114,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsubscribe();
   }, []);
 
-  const signInWithGoogle = async (preferredRole: UserRole = 'student') => {
+  const signInWithGoogle = async (preferredRole: 'student' | 'landlord' = 'student') => {
     try {
       const result = await signInWithPopup(auth, googleAuthProvider);
       const user = result.user;
@@ -160,23 +122,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const userDocRef = doc(db, 'users', user.uid);
       const snap = await getDoc(userDocRef);
 
+      // Public sign-in may only initialize student or landlord; existing server role is preserved
       let role: UserRole = preferredRole === 'landlord' ? 'landlord' : 'student';
       if (snap.exists() && snap.data()?.role) {
         role = snap.data().role as UserRole;
-      } else if (
-        user.email === 'admin@outpost.ng' ||
-        user.email === 'ethoppaofficial@gmail.com' ||
-        user.email === 'mrrex0312@gmail.com'
-      ) {
-        role = 'admin';
       }
 
       if (!snap.exists()) {
         await setDoc(userDocRef, {
           id: user.uid,
           email: user.email || '',
-          fullName: user.displayName || 'Google User',
+          fullName: user.displayName || 'OUTPOST User',
           role,
+          accountStatus: 'active',
           avatarUrl: user.photoURL || '',
           isActive: true,
           emailVerified: user.emailVerified,
@@ -184,11 +142,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
       }
 
+      const syncedUser = await authService.syncUserFromFirestore(user);
+      if (syncedUser.accountStatus === 'suspended') {
+        await fbSignOut(auth);
+        repository.clearActiveUserId();
+        return { success: false, error: 'Your account has been suspended by an administrator.' };
+      }
+
       repository.setActiveUserId(user.uid);
-      return { success: true };
+      setCurrentUser(syncedUser);
+      return { success: true, user: syncedUser };
     } catch (error: any) {
       console.error('Google sign-in error:', error);
-      return { success: false, error: error?.message || 'Authentication failed.' };
+      return { success: false, error: error?.message || 'Google authentication failed.' };
     }
   };
 
@@ -198,7 +164,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const signOut = async () => {
     try {
-      await fbSignOut(auth);
       await authService.logout();
       setCurrentUser(null);
     } catch (err) {

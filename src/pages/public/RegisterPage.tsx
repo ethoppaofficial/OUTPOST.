@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { UserPlus, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
-import { UserRole } from '../../domain/types';
+import { configValidationError, isFirebaseMode } from '../../infrastructure/config/appConfig';
 
 export const RegisterPage: React.FC = () => {
   const [role, setRole] = useState<'student' | 'landlord'>('student');
@@ -29,8 +29,16 @@ export const RegisterPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
+  const configError = configValidationError;
+  const isFirebaseMisconfigured = isFirebaseMode() && Boolean(configError);
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isFirebaseMisconfigured) {
+      setError(configError || 'Firebase authentication is not configured.');
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
 
@@ -61,7 +69,7 @@ export const RegisterPage: React.FC = () => {
           password,
           legalName: legalName || fullName,
           phone,
-          contactAddress: address || 'Kano State, Nigeria',
+          contactAddress: address || 'Dambare / Rimin Gata, Kano State, Nigeria',
           idType,
           idReference,
           businessName,
@@ -88,11 +96,21 @@ export const RegisterPage: React.FC = () => {
           Create an OUTPOST Account
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Join Nigeria's trusted network of verified students and accredited landlords
+          Verified off-campus accommodation platform for Bayero University Kano (Dambare & Rimin Gata)
         </p>
       </div>
 
-      {/* Role Picker */}
+      {isFirebaseMisconfigured && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+          <div>
+            <span className="font-bold block">Firebase Authentication Unavailable</span>
+            <span>{configError}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Role Picker (Public registration strictly allows Student or Landlord only) */}
       <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-semibold">
         <button
           type="button"
@@ -173,6 +191,7 @@ export const RegisterPage: React.FC = () => {
               <input
                 type="password"
                 required
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
@@ -263,7 +282,7 @@ export const RegisterPage: React.FC = () => {
                       type="text"
                       value={businessName}
                       onChange={(e) => setBusinessName(e.target.value)}
-                      placeholder="e.g. Okafor Hostels Ltd"
+                      placeholder="e.g. Danbatta Student Lodges Ltd"
                       className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                     />
                   </div>
@@ -306,10 +325,11 @@ export const RegisterPage: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md flex items-center justify-center gap-2"
+              disabled={submitting || isFirebaseMisconfigured}
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition shadow-md flex items-center justify-center gap-2"
             >
               <UserPlus className="w-4 h-4" />
-              <span>Register & Continue to Verification</span>
+              <span>{submitting ? 'Creating Account...' : 'Register & Continue to Verification'}</span>
             </button>
           </form>
         )}

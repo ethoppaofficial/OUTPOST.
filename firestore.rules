@@ -35,21 +35,10 @@ service cloud.firestore {
         && userDoc(userId).data.get('status', 'active') != 'suspended';
     }
 
-    function isBootstrappedAdmin() {
-      return signedIn()
-        && request.auth.token.email_verified == true
-        && request.auth.token.email in [
-          'mrrex0312@gmail.com',
-          'ethoppaofficial@gmail.com',
-          'admin@outpost.ng'
-        ];
-    }
-
     function hasRole(role) {
       return signedIn()
         && (
           request.auth.token.get('role', '') == role
-          || (role == 'admin' && isBootstrappedAdmin())
           || (
             userExists(request.auth.uid)
             && userDoc(request.auth.uid).data.get('role', '') == role
@@ -58,7 +47,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isBootstrappedAdmin() || (hasRole('admin') && accountIsActive(request.auth.uid));
+      return hasRole('admin') && accountIsActive(request.auth.uid);
     }
 
     function isStudent() {
