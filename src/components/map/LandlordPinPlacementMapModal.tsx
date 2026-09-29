@@ -8,6 +8,7 @@ import {
   setMaptilerApiKey,
   isMapTilerConfigured,
   subscribeToMapConfig,
+  applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import {
   searchAddress,
@@ -341,6 +342,7 @@ export const LandlordPinPlacementMapModal: React.FC<
 
       map.on('load', () => {
         map.resize();
+        applyMapTilerBuildingsLayer(map);
       });
 
       return () => {

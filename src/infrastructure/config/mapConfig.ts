@@ -126,7 +126,13 @@ export function getEffectiveAttribution(): string {
  */
 export function applyMapTilerBuildingsLayer(map: any): void {
   const apiKey = getMaptilerApiKey();
-  if (!map || !map.isStyleLoaded || !map.isStyleLoaded()) {
+  if (!map) {
+    return;
+  }
+  if (map.isStyleLoaded && !map.isStyleLoaded()) {
+    map.once('styledata', () => {
+      applyMapTilerBuildingsLayer(map);
+    });
     return;
   }
 

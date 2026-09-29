@@ -10,7 +10,7 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
-  const { signInWithGoogle, connected, firebaseUser } = useFirebase();
+  const { signInWithGoogle, connected, firebaseUser, signInWithEmail } = useFirebase();
   const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -19,7 +19,7 @@ export const LoginPage: React.FC = () => {
     setSubmitting(true);
 
     try {
-      const result = await authService.loginWithFirebase(email, password);
+      const result = await signInWithEmail(email, password);
       if (result.success && result.user) {
         if (result.user.role === 'student') navigate('/student/dashboard');
         else if (result.user.role === 'landlord') navigate('/landlord/dashboard');
