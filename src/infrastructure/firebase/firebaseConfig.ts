@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions';
 import { appConfig } from '../config/appConfig';
 import firebaseConfigFile from '../../../firebase-applet-config.json';
 
@@ -13,6 +14,7 @@ export const firestoreDatabaseId = firebaseConfigFile.firestoreDatabaseId || app
 export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+export const functions = getFunctions(app, 'europe-west2');
 export const googleAuthProvider = new GoogleAuthProvider();
 
 export async function testConnection(): Promise<boolean> {

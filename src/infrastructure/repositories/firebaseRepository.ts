@@ -60,12 +60,9 @@ export class FirebaseRepository extends LocalStorageRepository {
   private canSyncToFirestore(targetOwnerId?: string): boolean {
     if (!auth.currentUser) return false;
     if (!targetOwnerId) return true;
-    const email = auth.currentUser.email || '';
-    const isBootstrappedAdmin =
-      email === 'mrrex0312@gmail.com' ||
-      email === 'ethoppaofficial@gmail.com' ||
-      email === 'admin@outpost.ng';
-    return auth.currentUser.uid === targetOwnerId || isBootstrappedAdmin;
+    // Admin operations use trusted callable functions. Client-side persistence
+    // only syncs records owned by the currently authenticated account.
+    return auth.currentUser.uid === targetOwnerId;
   }
 
   public override async init(): Promise<void> {

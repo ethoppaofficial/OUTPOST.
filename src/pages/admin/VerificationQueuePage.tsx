@@ -1,290 +1,92 @@
-import React, { useState } from 'react';
-import { ShieldCheck, CheckCircle2, XCircle, Clock, FileText, ExternalLink, AlertCircle } from 'lucide-react';
-import { verificationService } from '../../application/services/verificationService';
-import { authService } from '../../application/services/authService';
-import { StudentVerificationSubmission, LandlordVerificationSubmission } from '../../domain/types';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import React, { useEffect, useState } from 'react';
+import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle } from 'lucide-react';
+import { adminService, AdminRecord } from '../../application/services/adminService';
 import { Modal } from '../../components/ui/Modal';
 
+type Kind = 'student' | 'landlord';
+type Target = { kind: Kind; id: string; name: string };
+
+function maskIdentifier(value: unknown): string {
+  const identifier = String(value || '').trim();
+  if (!identifier) return 'Not supplied';
+  if (identifier.length <= 4) return '••••';
+  return `${'•'.repeat(Math.min(8, Math.max(4, identifier.length - 4)))}${identifier.slice(-4)}`;
+}
+
 export const VerificationQueuePage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'students' | 'landlords'>('students');
-  const [studentQueue, setStudentQueue] = useState<StudentVerificationSubmission[]>(() =>
-    verificationService.getPendingStudentVerifications()
-  );
-  const [landlordQueue, setLandlordQueue] = useState<LandlordVerificationSubmission[]>(() =>
-    verificationService.getPendingLandlordVerifications()
-  );
+  const [activeTab, setActiveTab] = useState<Kind>('student');
+  const [students, setStudents] = useState<AdminRecord[]>([]);
+  const [landlords, setLandlords] = useState<AdminRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [target, setTarget] = useState<Target | null>(null);
+  const [reason, setReason] = useState('');
 
-  const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [rejectTarget, setRejectTarget] = useState<{ type: 'student' | 'landlord'; id: string } | null>(null);
-  const [rejectReason, setRejectReason] = useState('Submitted document scan is unreadable or obscured.');
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-
-  const refreshQueues = () => {
-    setStudentQueue(verificationService.getPendingStudentVerifications());
-    setLandlordQueue(verificationService.getPendingLandlordVerifications());
+  const refresh = async () => {
+    const queue = await adminService.getVerificationQueues();
+    setStudents(queue.students);
+    setLandlords(queue.landlords);
   };
+  useEffect(() => {
+    let active = true;
+    adminService.getVerificationQueues().then((queue) => {
+      if (active) { setStudents(queue.students); setLandlords(queue.landlords); }
+    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load verification queues.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
-  const handleApproveStudent = (subId: string) => {
-    const res = verificationService.reviewStudentVerification(subId, 'approved', 'admin-super-1');
-    if (res.success) {
-      refreshQueues();
-      setActionSuccess('Student verification approved! Student badge assigned.');
-      setTimeout(() => setActionSuccess(null), 3000);
+  const decide = async (item: AdminRecord, kind: Kind, decision: 'approved' | 'rejected', rejectionReason = '') => {
+    const id = kind === 'student' ? item.id : item.userId || item.id;
+    setBusyId(id);
+    setError(null);
+    try {
+      await adminService.reviewVerification({ kind, targetId: id, decision, reason: rejectionReason || undefined });
+      await refresh();
+      setMessage(`${kind === 'student' ? 'Student' : 'Landlord'} verification ${decision}. The decision and notification were recorded.`);
+      setTarget(null);
+      setReason('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The verification decision could not be saved.');
+    } finally {
+      setBusyId(null);
     }
   };
 
-  const handleApproveLandlord = (subId: string) => {
-    const res = verificationService.reviewLandlordVerification(subId, 'approved', 'admin-super-1');
-    if (res.success) {
-      refreshQueues();
-      setActionSuccess('Landlord credentials verified! Gold shield badge awarded.');
-      setTimeout(() => setActionSuccess(null), 3000);
-    }
-  };
-
-  const handleRejectSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rejectTarget) return;
-
-    if (rejectTarget.type === 'student') {
-      verificationService.reviewStudentVerification(rejectTarget.id, 'rejected', 'admin-super-1', rejectReason);
-    } else {
-      verificationService.reviewLandlordVerification(rejectTarget.id, 'rejected', 'admin-super-1', rejectReason);
-    }
-
-    refreshQueues();
-    setRejectModalOpen(false);
-    setActionSuccess(`Verification rejected with feedback note.`);
-    setTimeout(() => setActionSuccess(null), 3000);
-  };
-
+  const queue = activeTab === 'student' ? students : landlords;
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-          Credential Verification Queue
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Review institutional student ID cards, matriculation records, NIN credentials, and hostel title deeds.
-        </p>
+      <header><h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review live Student and Landlord submissions. Landlord identity verification is separate from property verification.</p></header>
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30">{error}</div>}
+      {message && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30">{message}</div>}
+      <div className="flex rounded-xl bg-slate-100 p-1 text-sm font-semibold dark:bg-slate-800">
+        {(['student', 'landlord'] as Kind[]).map((kind) => <button key={kind} type="button" onClick={() => setActiveTab(kind)} className={`flex-1 rounded-lg py-2.5 capitalize ${activeTab === kind ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white' : 'text-slate-500'}`}>{kind} submissions ({kind === 'student' ? students.length : landlords.length})</button>)}
       </div>
-
-      {actionSuccess && (
-        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>{actionSuccess}</span>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex rounded-2xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-semibold">
-        <button
-          onClick={() => setActiveTab('students')}
-          className={`flex-1 py-2.5 rounded-xl transition ${
-            activeTab === 'students'
-              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-              : 'text-slate-500'
-          }`}
-        >
-          Student ID Submissions ({studentQueue.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('landlords')}
-          className={`flex-1 py-2.5 rounded-xl transition ${
-            activeTab === 'landlords'
-              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-              : 'text-slate-500'
-          }`}
-        >
-          Landlord KYC Submissions ({landlordQueue.length})
-        </button>
-      </div>
-
-      {/* Student List */}
-      {activeTab === 'students' && (
-        <div className="space-y-4">
-          {studentQueue.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400">
-              No pending student verifications in the queue.
+      {loading ? <p className="text-sm text-slate-500">Loading Firebase submissions…</p> : queue.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No pending {activeTab} submissions.</div> : <div className="space-y-4">
+        {queue.map((item) => {
+          const name = activeTab === 'student' ? item.fullName : item.legalName;
+          const id = activeTab === 'student' ? item.id : item.userId || item.id;
+          const documentUrl = item.documentUrl;
+          return <article key={id} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><FileCheck2 className="h-4 w-4 text-amber-600" /><h2 className="font-bold text-slate-900 dark:text-white">{name || (activeTab === 'student' ? 'Student' : 'Landlord')}</h2></div><p className="mt-1 text-xs text-slate-500">{activeTab === 'student' ? `${item.studentEmail || 'No email'} · ${item.registrationNumber || 'Registration number not supplied'}` : `${item.email || 'No email'} · ${item.businessName || 'Individual landlord'}`}</p></div><span className="w-fit rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">Pending review</span></div>
+            <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-xs dark:bg-slate-800/70 sm:grid-cols-2 lg:grid-cols-4">
+              {activeTab === 'student' ? <><div><span className="text-slate-500">University / campus</span><p className="mt-1 font-semibold">{[item.university, item.campus].filter(Boolean).join(' · ') || 'Not supplied'}</p></div><div><span className="text-slate-500">Programme / level</span><p className="mt-1 font-semibold">{[item.programme, item.studyLevel].filter(Boolean).join(' · ') || 'Not supplied'}</p></div><div><span className="text-slate-500">Document type</span><p className="mt-1 font-semibold">{item.documentType || 'Not supplied'}</p></div></> : <><div><span className="text-slate-500">Identity type</span><p className="mt-1 font-semibold">{item.idType || 'Not supplied'}</p></div><div><span className="text-slate-500">Reference (partially masked)</span><p className="mt-1 font-semibold">{maskIdentifier(item.idNumber)}</p></div><div><span className="text-slate-500">Ownership evidence</span><p className="mt-1 font-semibold">{item.ownershipDocType || 'Not supplied'}</p></div></>}
+              <div><span className="text-slate-500">Submitted</span><p className="mt-1 font-semibold">{item.submittedAt ? new Date(item.submittedAt).toLocaleString() : 'Date unavailable'}</p></div>
             </div>
-          ) : (
-            studentQueue.map((sub) => (
-              <div
-                key={sub.id}
-                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {sub.fullName}
-                    </h3>
-                    <div className="text-xs text-slate-500 font-mono">
-                      Matric: {sub.registrationNumber} • {sub.university} ({sub.campus})
-                    </div>
-                  </div>
-
-                  <span className="px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 text-xs font-semibold">
-                    Pending Review
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 text-xs">
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Programme:</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{sub.programme}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Study Level:</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{sub.studyLevel}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Institutional Email:</span>
-                    <span className="font-mono text-slate-800 dark:text-slate-200 truncate block">{sub.studentEmail}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Submitted At:</span>
-                    <span className="text-slate-600 dark:text-slate-400">{new Date(sub.submittedAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
-                  <span className="text-xs text-slate-400">
-                    Uploaded Doc: <span className="font-mono text-slate-600 dark:text-slate-300">student_id_card.png</span>
-                  </span>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        setRejectTarget({ type: 'student', id: sub.id });
-                        setRejectModalOpen(true);
-                      }}
-                      className="px-4 py-2 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-xs font-medium"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      onClick={() => handleApproveStudent(sub.id)}
-                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Approve & Grant Student Badge</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Landlord List */}
-      {activeTab === 'landlords' && (
-        <div className="space-y-4">
-          {landlordQueue.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400">
-              No pending landlord verifications in the queue.
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {documentUrl ? <a href={documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400"><ExternalLink className="h-3.5 w-3.5" />Open submitted evidence</a> : <span className="text-xs text-amber-700 dark:text-amber-300">No document link is stored for this submission.</span>}
+              <div className="flex gap-2"><button type="button" disabled={busyId === id} onClick={() => setTarget({ kind: activeTab, id, name: String(name || activeTab) })} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300"><XCircle className="mr-1 inline h-3.5 w-3.5" />Reject</button><button type="button" disabled={busyId === id} onClick={() => decide(item, activeTab, 'approved')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{busyId === id ? 'Saving…' : 'Approve'}</button></div>
             </div>
-          ) : (
-            landlordQueue.map((sub) => (
-              <div
-                key={sub.id}
-                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {sub.legalName}
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      {sub.businessName ? `${sub.businessName} • ` : ''}ID: {sub.idType} ({sub.idNumber})
-                    </p>
-                  </div>
-
-                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
-                    Pending KYC
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 text-xs">
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Proof of Ownership / Authority:</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{sub.ownershipDocType}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px] block">Submitted At:</span>
-                    <span className="text-slate-600 dark:text-slate-400">{new Date(sub.submittedAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
-                  <button
-                    onClick={() => {
-                      setRejectTarget({ type: 'landlord', id: sub.id });
-                      setRejectModalOpen(true);
-                    }}
-                    className="px-4 py-2 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-xs font-medium"
-                  >
-                    Reject KYC
-                  </button>
-                  <button
-                    onClick={() => handleApproveLandlord(sub.id)}
-                    className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Approve Landlord Verification</span>
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Rejection Modal */}
-      <Modal isOpen={rejectModalOpen} onClose={() => setRejectModalOpen(false)} title="Reject Verification Application">
-        <form onSubmit={handleRejectSubmit} className="space-y-4 text-xs">
-          <p className="text-slate-600 dark:text-slate-300">
-            Specify why this credential verification is being declined. The applicant will be able to review this and re-submit.
-          </p>
-
-          <div className="space-y-1.5">
-            <label className="font-semibold text-slate-700 dark:text-slate-300">Rejection Reason</label>
-            <select
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-            >
-              <option value="Submitted document scan is unreadable or obscured.">
-                Submitted document scan is unreadable or obscured.
-              </option>
-              <option value="Matriculation / registration number does not match institutional records.">
-                Matriculation / registration number does not match institutional records.
-              </option>
-              <option value="ID card validity expired or lacks required university seal.">
-                ID card validity expired or lacks required university seal.
-              </option>
-              <option value="Proof of property ownership address does not match hostel listing.">
-                Proof of property ownership address does not match hostel listing.
-              </option>
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setRejectModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold"
-            >
-              Confirm Rejection
-            </button>
-          </div>
+          </article>;
+        })}
+      </div>}
+      <Modal isOpen={!!target} onClose={() => { setTarget(null); setReason(''); }} title="Reject verification">
+        <form onSubmit={(event) => { event.preventDefault(); const item = (target?.kind === 'student' ? students : landlords).find((entry) => (target?.kind === 'student' ? entry.id : entry.userId || entry.id) === target?.id); if (target && item) void decide(item, target.kind, 'rejected', reason); }} className="space-y-4 text-sm">
+          <p className="text-slate-600 dark:text-slate-300">Provide a clear reason for rejecting <strong>{target?.name}</strong>. The reason will be recorded and sent to the account.</p>
+          <label className="block font-semibold">Rejection reason<textarea required minLength={5} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} rows={4} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800" /></label>
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setTarget(null)} className="rounded-lg px-3 py-2 text-xs font-semibold">Cancel</button><button disabled={!!busyId} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white">Confirm rejection</button></div>
         </form>
       </Modal>
     </div>

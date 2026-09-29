@@ -1,162 +1,82 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Building2, Users, AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react';
-import { adminService } from '../../application/services/adminService';
-import { verificationService } from '../../application/services/verificationService';
-import { propertyService } from '../../application/services/propertyService';
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, Clock3, FileCheck2, Receipt, ShieldCheck, Users } from 'lucide-react';
+import { adminService, AdminDashboardData } from '../../application/services/adminService';
+
+const cards = [
+  { key: 'totalStudents', label: 'Total students', icon: Users },
+  { key: 'totalLandlords', label: 'Total landlords', icon: Building2 },
+  { key: 'pendingLandlordVerifications', label: 'Landlord checks pending', icon: ShieldCheck },
+  { key: 'pendingStudentVerifications', label: 'Student checks pending', icon: FileCheck2 },
+  { key: 'pendingPropertyVerifications', label: 'Property reviews pending', icon: Clock3 },
+  { key: 'activeProperties', label: 'Active properties', icon: Building2 },
+  { key: 'activeReservations', label: 'Active reservations', icon: Receipt },
+  { key: 'pendingReceiptVerifications', label: 'Receipts pending review', icon: Clock3 },
+  { key: 'expiredReservations', label: 'Expired reservations', icon: AlertTriangle },
+] as const;
+
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : 'Could not load live administrator data. Check your access and Firebase configuration.';
+}
 
 export const AdminDashboard: React.FC = () => {
-  const metrics = adminService.getAdminMetrics();
-  const pendingStudents = verificationService.getPendingStudentVerifications();
-  const pendingLandlords = verificationService.getPendingLandlordVerifications();
-  const pendingProperties = propertyService.getAllProperties().filter((p) => p.verificationStatus === 'pending');
+  const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    adminService.getDashboardData().then((result) => {
+      if (active) setData(result);
+    }).catch((cause) => {
+      if (active) setError(errorText(cause));
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
 
+  const metrics = data?.metrics;
+  const needsAction = metrics ? metrics.pendingLandlordVerifications + metrics.pendingStudentVerifications + metrics.pendingPropertyVerifications + metrics.pendingReceiptVerifications : 0;
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-7">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-mono text-[10px] font-bold uppercase tracking-wider">
-              Super Admin Console
-            </span>
-          </div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1">
-            Platform Verification & Moderation Hub
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Enforce trust, authenticate Nigerian student IDs, inspect hostel listings, and supervise 7-day reservation holds.
-          </p>
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-purple-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"><ShieldCheck className="h-3.5 w-3.5" /> Administrator workspace</span>
+          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 dark:text-white">Platform operations</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Live overview of OUTPOST student housing around BUK New Site.</p>
         </div>
+        <Link to="/admin/verifications" className="inline-flex items-center gap-2 self-start rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500">Open review queue <ArrowRight className="h-4 w-4" /></Link>
+      </header>
 
-        <Link
-          to="/admin/verifications"
-          className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>Open Verification Queue</span>
-        </Link>
-      </div>
-
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-1">
-          <div className="flex justify-between items-center text-slate-400">
-            <span className="text-xs font-medium">Total Registered</span>
-            <Users className="w-4 h-4 text-blue-500" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white">
-            {metrics.totalStudents + metrics.totalLandlords}
-          </div>
-          <div className="text-[11px] text-slate-400">
-            {metrics.totalStudents} students • {metrics.totalLandlords} landlords
-          </div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-1">
-          <div className="flex justify-between items-center text-slate-400">
-            <span className="text-xs font-medium">Pending Verifications</span>
-            <Clock className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
-            {metrics.pendingVerifications}
-          </div>
-          <div className="text-[11px] text-slate-400">Student & Landlord KYC</div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-1">
-          <div className="flex justify-between items-center text-slate-400">
-            <span className="text-xs font-medium">Hostel Listings</span>
-            <Building2 className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white">
-            {metrics.totalProperties}
-          </div>
-          <div className="text-[11px] text-slate-400">
-            {pendingProperties.length} pending moderation
-          </div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-1">
-          <div className="flex justify-between items-center text-slate-400">
-            <span className="text-xs font-medium">Active Bookings & Holds</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-            {metrics.activeReservations}
-          </div>
-          <div className="text-[11px] text-slate-400">7-day hold cycle</div>
-        </div>
-      </div>
-
-      {/* Review Pipelines Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Student Verification Queue */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Student ID Queue</h3>
-              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
-                {pendingStudents.length} Pending
-              </span>
+      {error && <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>}
+      {loading && <p className="text-sm text-slate-500">Loading live Firebase data…</p>}
+      {metrics && <>
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Platform metrics">
+          {cards.map(({ key, label, icon: Icon }) => (
+            <div key={key} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center justify-between"><span className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span><Icon className="h-4 w-4 text-emerald-600" /></div>
+              <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{metrics[key].toLocaleString()}</div>
             </div>
-            <p className="text-xs text-slate-500">
-              Institutional portal cross-referencing and student card validation.
-            </p>
-          </div>
+          ))}
+        </section>
 
-          <Link
-            to="/admin/verifications"
-            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold text-center block"
-          >
-            Review Students
-          </Link>
-        </div>
-
-        {/* Landlord Verification Queue */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Landlord KYC Queue</h3>
-              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
-                {pendingLandlords.length} Pending
-              </span>
+        <section className="grid gap-5 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="flex items-center gap-2 font-bold text-slate-900 dark:text-white"><AlertTriangle className="h-4 w-4 text-amber-500" /> Action required</h2>
+            <p className="mt-1 text-sm text-slate-500">{needsAction ? `${needsAction} item${needsAction === 1 ? '' : 's'} are awaiting review.` : 'No pending verification or receipt queues.'}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link to="/admin/verifications" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold dark:bg-slate-800">Verifications</Link>
+              <Link to="/admin/properties" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold dark:bg-slate-800">Properties</Link>
+              <Link to="/admin/reservations" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold dark:bg-slate-800">Reservations</Link>
             </div>
-            <p className="text-xs text-slate-500">
-              NIN slip, utility bills, and property ownership deeds review.
-            </p>
           </div>
-
-          <Link
-            to="/admin/verifications"
-            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold text-center block"
-          >
-            Review Landlords
-          </Link>
-        </div>
-
-        {/* Property Listing Moderation */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Hostel Moderation</h3>
-              <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-bold">
-                {pendingProperties.length} Pending
-              </span>
-            </div>
-            <p className="text-xs text-slate-500">
-              Campus proximity, pricing accuracy, and photo validation.
-            </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between"><h2 className="font-bold text-slate-900 dark:text-white">Recent audited activity</h2><Link to="/admin/audit-logs" className="text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400">View logs</Link></div>
+            {!data?.recentActivity.length ? <p className="mt-4 text-sm text-slate-500">No recorded activity yet.</p> : <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">{data.recentActivity.slice(0, 5).map((item) => <li key={item.id} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{item.action.replaceAll('_', ' ')}</p><p className="mt-0.5 text-xs text-slate-500">{item.actorName} · {item.targetEntity} {item.targetId}</p></div><span className="shrink-0 text-[11px] text-slate-400">{item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}</span></div></li>)}</ul>}
           </div>
-
-          <Link
-            to="/admin/properties"
-            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 text-xs font-semibold text-center block"
-          >
-            Inspect Accommodations
-          </Link>
-        </div>
-      </div>
+        </section>
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"><CheckCircle2 className="h-4 w-4" /> Dashboard figures are loaded from Firebase; no seeded demo metrics are shown here.</div>
+      </>}
     </div>
   );
 };

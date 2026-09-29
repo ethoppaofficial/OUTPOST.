@@ -10,28 +10,28 @@ import {
   Bell,
   ShieldCheck,
   Search,
+  User,
   Menu,
   X,
   FileCheck,
   CalendarCheck,
   LogOut,
-  LogIn,
-  UserPlus,
   Layers,
   MapPin,
+  ChevronRight,
   ChevronDown,
+  Sparkles,
+  CheckCircle2,
+  HelpCircle,
   AlertTriangle,
   PanelLeftClose,
   PanelLeftOpen,
-  MailCheck,
-  RefreshCw,
+  Settings,
 } from 'lucide-react';
-import { authService, AuthSession } from '../../application/services/authService';
 import { notificationService } from '../../application/services/notificationService';
 import { chatService } from '../../application/services/chatService';
-import { useFirebase } from '../../application/context/FirebaseContext';
-import { appEventBus } from '../../infrastructure/events/eventBus';
 import { ThemeToggle } from './ThemeToggle';
+import { useFirebase } from '../../application/context/FirebaseContext';
 
 export interface NavItem {
   id: string;
@@ -53,14 +53,17 @@ interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { currentUser, isConfigValid, validationError } = useFirebase();
-  const [session, setSession] = useState<AuthSession>(() => authService.getSession());
+  const { currentUser, signOut } = useFirebase();
+  const session = currentUser
+    ? {
+        user: currentUser,
+        displayName: currentUser.fullName || currentUser.name || currentUser.email,
+      }
+    : null;
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifsDropdownOpen, setNotifsDropdownOpen] = useState(false);
-  const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
-  const [resendingEmail, setResendingEmail] = useState(false);
 
   // Expanded and collapsed desktop sidebar modes with persisted preference
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -73,10 +76,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
   // Track expanded groups in sidebar
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    public: true,
     housing: true,
     roommates: true,
-    account: true,
     workspace: true,
     settlements: true,
   });
@@ -84,6 +85,16 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const prevTriggerRef = useRef<HTMLElement | null>(null);
+
+  const refreshSession = () => {
+    if (!currentUser?.id) {
+      setUnreadNotifs(0);
+      setUnreadMessages(0);
+      return;
+    }
+    setUnreadNotifs(notificationService.getUnreadCount(currentUser.id));
+    setUnreadMessages(chatService.getUnreadMessageCount(currentUser.id));
+  };
 
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => ({
@@ -104,31 +115,15 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     });
   };
 
-  const refreshSession = () => {
-    const s = authService.getSession();
-    setSession(s);
-    if (s?.user?.id) {
-      setUnreadNotifs(notificationService.getUnreadCount(s.user.id));
-      setUnreadMessages(chatService.getUnreadMessageCount(s.user.id));
-    } else {
-      setUnreadNotifs(0);
-      setUnreadMessages(0);
-    }
-  };
-
-  // Synchronize initial session & listen to auth/eventBus changes
+  // Notification badges follow the real Firebase-authenticated account.
   useEffect(() => {
     refreshSession();
-    const unsubEvent = appEventBus.subscribe('userChanged', () => {
-      refreshSession();
-    });
-    return () => unsubEvent();
-  }, [currentUser?.id, currentUser?.role, currentUser?.emailVerified]);
+  }, [currentUser?.id]);
 
-  // Listen to notification & chat subscriptions when authenticated
+  // Listen to persona/session changes & notification subscriptions
   useEffect(() => {
-    const currentUserId = session?.user?.id;
-    if (!currentUserId) return;
+    if (!session?.user?.id) return;
+    const currentUserId = session.user.id;
 
     const unsubNotifs = notificationService.subscribeToNotifications(currentUserId, () => {
       setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
@@ -164,69 +159,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     }
   }, [mobileMenuOpen]);
 
-  // Close mobile drawer and dropdowns on route transition
+  // Close mobile drawer on route transition
   useEffect(() => {
     setMobileMenuOpen(false);
-    setNotifsDropdownOpen(false);
   }, [location.pathname]);
 
   const handleLogout = async () => {
-    await authService.logout();
-    refreshSession();
+    await signOut();
     navigate('/');
   };
 
-  const handleResendVerification = async () => {
-    setResendingEmail(true);
-    setVerificationFeedback(null);
-    const res = await authService.resendVerificationEmail();
-    setResendingEmail(false);
-    if (res.success) {
-      setVerificationFeedback('Verification link sent to your email.');
-    } else {
-      setVerificationFeedback(res.error || 'Could not send verification email.');
-    }
-    setTimeout(() => setVerificationFeedback(null), 4000);
-  };
+  const userRole = session?.user?.role || 'student';
 
-  const handleCheckVerification = async () => {
-    setResendingEmail(true);
-    const res = await authService.refreshEmailVerification();
-    setResendingEmail(false);
-    refreshSession();
-    if (res.verified) {
-      setVerificationFeedback('Email address verified!');
-    } else {
-      setVerificationFeedback('Email not yet verified. Please click the link in your inbox.');
-    }
-    setTimeout(() => setVerificationFeedback(null), 4000);
-  };
-
-  const isSignedIn = Boolean(session?.user?.id);
-  const userRole = isSignedIn ? session.user.role : null;
-
-  // Public navigation for signed-out visitors
-  const publicNavGroups: NavGroup[] = [
-    {
-      id: 'public',
-      title: 'Public Discovery',
-      items: [
-        { id: 'home', label: 'Home', to: '/', icon: Home, exact: true },
-        { id: 'browse', label: 'Browse Accommodations', to: '/properties', icon: Compass },
-        { id: 'map', label: 'BUK Verified Map', to: '/map', icon: MapPin },
-      ],
-    },
-    {
-      id: 'account',
-      title: 'Account Access',
-      items: [
-        { id: 'login', label: 'Sign In', to: '/login', icon: LogIn, exact: true },
-        { id: 'register', label: 'Create Account', to: '/register', icon: UserPlus, exact: true },
-      ],
-    },
-  ];
-
-  // Typed navigation groups by role for authenticated users
+  // Typed navigation groups by role
   const studentNavGroups: NavGroup[] = [
     {
       id: 'housing',
@@ -296,26 +241,30 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       items: [
         { id: 'dash', label: 'Admin Console', to: '/admin/dashboard', icon: Home, exact: true },
         { id: 'users', label: 'User Directory', to: '/admin/users', icon: Users },
-        { id: 'landlords', label: 'Verification Queue', to: '/admin/verifications', icon: ShieldCheck },
+        { id: 'landlords', label: 'Landlord Approvals', to: '/admin/verifications', icon: ShieldCheck },
         { id: 'props', label: 'Property Approvals', to: '/admin/properties', icon: Building2 },
-        { id: 'disputes', label: 'Disputes & Holds', to: '/admin/disputes', icon: AlertTriangle },
+        { id: 'reservations', label: 'Reservations & Receipts', to: '/admin/reservations', icon: Receipt },
+        { id: 'reports', label: 'Reports', to: '/admin/reports', icon: Layers },
+        { id: 'audit', label: 'Audit Logs', to: '/admin/audit-logs', icon: FileCheck },
+        { id: 'settings', label: 'Platform Settings', to: '/admin/settings', icon: Settings },
+        { id: 'account', label: 'Admin Account', to: '/admin/account', icon: User },
         { id: 'chat', label: 'Support & Inquiries', to: '/admin/chat', icon: MessageSquare, badgeKey: 'messages' },
       ],
     },
   ];
 
-  const activeNavGroups = !isSignedIn
-    ? publicNavGroups
-    : userRole === 'admin'
-    ? adminNavGroups
-    : userRole === 'landlord'
-    ? landlordNavGroups
-    : studentNavGroups;
+  const activeNavGroups =
+    userRole === 'admin'
+      ? adminNavGroups
+      : userRole === 'landlord'
+      ? landlordNavGroups
+      : studentNavGroups;
 
-  const notifications = isSignedIn
+  const notifications = session?.user?.id
     ? notificationService.getNotifications(session.user.id).slice(0, 5)
     : [];
 
+  // Helper for active route calculation
   const isRouteActive = (item: NavItem) => {
     if (item.exact) {
       return location.pathname === item.to;
@@ -326,6 +275,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     );
   };
 
+  // Render navigation contents
   const renderNavContent = (isMobile = false) => {
     const collapsed = !isMobile && isCollapsed;
 
@@ -378,8 +328,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           )}
         </div>
 
-        {/* Active Role Indicator - ONLY when authenticated */}
-        {!collapsed && isSignedIn && userRole && (
+        {/* Active Role Indicator */}
+        {!collapsed && session && (
           <div className="mx-3 mt-3 p-2 rounded-xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2 truncate">
               <div
@@ -530,17 +480,22 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Bottom Sidebar Footer: Authenticated User Card OR Signed-Out CTAs */}
-        <div className="p-2.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50">
-          {isSignedIn ? (
-            !collapsed ? (
+        {/* User Card & Logout in Sidebar */}
+        {session && (
+          <div className="p-2.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50">
+            {!collapsed ? (
               <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 shadow-2xs">
-                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 uppercase">
-                  {(session.displayName || session.user.email || 'U')[0]}
-                </div>
+                <img
+                  src={
+                    session.user.avatarUrl ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
+                  }
+                  alt={session.displayName}
+                  className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0"
+                />
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                    {session.displayName || session.user.email}
+                    {session.displayName}
                   </span>
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
                     {session.user.email}
@@ -550,59 +505,85 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                   onClick={handleLogout}
                   className="p-1 text-slate-400 hover:text-rose-600 transition"
                   title="Sign Out"
-                  aria-label="Sign Out"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2">
-                <div
-                  title={session.displayName || session.user.email}
-                  className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs uppercase"
-                >
-                  {(session.displayName || session.user.email || 'U')[0]}
-                </div>
+                <img
+                  src={
+                    session.user.avatarUrl ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
+                  }
+                  alt={session.displayName}
+                  title={session.displayName}
+                  className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                />
                 <button
                   onClick={handleLogout}
                   className="p-1.5 text-slate-400 hover:text-rose-600 transition"
                   title="Sign Out"
-                  aria-label="Sign Out"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
-            )
-          ) : !collapsed ? (
-            <div className="grid grid-cols-2 gap-2">
-              <Link
-                to="/login"
-                className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs text-center transition"
-              >
-                Sign In
-              </Link>
-              <Link
-                to="/register"
-                className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs text-center transition shadow-xs"
-              >
-                Register
-              </Link>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <Link
-                to="/login"
-                title="Sign In"
-                className="p-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 transition"
-              >
-                <LogIn className="w-4 h-4" />
-              </Link>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
+
+  const publicPaths = ['/', '/properties', '/map', '/login', '/admin/login', '/register', '/forgot-password', '/unauthorized'];
+  const isPublicRoute =
+    publicPaths.includes(location.pathname) || location.pathname.startsWith('/properties/');
+  const dashboardPath =
+    session?.user.role === 'admin'
+      ? '/admin/dashboard'
+      : session?.user.role === 'landlord'
+      ? '/landlord/dashboard'
+      : '/student/dashboard';
+
+  if (isPublicRoute) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex flex-col">
+        <header className="sticky top-0 z-30 border-b border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            <Link to="/" className="flex items-center gap-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" aria-label="OUTPOST home">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-base font-black text-white">O</span>
+              <span>
+                <span className="block text-base font-extrabold tracking-tight">OUTPOST</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Off-campus housing</span>
+              </span>
+            </Link>
+
+            <nav className="hidden items-center gap-6 sm:flex" aria-label="Main navigation">
+              <Link to="/" className="text-sm font-medium text-slate-600 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-400">Home</Link>
+              <Link to="/properties" className="text-sm font-medium text-slate-600 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-400">Browse housing</Link>
+              <Link to="/map" className="text-sm font-medium text-slate-600 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-400">Map</Link>
+            </nav>
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              <ThemeToggle />
+              {session ? (
+                <Link to={dashboardPath} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500">Go to dashboard</Link>
+              ) : (
+                <>
+                  <Link to="/login" className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800">Sign in</Link>
+                  <Link to="/register" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500">Create account</Link>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          {children}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex">
@@ -618,10 +599,13 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       {/* 2. Mobile Slide-out Drawer Overlay & Navigation */}
       {mobileMenuOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
+          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in"
             onClick={() => setMobileMenuOpen(false)}
           />
+
+          {/* Drawer Panel */}
           <div className="relative flex-1 flex flex-col max-w-xs w-full bg-white dark:bg-slate-900 shadow-2xl z-10 animate-in slide-in-from-left duration-200">
             <div className="absolute top-3 right-3">
               <button
@@ -681,186 +665,99 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               </div>
             </div>
 
-            {/* Right: Auth Links or Authenticated Controls, Theme */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {!isSignedIn ? (
-                <div className="flex items-center gap-2">
-                  <Link
-                    to="/login"
-                    className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition whitespace-nowrap"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    to="/register"
-                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-xs whitespace-nowrap"
-                  >
-                    Create Account
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  {/* Dashboard Quick Link */}
-                  <Link
-                    to={
-                      userRole === 'admin'
-                        ? '/admin/dashboard'
-                        : userRole === 'landlord'
-                        ? '/landlord/dashboard'
-                        : '/student/dashboard'
-                    }
-                    className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition"
-                  >
-                    <span>Dashboard</span>
-                  </Link>
-
-                  {/* Chat Messages Quick Link */}
-                  <Link
-                    to={
-                      userRole === 'admin'
-                        ? '/admin/chat'
-                        : userRole === 'landlord'
-                        ? '/landlord/chat'
-                        : '/student/chat'
-                    }
-                    className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                    title="Messages & Inquiries"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    {unreadMessages > 0 && (
-                      <span className="absolute top-1 right-1 px-1 min-w-[14px] h-[14px] rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
-                        {unreadMessages}
-                      </span>
-                    )}
-                  </Link>
-
-                  {/* Notification Bell */}
-                  <div className="relative">
-                    <button
-                      onClick={() => setNotifsDropdownOpen(!notifsDropdownOpen)}
-                      className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                      aria-label="View notifications"
-                    >
-                      <Bell className="w-4 h-4" />
-                      {unreadNotifs > 0 && (
-                        <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
-                      )}
-                    </button>
-
-                    {notifsDropdownOpen && (
-                      <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                          <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                            Notifications
-                          </span>
-                          <button
-                            onClick={() => {
-                              notificationService.markAllAsRead(session.user.id);
-                              refreshSession();
-                            }}
-                            className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
-                          >
-                            Mark all read
-                          </button>
-                        </div>
-                        <div className="divide-y divide-slate-100 dark:divide-slate-800/60 max-h-72 overflow-y-auto">
-                          {notifications.length === 0 ? (
-                            <div className="p-4 text-center text-xs text-slate-400">
-                              No new notifications
-                            </div>
-                          ) : (
-                            notifications.map((n) => (
-                              <div
-                                key={n.id}
-                                onClick={() => {
-                                  notificationService.markAsRead(n.id);
-                                  refreshSession();
-                                  if (n.link) navigate(n.link);
-                                  setNotifsDropdownOpen(false);
-                                }}
-                                className={`p-3 text-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
-                                  !n.isRead ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
-                                }`}
-                              >
-                                <div className="font-semibold text-slate-800 dark:text-slate-200 mb-0.5">
-                                  {n.title}
-                                </div>
-                                <div className="text-slate-500 dark:text-slate-400 text-[11px] line-clamp-2">
-                                  {n.message}
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sign Out Button */}
-                  <button
-                    onClick={handleLogout}
-                    className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                    title="Sign Out"
-                    aria-label="Sign Out"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                </>
+              {/* Chat Messages Quick Link */}
+              {session?.user && (
+                <Link
+                  to={
+                    userRole === 'admin'
+                      ? '/admin/chat'
+                      : userRole === 'landlord'
+                      ? '/landlord/chat'
+                      : '/student/chat'
+                  }
+                  className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  title="Messages & Inquiries"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  {unreadMessages > 0 && (
+                    <span className="absolute top-1 right-1 px-1 min-w-[14px] h-[14px] rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+                      {unreadMessages}
+                    </span>
+                  )}
+                </Link>
               )}
+
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setNotifsDropdownOpen(!notifsDropdownOpen)}
+                  className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  aria-label="View notifications"
+                >
+                  <Bell className="w-4 h-4" />
+                  {unreadNotifs > 0 && (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+                  )}
+                </button>
+
+                {/* Notifications Dropdown */}
+                {notifsDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Notifications
+                      </span>
+                      {session?.user?.id && (
+                        <button
+                          onClick={() => {
+                            notificationService.markAllAsRead(session.user.id);
+                            refreshSession();
+                          }}
+                          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800/60 max-h-72 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-400">
+                          No new notifications
+                        </div>
+                      ) : (
+                        notifications.map((n) => (
+                          <div
+                            key={n.id}
+                            onClick={() => {
+                              notificationService.markAsRead(n.id);
+                              refreshSession();
+                              if (n.link) navigate(n.link);
+                              setNotifsDropdownOpen(false);
+                            }}
+                            className={`p-3 text-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
+                              !n.isRead ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                            }`}
+                          >
+                            <div className="font-semibold text-slate-800 dark:text-slate-200 mb-0.5">
+                              {n.title}
+                            </div>
+                            <div className="text-slate-500 dark:text-slate-400 text-[11px] line-clamp-2">
+                              {n.message}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Theme Toggle */}
               <ThemeToggle />
             </div>
           </div>
         </header>
-
-        {/* Non-blocking Firebase Configuration Warning Banner (if misconfigured) */}
-        {!isConfigValid && validationError && (
-          <div className="bg-amber-50 dark:bg-amber-950/50 border-b border-amber-200 dark:border-amber-900 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <span>
-                <strong>Configuration Notice:</strong> {validationError} Public browsing remains available, while Firebase-dependent account actions are disabled until configured.
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Email Verification Status Banner for Signed-In Unverified Users */}
-        {isSignedIn && !session.user.emailVerified && (
-          <div className="bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-200/80 dark:border-amber-900/60 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <MailCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-              <span>
-                Please verify your email address (<strong>{session.user.email}</strong>) to unlock full account permissions.
-              </span>
-              {verificationFeedback && (
-                <span className="font-semibold text-emerald-700 dark:text-emerald-400 ml-1">
-                  {verificationFeedback}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={resendingEmail}
-                onClick={handleResendVerification}
-                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] transition disabled:opacity-50"
-              >
-                Resend Verification Email
-              </button>
-              <button
-                type="button"
-                disabled={resendingEmail}
-                onClick={handleCheckVerification}
-                className="px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-900 dark:text-amber-200 font-semibold text-[11px] transition flex items-center gap-1 disabled:opacity-50"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>I've Verified</span>
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Main Content Area */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">

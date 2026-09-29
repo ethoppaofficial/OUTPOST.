@@ -2,7 +2,7 @@
   "name": "outpost-functions",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "lib/index.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "serve": "firebase emulators:start --only functions,firestore",
     "deploy": "firebase deploy --only functions",
+    "admin:promote": "node scripts/promote-admin.cjs",
     "test": "npm run build"
   },
   "dependencies": {

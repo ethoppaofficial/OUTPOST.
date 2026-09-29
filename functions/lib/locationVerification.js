@@ -4,11 +4,8 @@ exports.reviewPropertyLocation = exports.synchronizeVerifiedPropertyLocation = e
 const https_1 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const v2_1 = require("firebase-functions/v2");
-const app_1 = require("firebase-admin/app");
 const firestore_2 = require("firebase-admin/firestore");
-if ((0, app_1.getApps)().length === 0)
-    (0, app_1.initializeApp)();
-const db = (0, firestore_2.getFirestore)();
+const firebaseAdmin_1 = require("./firebaseAdmin");
 (0, v2_1.setGlobalOptions)({
     region: process.env.FUNCTION_REGION || 'europe-west2',
     maxInstances: 10,
@@ -42,12 +39,19 @@ function cleanString(value, maxLength) {
     return clean.length > 0 && clean.length <= maxLength ? clean : undefined;
 }
 async function getUserRole(uid) {
-    const snapshot = await db.doc(`users/${uid}`).get();
+    const snapshot = await firebaseAdmin_1.db.doc(`users/${uid}`).get();
     return snapshot.exists ? snapshot.data()?.role : undefined;
 }
-async function requireRole(uid, roles) {
+async function requireRole(uid, roles, claims) {
+    if (roles.includes('admin') && claims?.admin === true) {
+        const profile = await firebaseAdmin_1.db.doc(`users/${uid}`).get();
+        if (!profile.exists || profile.data()?.accountStatus === 'suspended') {
+            throw new https_1.HttpsError('permission-denied', 'This administrator account is not active.');
+        }
+        return;
+    }
     const role = await getUserRole(uid);
-    if (!role || !roles.includes(role)) {
+    if (!role || !roles.includes(role) || (role === 'admin' && claims?.admin !== true)) {
         throw new https_1.HttpsError('permission-denied', 'You are not authorized for this operation.');
     }
 }
@@ -96,10 +100,10 @@ exports.submitPropertyLocation = (0, https_1.onCall)(async (request) => {
     const uid = request.auth?.uid;
     if (!uid)
         throw new https_1.HttpsError('unauthenticated', 'Sign in to submit a location.');
-    await requireRole(uid, ['landlord', 'admin']);
+    await requireRole(uid, ['landlord', 'admin'], request.auth?.token);
     const submission = validateSubmission(request.data);
-    const propertyRef = db.doc(`properties/${submission.propertyId}`);
-    const locationRef = db.doc(`propertyLocations/${submission.propertyId}`);
+    const propertyRef = firebaseAdmin_1.db.doc(`properties/${submission.propertyId}`);
+    const locationRef = firebaseAdmin_1.db.doc(`propertyLocations/${submission.propertyId}`);
     const propertySnapshot = await propertyRef.get();
     if (!propertySnapshot.exists) {
         throw new https_1.HttpsError('not-found', 'Property was not found.');
@@ -118,7 +122,7 @@ exports.submitPropertyLocation = (0, https_1.onCall)(async (request) => {
         submittedAt: now,
         updatedAt: now,
     };
-    await db.runTransaction(async (transaction) => {
+    await firebaseAdmin_1.db.runTransaction(async (transaction) => {
         transaction.set(locationRef, pendingRecord, { merge: true });
         transaction.update(propertyRef, {
             locationVerificationStatus: 'pending',
@@ -139,14 +143,14 @@ exports.submitPropertyLocation = (0, https_1.onCall)(async (request) => {
  * submission remains private. Only an administrator-approved verified record
  * releases public coordinates onto the property document.
  */
-exports.synchronizeVerifiedPropertyLocation = (0, firestore_1.onDocumentWritten)('propertyLocations/{propertyId}', async (event) => {
+exports.synchronizeVerifiedPropertyLocation = (0, firestore_1.onDocumentWritten)({ document: 'propertyLocations/{propertyId}', database: firebaseAdmin_1.FIRESTORE_DATABASE_ID }, async (event) => {
     const after = event.data?.after;
     const before = event.data?.before;
     if (!after?.exists)
         return;
     const next = after.data();
     const previous = before?.exists ? before.data() : undefined;
-    const propertyRef = db.doc(`properties/${event.params.propertyId}`);
+    const propertyRef = firebaseAdmin_1.db.doc(`properties/${event.params.propertyId}`);
     const propertySnapshot = await propertyRef.get();
     if (!propertySnapshot.exists)
         return;
@@ -179,10 +183,11 @@ exports.synchronizeVerifiedPropertyLocation = (0, firestore_1.onDocumentWritten)
             publicLongitude: next.publicLongitude,
             publicLocationPrecision: next.precision,
             publicLocationLabel: next.formattedAddress || `${next.area}, Kano State`,
+            isActive: property.verificationStatus === 'approved' && property.moderationStatus !== 'suspended',
             locationUpdatedAt: firestore_2.FieldValue.serverTimestamp(),
             updatedAt: firestore_2.FieldValue.serverTimestamp(),
         });
-        await db.collection('auditLogs').add({
+        await firebaseAdmin_1.db.collection('auditLogs').add({
             action: 'property_location_verified',
             actorType: 'admin',
             actorId: reviewedBy,
@@ -195,6 +200,7 @@ exports.synchronizeVerifiedPropertyLocation = (0, firestore_1.onDocumentWritten)
     // Pending or rejected locations must never remain publicly visible.
     await propertyRef.update({
         locationVerificationStatus: next.verificationStatus,
+        isActive: false,
         publicLatitude: firestore_2.FieldValue.delete(),
         publicLongitude: firestore_2.FieldValue.delete(),
         publicLocationPrecision: firestore_2.FieldValue.delete(),
@@ -211,7 +217,7 @@ exports.reviewPropertyLocation = (0, https_1.onCall)(async (request) => {
     const uid = request.auth?.uid;
     if (!uid)
         throw new https_1.HttpsError('unauthenticated', 'Sign in to review locations.');
-    await requireRole(uid, ['admin']);
+    await requireRole(uid, ['admin'], request.auth?.token);
     const raw = (request.data ?? {});
     const propertyId = cleanString(raw.propertyId, 128);
     const decision = cleanString(raw.decision, 20);
@@ -222,7 +228,7 @@ exports.reviewPropertyLocation = (0, https_1.onCall)(async (request) => {
     if (!propertyId || !['verified', 'rejected'].includes(decision ?? '')) {
         throw new https_1.HttpsError('invalid-argument', 'Property and review decision are required.');
     }
-    const locationRef = db.doc(`propertyLocations/${propertyId}`);
+    const locationRef = firebaseAdmin_1.db.doc(`propertyLocations/${propertyId}`);
     const snapshot = await locationRef.get();
     if (!snapshot.exists)
         throw new https_1.HttpsError('not-found', 'Location submission was not found.');
@@ -251,6 +257,17 @@ exports.reviewPropertyLocation = (0, https_1.onCall)(async (request) => {
         reviewReason: reviewReason || firestore_2.FieldValue.delete(),
         updatedAt: firestore_2.FieldValue.serverTimestamp(),
     });
+    if (decision === 'rejected') {
+        await firebaseAdmin_1.db.collection('auditLogs').add({
+            action: 'PROPERTY_LOCATION_REJECTED',
+            actorType: 'admin',
+            actorId: uid,
+            targetEntity: 'PropertyLocation',
+            targetId: propertyId,
+            details: reviewReason,
+            timestamp: firestore_2.FieldValue.serverTimestamp(),
+        });
+    }
     return { ok: true, propertyId, verificationStatus: decision };
 });
 //# sourceMappingURL=locationVerification.js.map

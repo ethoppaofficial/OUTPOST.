@@ -8,6 +8,7 @@ import { HomePage } from './pages/public/HomePage';
 import { PropertiesPage } from './pages/public/PropertiesPage';
 import { PropertyDetailPage } from './pages/public/PropertyDetailPage';
 import { LoginPage } from './pages/public/LoginPage';
+import { AdminLoginPage } from './pages/public/AdminLoginPage';
 import { RegisterPage } from './pages/public/RegisterPage';
 import { ForgotPasswordPage } from './pages/public/ForgotPasswordPage';
 import { UnauthorizedPage } from './pages/public/UnauthorizedPage';
@@ -42,10 +43,20 @@ import { VerificationQueuePage } from './pages/admin/VerificationQueuePage';
 import { PropertyApprovalsPage } from './pages/admin/PropertyApprovalsPage';
 import { UsersPage } from './pages/admin/UsersPage';
 import { DisputesPage } from './pages/admin/DisputesPage';
+import { AdminReportsPage } from './pages/admin/AdminReportsPage';
+import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage';
+import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
+import { AdminAccountPage } from './pages/admin/AdminAccountPage';
 import { ThemeProvider } from './application/context/ThemeContext';
 import { FirebaseProvider } from './application/context/FirebaseContext';
+import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
+import { configValidationError } from './infrastructure/config/appConfig';
 
 export default function App() {
+  if (configValidationError) {
+    return <ConfigErrorScreen />;
+  }
+
   return (
     <FirebaseProvider>
       <ThemeProvider>
@@ -58,6 +69,7 @@ export default function App() {
               <Route path="/properties/:id" element={<PropertyDetailPage />} />
               <Route path="/map" element={<StudentHousingMapPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/admin/login" element={<AdminLoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/unauthorized" element={<UnauthorizedPage />} />
@@ -364,6 +376,14 @@ export default function App() {
                 }
               />
               <Route
+                path="/admin/verification"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <VerificationQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/admin/landlord-verifications"
                 element={
                   <ProtectedRoute allowedRoles={['admin']}>
@@ -400,6 +420,46 @@ export default function App() {
                 element={
                   <ProtectedRoute allowedRoles={['admin']}>
                     <DisputesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/reservations"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <DisputesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/reports"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminReportsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/audit-logs"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminAuditLogsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/settings"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminSettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/account"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminAccountPage />
                   </ProtectedRoute>
                 }
               />

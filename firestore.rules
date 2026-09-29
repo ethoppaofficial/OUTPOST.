@@ -36,18 +36,23 @@ service cloud.firestore {
     }
 
     function hasRole(role) {
-      return signedIn()
-        && (
-          request.auth.token.get('role', '') == role
-          || (
-            userExists(request.auth.uid)
-            && userDoc(request.auth.uid).data.get('role', '') == role
+      return signedIn() && (
+        (role == 'admin' && request.auth.token.get('admin', false) == true)
+        || (
+          role != 'admin'
+          && (
+            request.auth.token.get('role', '') == role
+            || (userExists(request.auth.uid)
+              && userDoc(request.auth.uid).data.get('role', '') == role)
           )
-        );
+        )
+      );
     }
 
     function isAdmin() {
-      return hasRole('admin') && accountIsActive(request.auth.uid);
+      return signedIn()
+        && request.auth.token.get('admin', false) == true
+        && accountIsActive(request.auth.uid);
     }
 
     function isStudent() {
@@ -678,6 +683,16 @@ service cloud.firestore {
 
     match /auditLogs/{logId} {
       allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /platformSettings/{settingsId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /publicSettings/{settingsId} {
+      allow read: if signedIn();
       allow create, update, delete: if false;
     }
 

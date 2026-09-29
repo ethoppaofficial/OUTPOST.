@@ -1,16 +1,10 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { setGlobalOptions } from 'firebase-functions/v2';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import {
-  FieldValue,
-  getFirestore,
-} from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import type { Timestamp } from 'firebase-admin/firestore';
+import { db, FIRESTORE_DATABASE_ID } from './firebaseAdmin';
 
-if (getApps().length === 0) initializeApp();
-
-const db = getFirestore();
 setGlobalOptions({
   region: process.env.FUNCTION_REGION || 'europe-west2',
   maxInstances: 10,
@@ -77,9 +71,16 @@ async function getUserRole(uid: string): Promise<string | undefined> {
   return snapshot.exists ? snapshot.data()?.role : undefined;
 }
 
-async function requireRole(uid: string, roles: string[]): Promise<void> {
+async function requireRole(uid: string, roles: string[], claims?: Record<string, unknown>): Promise<void> {
+  if (roles.includes('admin') && claims?.admin === true) {
+    const profile = await db.doc(`users/${uid}`).get();
+    if (!profile.exists || profile.data()?.accountStatus === 'suspended') {
+      throw new HttpsError('permission-denied', 'This administrator account is not active.');
+    }
+    return;
+  }
   const role = await getUserRole(uid);
-  if (!role || !roles.includes(role)) {
+  if (!role || !roles.includes(role) || (role === 'admin' && claims?.admin !== true)) {
     throw new HttpsError('permission-denied', 'You are not authorized for this operation.');
   }
 }
@@ -134,7 +135,7 @@ function validateSubmission(input: unknown): LocationSubmission {
 export const submitPropertyLocation = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in to submit a location.');
-  await requireRole(uid, ['landlord', 'admin']);
+  await requireRole(uid, ['landlord', 'admin'], request.auth?.token as Record<string, unknown> | undefined);
 
   const submission = validateSubmission(request.data);
   const propertyRef = db.doc(`properties/${submission.propertyId}`);
@@ -185,7 +186,7 @@ export const submitPropertyLocation = onCall(async (request) => {
  * releases public coordinates onto the property document.
  */
 export const synchronizeVerifiedPropertyLocation = onDocumentWritten(
-  'propertyLocations/{propertyId}',
+  { document: 'propertyLocations/{propertyId}', database: FIRESTORE_DATABASE_ID },
   async (event) => {
     const after = event.data?.after;
     const before = event.data?.before;
@@ -228,6 +229,7 @@ export const synchronizeVerifiedPropertyLocation = onDocumentWritten(
         publicLongitude: next.publicLongitude,
         publicLocationPrecision: next.precision,
         publicLocationLabel: next.formattedAddress || `${next.area}, Kano State`,
+        isActive: property.verificationStatus === 'approved' && property.moderationStatus !== 'suspended',
         locationUpdatedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -246,6 +248,7 @@ export const synchronizeVerifiedPropertyLocation = onDocumentWritten(
     // Pending or rejected locations must never remain publicly visible.
     await propertyRef.update({
       locationVerificationStatus: next.verificationStatus,
+      isActive: false,
       publicLatitude: FieldValue.delete(),
       publicLongitude: FieldValue.delete(),
       publicLocationPrecision: FieldValue.delete(),
@@ -263,7 +266,7 @@ export const synchronizeVerifiedPropertyLocation = onDocumentWritten(
 export const reviewPropertyLocation = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in to review locations.');
-  await requireRole(uid, ['admin']);
+  await requireRole(uid, ['admin'], request.auth?.token as Record<string, unknown> | undefined);
 
   const raw = (request.data ?? {}) as Record<string, unknown>;
   const propertyId = cleanString(raw.propertyId, 128);
@@ -306,6 +309,18 @@ export const reviewPropertyLocation = onCall(async (request) => {
     reviewReason: reviewReason || FieldValue.delete(),
     updatedAt: FieldValue.serverTimestamp(),
   });
+
+  if (decision === 'rejected') {
+    await db.collection('auditLogs').add({
+      action: 'PROPERTY_LOCATION_REJECTED',
+      actorType: 'admin',
+      actorId: uid,
+      targetEntity: 'PropertyLocation',
+      targetId: propertyId,
+      details: reviewReason,
+      timestamp: FieldValue.serverTimestamp(),
+    });
+  }
 
   return { ok: true, propertyId, verificationStatus: decision };
 });

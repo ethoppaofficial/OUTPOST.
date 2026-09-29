@@ -1,261 +1,63 @@
-import React, { useState } from 'react';
-import {
-  Building2,
-  CheckCircle2,
-  XCircle,
-  ShieldCheck,
-  Clock,
-  ExternalLink,
-  MapPin,
-  ChevronDown,
-  ChevronUp,
-} from 'lucide-react';
-import { propertyService } from '../../application/services/propertyService';
-import { Property } from '../../domain/types';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
-import { PropertyMap } from '../../components/map/PropertyMap';
+import React, { useEffect, useState } from 'react';
+import { Building2, CheckCircle2, ExternalLink, MapPin, ShieldCheck, XCircle } from 'lucide-react';
+import { adminService, AdminRecord } from '../../application/services/adminService';
+import { Modal } from '../../components/ui/Modal';
+
+type ReviewTarget = { id: string; title: string; scope: 'property' | 'location'; action: 'reject' | 'suspend' };
 
 export const PropertyApprovalsPage: React.FC = () => {
-  const [properties, setProperties] = useState<Property[]>(() => propertyService.getAllProperties());
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [expandedMapPropId, setExpandedMapPropId] = useState<string | null>(null);
-
-  const handleApprove = (prop: Property) => {
-    // Approve property and verify location
-    const updatedLocation = prop.location
-      ? {
-          ...prop.location,
-          verificationStatus: 'verified' as const,
-          locationVerificationStatus: 'verified' as const,
-          reviewedBy: 'user-admin-1',
-          reviewedAt: new Date().toISOString(),
-        }
-      : undefined;
-
-    propertyService.updateProperty(prop.id, {
-      verificationStatus: 'approved',
-      locationVerificationStatus: 'verified',
-      isActive: true,
-      publicLatitude: prop.location?.publicLatitude ?? prop.publicLatitude,
-      publicLongitude: prop.location?.publicLongitude ?? prop.publicLongitude,
-      location: updatedLocation,
-    });
-    setProperties(propertyService.getAllProperties());
-    setActionSuccess(`Property "${prop.title}" and physical location verified & published!`);
-    setTimeout(() => setActionSuccess(null), 3000);
+  const [properties, setProperties] = useState<AdminRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [target, setTarget] = useState<ReviewTarget | null>(null);
+  const [reason, setReason] = useState('');
+  const refresh = async () => setProperties(await adminService.getProperties());
+  useEffect(() => {
+    let active = true;
+    adminService.getProperties().then((items) => { if (active) setProperties(items); }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Property records could not be loaded.'); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+  const propertyAction = async (propertyId: string, decision: 'approve' | 'reject' | 'suspend' | 'reactivate', note?: string) => {
+    setBusy(propertyId); setError(null); setMessage(null);
+    try { await adminService.reviewProperty({ propertyId, decision, reason: note }); await refresh(); setMessage(`Property moderation action “${decision}” saved and audited.`); setTarget(null); setReason(''); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Property action failed.'); }
+    finally { setBusy(null); }
   };
-
-  const handleReject = (prop: Property) => {
-    const updatedLocation = prop.location
-      ? {
-          ...prop.location,
-          verificationStatus: 'rejected' as const,
-          reviewedBy: 'user-admin-1',
-          reviewedAt: new Date().toISOString(),
-        }
-      : undefined;
-
-    propertyService.updateProperty(prop.id, {
-      verificationStatus: 'rejected',
-      location: updatedLocation,
-    });
-    setProperties(propertyService.getAllProperties());
-    setActionSuccess(`Property "${prop.title}" listing rejected.`);
-    setTimeout(() => setActionSuccess(null), 3000);
+  const locationAction = async (propertyId: string, decision: 'verified' | 'rejected', note?: string) => {
+    setBusy(propertyId); setError(null); setMessage(null);
+    try { await adminService.reviewPropertyLocation({ propertyId, decision, reason: note }); await refresh(); setMessage(`Property location ${decision === 'verified' ? 'verified' : 'rejected'} separately from listing approval.`); setTarget(null); setReason(''); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Location review failed.'); }
+    finally { setBusy(null); }
   };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-          Accommodation Listing Moderation
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Review student hostel submissions for address legitimacy, security provisions, and reasonable campus proximity.
-        </p>
-      </div>
-
-      {actionSuccess && (
-        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>{actionSuccess}</span>
-        </div>
-      )}
-
-      <div className="space-y-4">
-        {properties.map((prop) => {
-          const isMapExpanded = expandedMapPropId === prop.id;
-          const loc = prop.location;
-
-          return (
-            <div
-              key={prop.id}
-              className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-emerald-600 uppercase">
-                      {prop.propertyType} • {prop.university}
-                    </span>
-                    <VerificationBadge type="property" status={prop.verificationStatus} />
-                    {loc && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        Loc: {loc.verificationStatus}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
-                    {prop.title}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {prop.address}, {prop.neighbourhood} ({prop.distanceKm}km from campus gate) • Host: {prop.landlordName}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400">
-                    ₦{prop.pricePerSession.toLocaleString()}
-                  </span>
-                  <span className="text-[11px] text-slate-400 block">per academic session</span>
-                </div>
-              </div>
-
-              {/* Location Details & Verification Box */}
-              {loc && (
-                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 text-xs space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        {loc.area} Area Settlement
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-500">
-                        ({loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)})
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setExpandedMapPropId(isMapExpanded ? null : prop.id)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
-                    >
-                      <span>{isMapExpanded ? 'Hide Map' : 'View on Map'}</span>
-                      {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap gap-4 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>Precision: <strong className="text-slate-700 dark:text-slate-300">{loc.precision}</strong></span>
-                    <span>Geohash: <strong className="font-mono text-slate-700 dark:text-slate-300">{loc.geohash}</strong></span>
-                    <span>Source: <strong className="text-slate-700 dark:text-slate-300">{loc.source}</strong></span>
-                    <span>Public Label: <strong className="text-slate-700 dark:text-slate-300">{loc.publicLocationLabel}</strong></span>
-                  </div>
-
-                  {(prop.streetOrRoad || prop.nearestLandmark || prop.directions) && (
-                    <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] space-y-1">
-                      {prop.streetOrRoad && (
-                        <div>
-                          <span className="text-slate-500">Street / Road:</span> <strong className="text-slate-800 dark:text-slate-200">{prop.streetOrRoad}</strong>
-                        </div>
-                      )}
-                      {prop.nearestLandmark && (
-                        <div>
-                          <span className="text-slate-500">Nearest Landmark:</span> <strong className="text-slate-800 dark:text-slate-200">{prop.nearestLandmark}</strong>
-                        </div>
-                      )}
-                      {prop.directions && (
-                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 mt-1">
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 block mb-0.5">Written Directions:</span>
-                          <span className="text-slate-600 dark:text-slate-400">{prop.directions}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Collapsible Mini MapLibre GL instance */}
-                  {isMapExpanded && (
-                    <div className="pt-2">
-                      <PropertyMap
-                        properties={[prop]}
-                        selectedPropertyId={prop.id}
-                        height="240px"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Specs & Amenities preview */}
-              <div className="flex flex-wrap gap-1.5 text-xs">
-                {prop.amenities.map((am) => (
-                  <span
-                    key={am}
-                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px]"
-                  >
-                    {am}
-                  </span>
-                ))}
-              </div>
-
-              {/* Submitted Photos Review Strip */}
-              {prop.images && prop.images.length > 0 && (
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    <span>Inspection Photographs ({prop.images.length} photos submitted)</span>
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Click to expand</span>
-                  </div>
-                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                    {prop.images.map((img, i) => (
-                      <a
-                        key={i}
-                        href={img}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="relative w-20 h-14 rounded-xl overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-700 group hover:ring-2 hover:ring-emerald-500 transition-all"
-                        title={`View photo ${i + 1}`}
-                      >
-                        <img src={img} alt={`Property Photo ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        <span className="absolute bottom-1 right-1 px-1 rounded text-[9px] bg-slate-950/70 text-white font-medium">
-                          {i === 0 ? 'Cover' : `#${i + 1}`}
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Moderation Controls */}
-              <div className="pt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-800 text-xs">
-                <span className="text-slate-400">
-                  Spaces: {prop.availableSpaces} available / {prop.totalCapacity} total
-                </span>
-
-                <div className="flex gap-2">
-                  {prop.verificationStatus !== 'rejected' && (
-                    <button
-                      onClick={() => handleReject(prop)}
-                      className="px-4 py-2 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-xs font-medium"
-                    >
-                      Reject Listing
-                    </button>
-                  )}
-
-                  {prop.verificationStatus !== 'approved' && (
-                    <button
-                      onClick={() => handleApprove(prop)}
-                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Approve & Verify Property Location</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+  const confirmReason = (event: React.FormEvent) => {
+    event.preventDefault(); if (!target) return;
+    if (target.scope === 'property') void propertyAction(target.id, target.action, reason);
+    else void locationAction(target.id, 'rejected', reason);
+  };
+  return <div className="space-y-6"><header><h1 className="text-2xl font-black text-slate-900 dark:text-white">Property moderation</h1><p className="mt-1 text-sm text-slate-500">Listing approval and location verification are separate decisions; a listing is public only when both conditions are satisfied.</p></header>
+    {error && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30">{error}</div>}{message && <div role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/30">{message}</div>}
+    {loading ? <p className="text-sm text-slate-500">Loading Firebase properties…</p> : properties.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No Firebase property records.</div> : <div className="space-y-4">{properties.map((property) => {
+      const location = property.submittedLocation;
+      const propertyStatus = property.moderationStatus === 'suspended' ? 'suspended' : property.verificationStatus || 'unknown';
+      const locationStatus = property.locationVerificationStatus || location?.verificationStatus || 'not_submitted';
+      const suspended = property.moderationStatus === 'suspended';
+      return <article key={property.id} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row"><div><div className="flex flex-wrap items-center gap-2 text-xs"><span className="font-bold uppercase text-emerald-700 dark:text-emerald-400">{property.propertyType || 'Property'}</span><span className="rounded-full bg-purple-100 px-2 py-1 font-semibold text-purple-800 dark:bg-purple-950/40 dark:text-purple-300">Listing: {propertyStatus}</span><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">Location: {locationStatus}</span></div><h2 className="mt-2 text-lg font-bold text-slate-900 dark:text-white">{property.title || 'Untitled property'}</h2><p className="mt-1 text-xs text-slate-500">{property.address || 'No address'} · {property.neighbourhood || property.area || 'Area unavailable'} · Landlord {property.landlordName || property.landlordId || '—'}</p></div><div className="sm:text-right"><div className="font-black text-emerald-700 dark:text-emerald-400">₦{Number(property.pricePerSession || 0).toLocaleString()}</div><span className="text-[11px] text-slate-500">per academic session</span></div></div>
+        {location && <div className="rounded-xl bg-slate-50 p-3 text-xs dark:bg-slate-800/70"><div className="flex flex-wrap items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-emerald-600" />{location.area || property.area || 'Area unavailable'} · {location.formattedAddress || location.publicLocationLabel || 'Submitted location'} {Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude)) && <span className="font-mono text-slate-500">Private review coordinates: {Number(location.latitude).toFixed(4)}, {Number(location.longitude).toFixed(4)}</span>}</div><p className="mt-1 text-slate-500">Approval of the location publishes only a derived public coordinate, not the private pin.</p></div>}
+        {Array.isArray(property.images) && property.images.length > 0 && <div className="flex gap-2 overflow-x-auto">{property.images.slice(0, 8).map((url: string, index: number) => <a key={`${property.id}-${index}`} href={url} target="_blank" rel="noreferrer" className="shrink-0"><img src={url} alt={`Evidence ${index + 1} for ${property.title || 'property'}`} className="h-20 w-28 rounded-lg object-cover" /><span className="sr-only">Open property evidence {index + 1}</span></a>)}</div>}
+        {property.adminReviewReason && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">Last decision note: {property.adminReviewReason}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800"><span className="text-xs text-slate-500">Created {property.createdAt ? new Date(property.createdAt).toLocaleDateString() : 'date unavailable'}</span><div className="flex flex-wrap gap-2">
+          {property.verificationStatus !== 'approved' && <button type="button" disabled={busy === property.id} onClick={() => void propertyAction(property.id, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />Approve listing</button>}
+          {property.verificationStatus !== 'rejected' && <button type="button" disabled={busy === property.id} onClick={() => setTarget({ id: property.id, title: property.title || 'Property', scope: 'property', action: 'reject' })} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 dark:border-rose-900 dark:text-rose-300"><XCircle className="mr-1 inline h-3.5 w-3.5" />Reject</button>}
+          {location && locationStatus === 'pending' && <><button type="button" disabled={busy === property.id} onClick={() => void locationAction(property.id, 'verified')} className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 dark:border-blue-900 dark:text-blue-300"><ShieldCheck className="mr-1 inline h-3.5 w-3.5" />Verify location</button><button type="button" disabled={busy === property.id} onClick={() => setTarget({ id: property.id, title: property.title || 'Property location', scope: 'location', action: 'reject' })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold dark:border-slate-700">Reject location</button></>}
+          {suspended ? <button type="button" disabled={busy === property.id} onClick={() => void propertyAction(property.id, 'reactivate')} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">Reactivate</button> : property.verificationStatus === 'approved' && <button type="button" disabled={busy === property.id} onClick={() => setTarget({ id: property.id, title: property.title || 'Property', scope: 'property', action: 'suspend' })} className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">Suspend</button>}
+          {location?.documentUrl && <a href={location.documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold dark:bg-slate-800"><ExternalLink className="h-3.5 w-3.5" />Evidence</a>}
+        </div></div>
+      </article>;
+    })}</div>}
+    <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900"><Building2 className="h-4 w-4 shrink-0 text-emerald-600" />Landlord verification does not automatically verify a listing; listing approval and location approval remain distinct and are independently audited.</div>
+    <Modal isOpen={!!target} onClose={() => { setTarget(null); setReason(''); }} title={target?.action === 'suspend' ? 'Suspend property' : target?.scope === 'location' ? 'Reject property location' : 'Reject property listing'}><form onSubmit={confirmReason} className="space-y-4 text-sm"><p>Enter the reason for this decision on <strong>{target?.title}</strong>.</p><label className="block font-semibold">Reason<textarea required minLength={5} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} rows={4} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setTarget(null)} className="rounded-lg px-3 py-2 text-xs">Cancel</button><button disabled={!!busy} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white">Confirm decision</button></div></form></Modal>
+  </div>;
 };
