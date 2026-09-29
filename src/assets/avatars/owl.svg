@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <circle cx="50" cy="50" r="48" fill="#6366f1" />
+  <ellipse cx="50" cy="54" rx="28" ry="32" fill="#4338ca" />
+  <ellipse cx="50" cy="58" rx="20" ry="24" fill="#e0e7ff" />
+  <!-- Left Eye -->
+  <circle cx="38" cy="42" r="10" fill="#ffffff" />
+  <circle cx="38" cy="42" r="5" fill="#1e1b4b" />
+  <circle cx="36" cy="40" r="2" fill="#ffffff" />
+  <!-- Right Eye -->
+  <circle cx="62" cy="42" r="10" fill="#ffffff" />
+  <circle cx="62" cy="42" r="5" fill="#1e1b4b" />
+  <circle cx="60" cy="40" r="2" fill="#ffffff" />
+  <!-- Beak -->
+  <polygon points="50,48 45,54 55,54" fill="#f59e0b" />
+  <!-- Ear Tufts -->
+  <polygon points="28,24 38,34 30,38" fill="#4338ca" />
+  <polygon points="72,24 62,34 70,38" fill="#4338ca" />
+</svg>

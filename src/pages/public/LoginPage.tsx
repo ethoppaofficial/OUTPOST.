@@ -152,8 +152,8 @@ export const LoginPage: React.FC = () => {
           <span>{googleLoading ? 'Connecting to Google…' : 'Continue with Google'}</span>
         </button>
 
-        {/* Firebase Status Badge */}
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
+        {/* Firebase Status Badge (hidden per clean UI guidelines) */}
+        <div className="hidden" aria-hidden="true">
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
             <span className="font-medium text-slate-700 dark:text-slate-300">Firebase Firestore</span>

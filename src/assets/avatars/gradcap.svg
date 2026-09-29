@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <circle cx="50" cy="50" r="48" fill="#10b981" />
+  <!-- Skull Cap Underneath -->
+  <path d="M 32,54 C 32,66 68,66 68,54 Z" fill="#047857" />
+  <!-- Mortarboard Diamond -->
+  <polygon points="50,28 82,42 50,56 18,42" fill="#064e3b" />
+  <!-- Top Center Button -->
+  <circle cx="50" cy="42" r="3" fill="#f59e0b" />
+  <!-- Tassel -->
+  <path d="M 50,42 Q 68,44 72,56" fill="none" stroke="#f59e0b" stroke-width="2.5" />
+  <rect x="70" y="56" width="4" height="10" rx="1" fill="#f59e0b" />
+</svg>

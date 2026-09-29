@@ -1,6 +1,13 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import {
+  ref,
+  uploadBytes,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
+  UploadTask,
+  UploadMetadata,
+} from 'firebase/storage';
 import { storage, auth } from './firebaseConfig';
-import { appConfig } from '../config/appConfig';
 
 export interface FileUploadResult {
   url: string;
@@ -12,30 +19,55 @@ export interface FileUploadResult {
 
 export class StorageService {
   /**
-   * Upload Student Verification Document (Admission letter, School ID, Fees receipt)
-   * Max 5MB, PDF or Image only. Path: student-docs/{studentId}/{documentId}
+   * Upload Profile Photo (images only, max 2 MB)
+   * Path: profile-pictures/{uid}/{fileName}
+   */
+  async uploadProfilePicture(
+    uid: string,
+    file: File | Blob,
+    fileName: string = 'avatar.jpg'
+  ): Promise<FileUploadResult> {
+    this.validateFileSize(file.size, 2 * 1024 * 1024, 'Profile photo');
+    this.validateFileType(file.type, ['image/'], 'Profile photo');
+
+    const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `profile-pictures/${uid}/${cleanName}`;
+    const storageRef = ref(storage, storagePath);
+
+    const snapshot = await uploadBytes(storageRef, file, {
+      contentType: file.type || 'image/jpeg',
+      customMetadata: {
+        uploaderUid: uid,
+        uploadedAt: new Date().toISOString(),
+      },
+    });
+
+    const url = await getDownloadURL(snapshot.ref);
+    return {
+      url,
+      fileName: cleanName,
+      fileSize: file.size,
+      contentType: file.type || 'image/jpeg',
+      path: storagePath,
+    };
+  }
+
+  /**
+   * Upload Student Verification Document (image or PDF, max 5 MB)
+   * Path: student-docs/{uid}/{docId}/{fileName}
    */
   async uploadStudentDocument(
     studentId: string,
     file: File | Blob,
-    originalFileName: string
+    originalFileName: string,
+    customDocId?: string
   ): Promise<FileUploadResult> {
     this.validateFileSize(file.size, 5 * 1024 * 1024, 'Student document');
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Student document');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = `doc_${Date.now()}`;
+    const docId = customDocId || `doc_${Date.now()}`;
     const storagePath = `student-docs/${studentId}/${docId}/${cleanName}`;
-
-    if (appConfig.backendMode === 'mock') {
-      return {
-        url: URL.createObjectURL(file),
-        fileName: cleanName,
-        fileSize: file.size,
-        contentType: file.type || 'application/pdf',
-        path: storagePath,
-      };
-    }
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
@@ -58,30 +90,21 @@ export class StorageService {
   }
 
   /**
-   * Upload Landlord Identity or Ownership Verification Document
-   * Max 5MB, PDF or Image only. Path: landlord-docs/{landlordId}/{documentId}
+   * Upload Landlord Identity or Ownership Verification Document (image or PDF, max 5 MB)
+   * Path: landlord-docs/{uid}/{docId}/{fileName}
    */
   async uploadLandlordDocument(
     landlordId: string,
     file: File | Blob,
-    originalFileName: string
+    originalFileName: string,
+    customDocId?: string
   ): Promise<FileUploadResult> {
     this.validateFileSize(file.size, 5 * 1024 * 1024, 'Landlord document');
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Landlord document');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = `landlord_${Date.now()}`;
+    const docId = customDocId || `landlord_${Date.now()}`;
     const storagePath = `landlord-docs/${landlordId}/${docId}/${cleanName}`;
-
-    if (appConfig.backendMode === 'mock') {
-      return {
-        url: URL.createObjectURL(file),
-        fileName: cleanName,
-        fileSize: file.size,
-        contentType: file.type || 'application/pdf',
-        path: storagePath,
-      };
-    }
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
@@ -104,30 +127,49 @@ export class StorageService {
   }
 
   /**
-   * Upload Payment Receipt for a Reservation Hold
-   * Max 10MB, PDF or Image. Path: receipts/{reservationId}/{receiptId}
+   * Upload Property Listing Image (images only, max 5 MB)
+   * Path: property-images/{propertyId}/{fileName}
+   */
+  async uploadPropertyImage(
+    file: File | Blob,
+    originalFileName: string,
+    propertyId: string = 'pending_submission'
+  ): Promise<FileUploadResult> {
+    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Property image');
+    this.validateFileType(file.type, ['image/'], 'Property image');
+
+    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `property-images/${propertyId}/${Date.now()}_${cleanName}`;
+
+    const storageRef = ref(storage, storagePath);
+    const snapshot = await uploadBytes(storageRef, file, {
+      contentType: file.type || 'image/jpeg',
+    });
+
+    const url = await getDownloadURL(snapshot.ref);
+    return {
+      url,
+      fileName: cleanName,
+      fileSize: file.size,
+      contentType: file.type || 'image/jpeg',
+      path: storagePath,
+    };
+  }
+
+  /**
+   * Upload Payment Receipt for a Reservation (image or PDF, max 5 MB)
+   * Path: payment-receipts/{reservationId}/{fileName}
    */
   async uploadPaymentReceipt(
     reservationId: string,
     file: File | Blob,
     originalFileName: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Payment receipt');
+    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Payment receipt');
     this.validateFileType(file.type, ['image/', 'application/pdf'], 'Payment receipt');
 
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const receiptId = `receipt_${Date.now()}`;
-    const storagePath = `receipts/${reservationId}/${receiptId}/${cleanName}`;
-
-    if (appConfig.backendMode === 'mock') {
-      return {
-        url: URL.createObjectURL(file),
-        fileName: cleanName,
-        fileSize: file.size,
-        contentType: file.type || 'image/jpeg',
-        path: storagePath,
-      };
-    }
+    const storagePath = `payment-receipts/${reservationId}/${Date.now()}_${cleanName}`;
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
@@ -150,33 +192,21 @@ export class StorageService {
   }
 
   /**
-   * Upload Public Property Image
-   * Max 10MB, Image only. Path: property-images/{propertyId}/{fileName}
+   * Upload Chat Attachment (image, PDF, text, max 5 MB)
+   * Path: chat-attachments/{chatId}/{fileName}
    */
-  async uploadPropertyImage(
+  async uploadChatAttachment(
+    chatId: string,
     file: File | Blob,
-    originalFileName: string,
-    propertyId: string = 'pending_submission'
+    originalFileName: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Property image');
-    this.validateFileType(file.type, ['image/'], 'Property image');
-
+    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Chat attachment');
     const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `property-images/${propertyId}/${Date.now()}_${cleanName}`;
-
-    if (appConfig.backendMode === 'mock') {
-      return {
-        url: URL.createObjectURL(file),
-        fileName: cleanName,
-        fileSize: file.size,
-        contentType: file.type || 'image/jpeg',
-        path: storagePath,
-      };
-    }
+    const storagePath = `chat-attachments/${chatId}/${Date.now()}_${cleanName}`;
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'image/jpeg',
+      contentType: file.type || 'application/octet-stream',
     });
 
     const url = await getDownloadURL(snapshot.ref);
@@ -184,9 +214,45 @@ export class StorageService {
       url,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
+      contentType: file.type || 'application/octet-stream',
       path: storagePath,
     };
+  }
+
+  /**
+   * Start a Resumable Upload Task with Progress Reporting
+   */
+  uploadResumable(
+    storagePath: string,
+    file: File | Blob,
+    metadata?: UploadMetadata
+  ): UploadTask {
+    const storageRef = ref(storage, storagePath);
+    return uploadBytesResumable(storageRef, file, metadata);
+  }
+
+  /**
+   * Delete a File from Storage by path or URL
+   */
+  async deleteFile(pathOrUrl: string): Promise<void> {
+    if (!pathOrUrl || !pathOrUrl.trim()) return;
+
+    try {
+      let storageRef;
+      if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+        // Firebase storage URL or direct reference
+        storageRef = ref(storage, pathOrUrl);
+      } else {
+        storageRef = ref(storage, pathOrUrl);
+      }
+      await deleteObject(storageRef);
+    } catch (err: any) {
+      // If object doesn't exist, ignore (already deleted)
+      if (err?.code === 'storage/object-not-found') {
+        return;
+      }
+      console.warn('Storage file deletion notice:', err);
+    }
   }
 
   private validateFileSize(size: number, maxBytes: number, label: string) {

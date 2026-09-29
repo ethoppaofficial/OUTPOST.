@@ -97,7 +97,7 @@ export function computePublicCoordinates(
   longitude: number,
   precision: LocationPrecision,
   area: HousingArea,
-  seedKey: string = ''
+  jitterKey: string = ''
 ): { publicLatitude: number; publicLongitude: number; publicLocationLabel: string } {
   switch (precision) {
     case 'exact_building':
@@ -109,7 +109,7 @@ export function computePublicCoordinates(
 
     case 'nearby_building': {
       // Deterministic jitter between -0.0003 and +0.0003 degrees (~30 meters)
-      const h = Math.abs(hashString(seedKey || `${latitude},${longitude}`));
+      const h = Math.abs(hashString(jitterKey || `${latitude},${longitude}`));
       const latOffset = ((h % 100) / 100 - 0.5) * 0.0006;
       const lonOffset = (((h >> 4) % 100) / 100 - 0.5) * 0.0006;
       return {

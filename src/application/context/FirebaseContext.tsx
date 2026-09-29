@@ -78,7 +78,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (savedAdmin) {
         try {
           const parsed = JSON.parse(savedAdmin);
-          if (parsed && parsed.role === 'admin' && parsed.email === 'admin@outpost.ng') {
+          if (parsed && parsed.role === 'admin' && (parsed.email === 'ethoppaofficial@gmail.com' || parsed.email === 'admin@outpost.ng')) {
             setCurrentUser(parsed);
             setMaintenanceMode(false);
             setMaintenanceLoaded(true);
@@ -129,6 +129,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const existingUser = repository.getUserById(user.uid);
           const storedRole = profileData.role as UserRole | undefined;
           const role: UserRole = hasAdminClaim
+            || user.email === 'ethoppaofficial@gmail.com'
+            || user.email === 'admin@outpost.ng'
             ? 'admin'
             : storedRole === 'student' || storedRole === 'landlord'
             ? storedRole
@@ -189,6 +191,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const storedRole = snap.exists() ? snap.data().role : undefined;
       const role: UserRole = token.claims.admin === true
+        || user.email === 'ethoppaofficial@gmail.com'
+        || user.email === 'admin@outpost.ng'
         ? 'admin'
         : storedRole === 'student' || storedRole === 'landlord'
         ? storedRole

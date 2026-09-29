@@ -38,8 +38,7 @@ export type LocationSource =
   | 'address_search'
   | 'admin_adjusted'
   | 'landlord_pin'
-  | 'geocoded_address'
-  | 'seed_demo';
+  | 'geocoded_address';
 
 export type LocationVerificationStatus =
   | 'pending'
@@ -172,6 +171,42 @@ export type PropertyType = 'Hostel' | 'Apartment' | 'Studio' | 'Shared House';
 export type AccommodationType = 'Single Room' | 'Shared Room (2-person)' | 'Shared Room (3-4 person)' | 'Self-Contained Flat';
 export type GenderPolicy = 'Mixed' | 'Male-Only' | 'Female-Only';
 
+export interface ProfileVisibility {
+  bio: boolean;
+  faculty: boolean;
+  department: boolean;
+  programme: boolean;
+  studyLevel: boolean;
+  institution: boolean;
+  preferences: boolean;
+  phone: boolean;
+  email: boolean;
+}
+
+export const DEFAULT_PROFILE_VISIBILITY: ProfileVisibility = {
+  bio: true,
+  faculty: true,
+  department: true,
+  programme: true,
+  studyLevel: true,
+  institution: true,
+  preferences: true,
+  phone: false,
+  email: false,
+};
+
+export interface UserPreferences {
+  sleepSchedule?: 'early_bird' | 'night_owl' | 'flexible' | string;
+  cleanliness?: 'clean' | 'moderate' | 'relaxed' | string;
+  smoking?: 'no' | 'yes' | 'outdoor_only' | string;
+  guests?: 'never' | 'occasionally' | 'frequently' | string;
+  budgetMin?: number;
+  budgetMax?: number;
+  budgetRange?: string;
+  preferredLocation?: string;
+  hobbies?: string[];
+}
+
 export interface User {
   id: string;
   email: string;
@@ -180,12 +215,51 @@ export interface User {
   status?: AccountStatus;
   name?: string;
   fullName?: string;
+  displayName?: string;
   emailVerified: boolean;
   createdAt: string;
   lastLoginAt?: string;
   avatarUrl?: string;
+  avatarPresetId?: string;
+  bio?: string;
+  faculty?: string;
+  department?: string;
+  programme?: string;
+  studyLevel?: string;
+  institution?: string;
+  campus?: string;
+  phone?: string;
+  // Landlord specific fields
+  businessName?: string;
+  contactPreference?: 'phone' | 'email' | 'chat';
+  // Lifestyle / roommate preferences
+  preferences?: UserPreferences;
+  // Field visibility toggles
+  visibility?: ProfileVisibility;
   studentProfile?: StudentProfile;
   landlordProfile?: LandlordProfile;
+}
+
+export interface PublicProfile {
+  id: string;
+  role: UserRole;
+  fullName: string;
+  displayName?: string;
+  avatarUrl?: string;
+  avatarPresetId?: string;
+  isVerified: boolean;
+  createdAt: string;
+  bio?: string;
+  faculty?: string;
+  department?: string;
+  programme?: string;
+  studyLevel?: string;
+  institution?: string;
+  campus?: string;
+  phone?: string;
+  email?: string;
+  businessName?: string;
+  preferences?: UserPreferences;
 }
 
 export interface StudentProfile {

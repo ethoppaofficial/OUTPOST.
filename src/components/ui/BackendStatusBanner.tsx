@@ -1,7 +1,7 @@
 import React from 'react';
-import { Database, AlertTriangle, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Database, AlertTriangle, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
 import { useFirebase } from '../../application/context/FirebaseContext';
-import { appConfig, configValidationError } from '../../infrastructure/config/appConfig';
+import { configValidationError } from '../../infrastructure/config/appConfig';
 
 export const ConfigErrorScreen: React.FC = () => {
   return (
@@ -29,7 +29,7 @@ export const ConfigErrorScreen: React.FC = () => {
         </div>
         <button
           onClick={() => window.location.reload()}
-          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center justify-center gap-2"
+          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
         >
           <RefreshCw className="w-4 h-4" />
           <span>Retry Connection</span>
@@ -40,22 +40,29 @@ export const ConfigErrorScreen: React.FC = () => {
 };
 
 export const BackendStatusBadge: React.FC = () => {
-  const { connected, backendMode, firestoreDatabaseId } = useFirebase();
+  const { connected, firestoreDatabaseId } = useFirebase();
 
-  if (backendMode === 'mock') {
+  if (connected) {
     return (
-      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[11px] font-semibold">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        <span>Mock Mode (Local Storage Only)</span>
+      <div
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold"
+        title={`Connected to Firestore Database: ${firestoreDatabaseId}`}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        <CheckCircle2 className="w-3 h-3" />
+        <span>Connected to Firebase</span>
       </div>
     );
   }
 
   return (
-    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold" title={`Connected to Firestore DB: ${firestoreDatabaseId}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-      <Database className="w-3 h-3" />
-      <span>Firebase: {connected ? 'Live' : 'Connecting'}</span>
+    <div
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-semibold"
+      title="Firebase connection is not established"
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+      <XCircle className="w-3 h-3" />
+      <span>Not connected</span>
     </div>
   );
 };

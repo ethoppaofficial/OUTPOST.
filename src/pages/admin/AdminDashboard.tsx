@@ -75,7 +75,6 @@ export const AdminDashboard: React.FC = () => {
             {!data?.recentActivity.length ? <p className="mt-4 text-sm text-slate-500">No recorded activity yet.</p> : <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">{data.recentActivity.slice(0, 5).map((item) => <li key={item.id} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{item.action.replaceAll('_', ' ')}</p><p className="mt-0.5 text-xs text-slate-500">{item.actorName} · {item.targetEntity} {item.targetId}</p></div><span className="shrink-0 text-[11px] text-slate-400">{item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}</span></div></li>)}</ul>}
           </div>
         </section>
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"><CheckCircle2 className="h-4 w-4" /> Dashboard figures are loaded from Firebase; no seeded demo metrics are shown here.</div>
       </>}
     </div>
   );

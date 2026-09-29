@@ -10,7 +10,7 @@ export const UnauthorizedPage: React.FC = () => {
       </div>
       <h1 className="text-xl font-bold text-slate-900 dark:text-white">Restricted Portal Access</h1>
       <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-        Your current account role does not have administrative clearance to access this route. Please switch account personas or return to your dashboard.
+        Your current account role does not have authorization to access this restricted route. Please return to your account dashboard or homepage.
       </p>
       <div className="pt-2">
         <Link
