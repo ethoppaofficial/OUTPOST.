@@ -1,6 +1,7 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage, auth } from './firebaseConfig';
 import { appConfig } from '../config/appConfig';
+import { getSupabaseClient } from '../../lib/supabase/client';
 
 export interface FileUploadResult {
   url: string;
@@ -30,6 +31,32 @@ export class StorageService {
     if (appConfig.backendMode === 'mock') {
       return {
         url: URL.createObjectURL(file),
+        fileName: cleanName,
+        fileSize: file.size,
+        contentType: file.type || 'application/pdf',
+        path: storagePath,
+      };
+    }
+
+    if (appConfig.backendMode === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error('Supabase client is not configured.');
+      }
+      const { error } = await supabase.storage
+        .from('verification-documents')
+        .upload(storagePath, file, {
+          contentType: file.type || 'application/pdf',
+          upsert: false,
+        });
+      if (error) {
+        throw new Error(`Supabase Storage upload failed: ${error.message}`);
+      }
+      const { data: signedData } = await supabase.storage
+        .from('verification-documents')
+        .createSignedUrl(storagePath, 3600);
+      return {
+        url: signedData?.signedUrl || storagePath,
         fileName: cleanName,
         fileSize: file.size,
         contentType: file.type || 'application/pdf',
@@ -83,6 +110,32 @@ export class StorageService {
       };
     }
 
+    if (appConfig.backendMode === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error('Supabase client is not configured.');
+      }
+      const { error } = await supabase.storage
+        .from('verification-documents')
+        .upload(storagePath, file, {
+          contentType: file.type || 'application/pdf',
+          upsert: false,
+        });
+      if (error) {
+        throw new Error(`Supabase Storage upload failed: ${error.message}`);
+      }
+      const { data: signedData } = await supabase.storage
+        .from('verification-documents')
+        .createSignedUrl(storagePath, 3600);
+      return {
+        url: signedData?.signedUrl || storagePath,
+        fileName: cleanName,
+        fileSize: file.size,
+        contentType: file.type || 'application/pdf',
+        path: storagePath,
+      };
+    }
+
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'application/pdf',
@@ -129,6 +182,32 @@ export class StorageService {
       };
     }
 
+    if (appConfig.backendMode === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error('Supabase client is not configured.');
+      }
+      const { error } = await supabase.storage
+        .from('payment-receipts')
+        .upload(storagePath, file, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
+      if (error) {
+        throw new Error(`Supabase Storage upload failed: ${error.message}`);
+      }
+      const { data: signedData } = await supabase.storage
+        .from('payment-receipts')
+        .createSignedUrl(storagePath, 3600);
+      return {
+        url: signedData?.signedUrl || storagePath,
+        fileName: cleanName,
+        fileSize: file.size,
+        contentType: file.type || 'image/jpeg',
+        path: storagePath,
+      };
+    }
+
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'image/jpeg',
@@ -167,6 +246,32 @@ export class StorageService {
     if (appConfig.backendMode === 'mock') {
       return {
         url: URL.createObjectURL(file),
+        fileName: cleanName,
+        fileSize: file.size,
+        contentType: file.type || 'image/jpeg',
+        path: storagePath,
+      };
+    }
+
+    if (appConfig.backendMode === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error('Supabase client is not configured.');
+      }
+      const { error } = await supabase.storage
+        .from('property-images')
+        .upload(storagePath, file, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
+      if (error) {
+        throw new Error(`Supabase Storage upload failed: ${error.message}`);
+      }
+      const { data: pubData } = supabase.storage
+        .from('property-images')
+        .getPublicUrl(storagePath);
+      return {
+        url: pubData.publicUrl,
         fileName: cleanName,
         fileSize: file.size,
         contentType: file.type || 'image/jpeg',
