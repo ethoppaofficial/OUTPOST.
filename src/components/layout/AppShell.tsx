@@ -32,7 +32,6 @@ import { chatService } from '../../application/services/chatService';
 import { useFirebase } from '../../application/context/FirebaseContext';
 import { appEventBus } from '../../infrastructure/events/eventBus';
 import { ThemeToggle } from './ThemeToggle';
-import { BackendStatusBadge } from '../ui/BackendStatusBanner';
 
 export interface NavItem {
   id: string;
@@ -682,10 +681,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               </div>
             </div>
 
-            {/* Right: Backend Status, Auth Links or Authenticated Controls, Theme */}
+            {/* Right: Auth Links or Authenticated Controls, Theme */}
             <div className="flex items-center gap-2 sm:gap-3">
-              <BackendStatusBadge />
-
               {!isSignedIn ? (
                 <div className="flex items-center gap-2">
                   <Link
