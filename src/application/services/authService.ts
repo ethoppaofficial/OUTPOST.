@@ -19,18 +19,6 @@ export interface AuthSession {
 
 class AuthService {
   public getCurrentUser(): User {
-    const savedAdmin = typeof window !== 'undefined'
-      ? (sessionStorage.getItem('outpost_admin_active') || localStorage.getItem('outpost_admin_active'))
-      : null;
-    if (savedAdmin) {
-      try {
-        const parsed = JSON.parse(savedAdmin);
-        if (parsed?.role === 'admin') return parsed;
-      } catch {
-        // ignore invalid json
-      }
-    }
-
     const firebaseUser = auth.currentUser;
     if (!firebaseUser) {
       throw new Error('Authentication is required to access the current user.');
@@ -84,49 +72,6 @@ class AuthService {
       return { success: false, error: 'Enter your password to sign in.' };
     }
 
-    // Support injected administrator credentials for presentation/evaluation
-    const isAdminTarget = (normalized === 'ethoppaofficial@gmail.com' && password === '#blaqqking@25')
-      || (normalized === 'admin@outpost.ng' && (password === '#blaqqking@25' || password === 'admin@outpost'));
-
-    if (isAdminTarget) {
-      try {
-        const cred = await signInWithEmailAndPassword(auth, normalized, password);
-        const fbUser = cred.user;
-        repository.setActiveUserId(fbUser.uid);
-        const adminUser: User = {
-          id: fbUser.uid,
-          email: normalized,
-          fullName: 'OUTPOST Administrator',
-          role: 'admin',
-          accountStatus: 'active',
-          emailVerified: true,
-          createdAt: new Date().toISOString(),
-        };
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('outpost_admin_active', JSON.stringify(adminUser));
-          localStorage.setItem('outpost_admin_active', JSON.stringify(adminUser));
-        }
-        return { success: true, user: adminUser };
-      } catch (authErr) {
-        console.info('Authenticated administrator via injected credentials:', authErr);
-        const adminUser: User = {
-          id: 'user-admin-1',
-          email: normalized,
-          fullName: 'OUTPOST Administrator',
-          role: 'admin',
-          accountStatus: 'active',
-          emailVerified: true,
-          createdAt: new Date().toISOString(),
-        };
-        repository.setActiveUserId(adminUser.id);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('outpost_admin_active', JSON.stringify(adminUser));
-          localStorage.setItem('outpost_admin_active', JSON.stringify(adminUser));
-        }
-        return { success: true, user: adminUser };
-      }
-    }
-
     try {
       const cred = await signInWithEmailAndPassword(auth, normalized, password);
       const fbUser = cred.user;
@@ -137,8 +82,6 @@ class AuthService {
       const profile = userDoc.exists() ? userDoc.data() : {};
       const storedRole = profile.role as UserRole | undefined;
       const role: UserRole = token.claims.admin === true
-        || normalized === 'ethoppaofficial@gmail.com'
-        || normalized === 'admin@outpost.ng'
         ? 'admin'
         : storedRole === 'student' || storedRole === 'landlord'
         ? storedRole
@@ -509,10 +452,6 @@ class AuthService {
   }
 
   public async logout(): Promise<void> {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('outpost_admin_active');
-      localStorage.removeItem('outpost_admin_active');
-    }
     try {
       await fbSignOut(auth);
     } catch {}

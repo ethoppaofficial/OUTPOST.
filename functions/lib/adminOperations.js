@@ -236,6 +236,12 @@ exports.adminReviewProperty = (0, https_1.onCall)(async (request) => {
         updatedAt: firestore_1.FieldValue.serverTimestamp(),
     };
     if (decision === 'approve') {
+        if (landlordId) {
+            const landlordSnap = await firebaseAdmin_1.db.doc(`landlordProfiles/${landlordId}`).get();
+            if (!landlordSnap.exists || landlordSnap.data()?.verificationStatus !== 'approved') {
+                throw new https_1.HttpsError('failed-precondition', 'Cannot approve property listing: The landlord must complete identity and document verification before accommodation listings can be approved.');
+            }
+        }
         updates.verificationStatus = 'approved';
         updates.moderationStatus = 'active';
         updates.isActive = locationStatus === 'verified';

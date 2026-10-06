@@ -248,6 +248,12 @@ export const adminReviewProperty = onCall(async (request) => {
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (decision === 'approve') {
+    if (landlordId) {
+      const landlordSnap = await db.doc(`landlordProfiles/${landlordId}`).get();
+      if (!landlordSnap.exists || landlordSnap.data()?.verificationStatus !== 'approved') {
+        throw new HttpsError('failed-precondition', 'Cannot approve property listing: The landlord must complete identity and document verification before accommodation listings can be approved.');
+      }
+    }
     updates.verificationStatus = 'approved';
     updates.moderationStatus = 'active';
     updates.isActive = locationStatus === 'verified';

@@ -37,11 +37,7 @@ service cloud.firestore {
 
     function hasRole(role) {
       return signedIn() && (
-        (role == 'admin' && (
-          request.auth.token.get('admin', false) == true
-          || request.auth.token.email in ['admin@outpost.ng', 'ethoppaofficial@gmail.com']
-          || (userExists(request.auth.uid) && userDoc(request.auth.uid).data.get('role', '') == 'admin')
-        ))
+        (role == 'admin' && request.auth.token.get('admin', false) == true)
         || (
           role != 'admin'
           && (
@@ -55,11 +51,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn()
-        && (
-          request.auth.token.get('admin', false) == true
-          || request.auth.token.email in ['admin@outpost.ng', 'ethoppaofficial@gmail.com']
-          || (userExists(request.auth.uid) && userDoc(request.auth.uid).data.get('role', '') == 'admin')
-        )
+        && request.auth.token.get('admin', false) == true
         && accountIsActive(request.auth.uid);
     }
 

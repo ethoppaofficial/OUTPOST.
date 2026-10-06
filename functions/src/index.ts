@@ -12,3 +12,9 @@ export {
   adminSaveSettings,
   adminRecordSecurityEvent,
 } from './adminOperations';
+
+export {
+  createReservation,
+  reviewPaymentReceipt,
+  expireOverdueReservations,
+} from './reservationOperations';

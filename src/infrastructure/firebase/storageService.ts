@@ -144,6 +144,11 @@ export class StorageService {
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'image/jpeg',
+      customMetadata: {
+        propertyId,
+        uploaderUid: auth.currentUser?.uid || '',
+        uploadedAt: new Date().toISOString(),
+      },
     });
 
     const url = await getDownloadURL(snapshot.ref);

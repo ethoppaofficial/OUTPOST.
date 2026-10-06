@@ -71,25 +71,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubscribePublicSettings = undefined;
       setFirebaseUser(user);
 
-      // Check if injected admin session is active
-      const savedAdmin = typeof window !== 'undefined'
-        ? (sessionStorage.getItem('outpost_admin_active') || localStorage.getItem('outpost_admin_active'))
-        : null;
-      if (savedAdmin) {
-        try {
-          const parsed = JSON.parse(savedAdmin);
-          if (parsed && parsed.role === 'admin' && (parsed.email === 'ethoppaofficial@gmail.com' || parsed.email === 'admin@outpost.ng')) {
-            setCurrentUser(parsed);
-            setMaintenanceMode(false);
-            setMaintenanceLoaded(true);
-            setLoading(false);
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
       if (!user) {
         setCurrentUser(null);
         setMaintenanceMode(false);
@@ -129,8 +110,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const existingUser = repository.getUserById(user.uid);
           const storedRole = profileData.role as UserRole | undefined;
           const role: UserRole = hasAdminClaim
-            || user.email === 'ethoppaofficial@gmail.com'
-            || user.email === 'admin@outpost.ng'
             ? 'admin'
             : storedRole === 'student' || storedRole === 'landlord'
             ? storedRole
@@ -244,10 +223,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const signOut = async () => {
     try {
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('outpost_admin_active');
-        localStorage.removeItem('outpost_admin_active');
-      }
       if (currentUser?.role === 'admin') {
         try {
           await httpsCallable(functions, 'adminRecordSecurityEvent')({ event: 'ADMIN_LOGOUT' });

@@ -25,10 +25,18 @@ export function calculateCompatibility(
   const matchingFactors: string[] = [];
   const divergingFactors: string[] = [];
 
+  const safePrefA = prefA || ({} as Partial<RoommatePreference>);
+  const safePrefB = prefB || ({} as Partial<RoommatePreference>);
+
   // 1. Budget overlap (25 pts)
-  const overlapMin = Math.max(prefA.minBudget, prefB.minBudget);
-  const overlapMax = Math.min(prefA.maxBudget, prefB.maxBudget);
-  if (overlapMin <= overlapMax) {
+  const minA = typeof safePrefA.minBudget === 'number' ? safePrefA.minBudget : 0;
+  const maxA = typeof safePrefA.maxBudget === 'number' ? safePrefA.maxBudget : 0;
+  const minB = typeof safePrefB.minBudget === 'number' ? safePrefB.minBudget : 0;
+  const maxB = typeof safePrefB.maxBudget === 'number' ? safePrefB.maxBudget : 0;
+
+  const overlapMin = Math.max(minA, minB);
+  const overlapMax = Math.min(maxA, maxB);
+  if (overlapMin <= overlapMax && overlapMax > 0) {
     score += 25;
     matchingFactors.push('Aligned budget ranges (₦' + overlapMin.toLocaleString() + ' - ₦' + overlapMax.toLocaleString() + ')');
   } else {
@@ -42,9 +50,9 @@ export function calculateCompatibility(
   }
 
   // 2. Preferred Location overlap (20 pts)
-  const commonLocations = prefA.preferredNeighbourhoods.filter((n) =>
-    prefB.preferredNeighbourhoods.includes(n)
-  );
+  const locationsA = Array.isArray(safePrefA.preferredNeighbourhoods) ? safePrefA.preferredNeighbourhoods : [];
+  const locationsB = Array.isArray(safePrefB.preferredNeighbourhoods) ? safePrefB.preferredNeighbourhoods : [];
+  const commonLocations = locationsA.filter((n) => locationsB.includes(n));
   if (commonLocations.length > 0) {
     score += 20;
     matchingFactors.push(`Mutual interest in ${commonLocations.join(', ')}`);
@@ -54,65 +62,65 @@ export function calculateCompatibility(
   }
 
   // 3. Move-in period (15 pts)
-  if (prefA.moveInPeriod === prefB.moveInPeriod) {
+  if (safePrefA.moveInPeriod && safePrefA.moveInPeriod === safePrefB.moveInPeriod) {
     score += 15;
-    matchingFactors.push(`Both planning to move in ${prefA.moveInPeriod}`);
+    matchingFactors.push(`Both planning to move in ${safePrefA.moveInPeriod}`);
   } else {
     score += 5;
-    divergingFactors.push(`Different move-in targets (${prefA.moveInPeriod} vs ${prefB.moveInPeriod})`);
+    divergingFactors.push(`Different move-in targets (${safePrefA.moveInPeriod || 'TBD'} vs ${safePrefB.moveInPeriod || 'TBD'})`);
   }
 
   // 4. Cleanliness (10 pts) & Study Habits (5 pts)
-  if (prefA.cleanliness === prefB.cleanliness) {
+  if (safePrefA.cleanliness && safePrefA.cleanliness === safePrefB.cleanliness) {
     score += 10;
-    matchingFactors.push(`Compatible cleanliness expectations (${prefA.cleanliness})`);
+    matchingFactors.push(`Compatible cleanliness expectations (${safePrefA.cleanliness})`);
   } else if (
-    (prefA.cleanliness === 'Extremely Neat / Daily' && prefB.cleanliness === 'Relaxed') ||
-    (prefA.cleanliness === 'Relaxed' && prefB.cleanliness === 'Extremely Neat / Daily')
+    (safePrefA.cleanliness === 'Extremely Neat / Daily' && safePrefB.cleanliness === 'Relaxed') ||
+    (safePrefA.cleanliness === 'Relaxed' && safePrefB.cleanliness === 'Extremely Neat / Daily')
   ) {
     divergingFactors.push('Divergent domestic neatness routines');
   } else {
     score += 6;
   }
 
-  if (prefA.studyHabits === prefB.studyHabits) {
+  if (safePrefA.studyHabits && safePrefA.studyHabits === safePrefB.studyHabits) {
     score += 5;
-    matchingFactors.push(`Harmonious study lifestyle (${prefA.studyHabits})`);
+    matchingFactors.push(`Harmonious study lifestyle (${safePrefA.studyHabits})`);
   } else {
     score += 2;
   }
 
   // 5. Sleep Schedule & Noise (15 pts)
-  if (prefA.sleepSchedule === prefB.sleepSchedule) {
+  if (safePrefA.sleepSchedule && safePrefA.sleepSchedule === safePrefB.sleepSchedule) {
     score += 8;
-    matchingFactors.push(`Synchronized sleep schedule (${prefA.sleepSchedule})`);
+    matchingFactors.push(`Synchronized sleep schedule (${safePrefA.sleepSchedule})`);
   } else {
     score += 3;
   }
 
-  if (prefA.noiseTolerance === prefB.noiseTolerance) {
+  if (safePrefA.noiseTolerance && safePrefA.noiseTolerance === safePrefB.noiseTolerance) {
     score += 7;
-    matchingFactors.push(`Similar acoustic tolerance (${prefA.noiseTolerance})`);
+    matchingFactors.push(`Similar acoustic tolerance (${safePrefA.noiseTolerance})`);
   } else {
     score += 3;
   }
 
   // 6. Smoking & Guest preference (10 pts)
-  if (prefA.smoking === 'Non-Smoker Only' && prefB.smoking === 'Non-Smoker Only') {
+  if (safePrefA.smoking === 'Non-Smoker Only' && safePrefB.smoking === 'Non-Smoker Only') {
     score += 5;
     matchingFactors.push('Both smoke-free living environment');
   } else if (
-    (prefA.smoking === 'Non-Smoker Only' && prefB.smoking !== 'Non-Smoker Only') ||
-    (prefB.smoking === 'Non-Smoker Only' && prefA.smoking !== 'Non-Smoker Only')
+    (safePrefA.smoking === 'Non-Smoker Only' && safePrefB.smoking !== 'Non-Smoker Only') ||
+    (safePrefB.smoking === 'Non-Smoker Only' && safePrefA.smoking !== 'Non-Smoker Only')
   ) {
     divergingFactors.push('Conflicting smoking boundary');
   } else {
     score += 4;
   }
 
-  if (prefA.guestPreference === prefB.guestPreference) {
+  if (safePrefA.guestPreference && safePrefA.guestPreference === safePrefB.guestPreference) {
     score += 5;
-    matchingFactors.push(`Shared guest policy (${prefA.guestPreference})`);
+    matchingFactors.push(`Shared guest policy (${safePrefA.guestPreference})`);
   } else {
     score += 2;
   }

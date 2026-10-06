@@ -8,14 +8,18 @@ service firebase.storage {
     }
 
     function isAdmin() {
-      return signedIn() && (
-        request.auth.token.get('admin', false) == true
-        || request.auth.token.email in ['ethoppaofficial@gmail.com', 'admin@outpost.ng']
-      );
+      return signedIn() && request.auth.token.get('admin', false) == true;
     }
 
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
+    }
+
+    function isLandlord() {
+      return signedIn() && (
+        request.auth.token.get('role', '') == 'landlord'
+        || request.auth.token.get('admin', false) == true
+      );
     }
 
     function validImage(maxBytes) {
@@ -86,31 +90,52 @@ service firebase.storage {
     // ----------------------------------------------------------------------
     // Property Images
     // Path: property-images/{propertyId}/{fileName} (images only, max 5 MB)
+    // Only landlords or administrators can upload property media.
+    // Deletion is restricted to the uploader landlord or an administrator.
     // ----------------------------------------------------------------------
     match /property-images/{propertyId}/{fileName} {
-      // Publicly readable for listings, signed-in users can upload
       allow read: if true;
-      allow write: if signedIn() && validImage(5 * 1024 * 1024);
-      allow delete: if signedIn();
+      allow write: if (isLandlord() || isAdmin()) && validImage(5 * 1024 * 1024);
+      allow delete: if isAdmin()
+        || (isLandlord() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     // ----------------------------------------------------------------------
     // Payment Receipts
     // Path: payment-receipts/{reservationId}/{fileName} (image or PDF, max 5 MB)
+    // Read: Only the uploading student, property landlords, or administrators.
+    // Write: Signed-in students tagging their own uploader UID.
+    // Delete: Only the student owner or administrator.
     // ----------------------------------------------------------------------
     match /payment-receipts/{reservationId}/{fileName} {
-      allow read: if signedIn();
-      allow write: if signedIn() && validDocument(5 * 1024 * 1024);
-      allow delete: if signedIn();
+      allow read: if isAdmin()
+        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+      allow write: if signedIn()
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && validDocument(5 * 1024 * 1024);
+      allow delete: if isAdmin()
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
-    // Legacy receipts path support
+    // Legacy receipts path support with strict access
     match /receipts/{reservationId}/{fileName} {
-      allow read, write, delete: if signedIn();
+      allow read: if isAdmin()
+        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+      allow write: if signedIn()
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && validDocument(5 * 1024 * 1024);
+      allow delete: if isAdmin()
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     match /receipts/{reservationId}/{receiptId}/{fileName} {
-      allow read, write, delete: if signedIn();
+      allow read: if isAdmin()
+        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+      allow write: if signedIn()
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && validDocument(5 * 1024 * 1024);
+      allow delete: if isAdmin()
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     // ----------------------------------------------------------------------
@@ -120,7 +145,8 @@ service firebase.storage {
     match /chat-attachments/{chatId}/{fileName} {
       allow read: if signedIn();
       allow write: if signedIn() && validChatAttachment(5 * 1024 * 1024);
-      allow delete: if signedIn();
+      allow delete: if isAdmin()
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     // ----------------------------------------------------------------------
