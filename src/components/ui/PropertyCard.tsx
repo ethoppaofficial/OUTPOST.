@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, Bed, CheckCircle2 } from 'lucide-react';
+import { MapPin, Navigation, Bed, CheckCircle2, Compass } from 'lucide-react';
 import { Property } from '../../domain/types';
 import { VerificationBadge, Badge } from './Badge';
 
@@ -10,6 +10,10 @@ interface PropertyCardProps {
   onSelect?: (propertyId: string) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
+  proximity?: {
+    distanceKm: number;
+    compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null;
+  };
 }
 
 export const PropertyCard: React.FC<PropertyCardProps> = ({
@@ -18,6 +22,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   onSelect,
   onMouseEnter,
   onMouseLeave,
+  proximity,
 }) => {
   return (
     <div
@@ -80,6 +85,16 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
             <Navigation className="w-3.5 h-3.5 flex-shrink-0 text-emerald-500" />
             <span>{property.distanceKm} km from {property.campus.split('(')[0]}</span>
           </div>
+
+          {proximity && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/80 px-2.5 py-1 rounded-xl mt-2">
+              <Compass className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>
+                ~{proximity.distanceKm.toFixed(1)} km
+                {proximity.compassDirection ? ` ${proximity.compassDirection}` : ''} from your current device point
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Availability & Amenities Footer */}

@@ -540,17 +540,43 @@ export class FirebaseRepository {
 
   public createProperty(prop: Property): Property {
     const list = this.getProperties();
+    let savedLocation: PropertyLocation | undefined = undefined;
     if (prop.location) {
-      prop.location = this.savePropertyLocation(prop.location);
+      savedLocation = this.savePropertyLocation(prop.location);
+      prop.location = savedLocation;
     }
     list.unshift(prop);
     save(STORAGE_KEYS.PROPERTIES, list);
 
     if (this.canSyncToFirestore(prop.landlordId)) {
+      // 1. Sync private property location separately into propertyLocations/{id}
+      if (savedLocation) {
+        setDoc(
+          doc(db, 'propertyLocations', prop.id),
+          stripUndefined({
+            ...savedLocation,
+            propertyId: prop.id,
+            submittedBy: prop.landlordId,
+            verificationStatus: 'pending',
+            submittedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true }
+        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `propertyLocations/${prop.id}`));
+      }
+
+      // 2. Public property document must NEVER contain raw exact latitude/longitude or full private location
+      const {
+        latitude: _rawLat,
+        longitude: _rawLng,
+        location: _rawLocation,
+        ...safePublicDoc
+      } = prop;
+
       setDoc(
         doc(db, 'properties', prop.id),
         stripUndefined({
-          ...prop,
+          ...safePublicDoc,
           serverCreatedAt: serverTimestamp(),
         })
       ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `properties/${prop.id}`));
@@ -559,17 +585,39 @@ export class FirebaseRepository {
   }
 
   public updateProperty(prop: Property): Property {
+    let savedLocation: PropertyLocation | undefined = undefined;
     if (prop.location) {
-      prop.location = this.savePropertyLocation(prop.location);
+      savedLocation = this.savePropertyLocation(prop.location);
+      prop.location = savedLocation;
     }
     const list = this.getProperties().map((p) => (p.id === prop.id ? prop : p));
     save(STORAGE_KEYS.PROPERTIES, list);
 
     if (this.canSyncToFirestore(prop.landlordId)) {
+      if (savedLocation) {
+        setDoc(
+          doc(db, 'propertyLocations', prop.id),
+          stripUndefined({
+            ...savedLocation,
+            propertyId: prop.id,
+            submittedBy: prop.landlordId,
+            updatedAt: serverTimestamp(),
+          }),
+          { merge: true }
+        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `propertyLocations/${prop.id}`));
+      }
+
+      const {
+        latitude: _rawLat,
+        longitude: _rawLng,
+        location: _rawLocation,
+        ...safePublicDoc
+      } = prop;
+
       setDoc(
         doc(db, 'properties', prop.id),
         stripUndefined({
-          ...prop,
+          ...safePublicDoc,
           serverUpdatedAt: serverTimestamp(),
         }),
         { merge: true }

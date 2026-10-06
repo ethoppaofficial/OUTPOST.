@@ -2,6 +2,7 @@ export {
   submitPropertyLocation,
   synchronizeVerifiedPropertyLocation,
   reviewPropertyLocation,
+  searchNearbyProperties,
 } from './locationVerification';
 
 export {

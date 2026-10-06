@@ -31,3 +31,12 @@ npm --prefix functions run build
 ```
 
 Deploy the Firebase rules and functions to the configured project, then deploy the Vite `dist` output through the connected Vercel project. The deployment must use the same Firebase project and named Firestore database as the client configuration.
+
+## Location Architecture & Nearby Search Security
+
+- **Map-free MVP**: Interactive maps and geocoding services are removed/deferred as future work. Accommodation search is text-based and corridor-focused (Dambare and Rimin Gata around BUK New Site).
+- **Opt-in One-time Browser Location**: The browser Geolocation API is requested only upon an explicit student gesture ("Use my location") or landlord action. It is never triggered on page load, sign-in, route navigation, or background refresh.
+- **Privacy Protection**: Browser coordinates are sensitive and used strictly for the single request. They are never persisted in Firestore, localStorage, sessionStorage, logs, analytics, or student profiles. Browser geolocation requires HTTPS or localhost.
+- **Landlord Property-Point Capture**: Landlord device-captured GPS coordinates are optional, private, and stored separately from public listing data. They supplement—and never bypass—written addresses, landmarks, directions, and administrative review. Exact latitude/longitude is never written to public listing documents or returned to students.
+- **Trusted Server-Side Ranking**: Nearby search ranking is performed by a trusted Firebase Cloud Function (`searchNearbyProperties`) reading private points with the Admin SDK. The function returns only minimal public fields: property ID, distance rounded to 0.1 km, and coarse 8-point compass direction (N, NE, E, SE, S, SW, W, NW).
+- **Backend Status & Future Migration**: Firebase (Auth, Firestore, Storage, Cloud Functions) is the active operational backend. The Supabase/PostgreSQL migration remains separate future work. Local builds and unit tests verify software correctness but do not prove live production deployment or activation.

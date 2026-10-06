@@ -324,3 +324,162 @@ export const reviewPropertyLocation = onCall(async (request) => {
 
   return { ok: true, propertyId, verificationStatus: decision };
 });
+
+export interface NearbyPropertyResult {
+  propertyId: string;
+  distanceKm: number;
+  compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null;
+}
+
+/**
+ * Student-only trusted Cloud Function for nearby accommodation ranking.
+ * Takes the student's current device coordinates, reads private verified property
+ * locations on the server, calculates full-precision spherical distance, and returns
+ * ONLY the minimum necessary public fields (propertyId, distance rounded to 0.1km,
+ * and coarse 8-point compass direction). Exact coordinates are NEVER returned.
+ */
+export const searchNearbyProperties = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Authentication is required for nearby accommodation search.');
+  }
+
+  // Enforce Student role strictly from trusted profile/token data
+  await requireRole(uid, ['student', 'admin'], request.auth?.token as Record<string, unknown> | undefined);
+
+  const raw = (request.data ?? {}) as Record<string, unknown>;
+  const latitude = raw.latitude;
+  const longitude = raw.longitude;
+
+  if (!isFiniteCoordinate(latitude, longitude)) {
+    throw new HttpsError('invalid-argument', 'Valid, finite GPS coordinates are required.');
+  }
+
+  const studentLat = latitude as number;
+  const studentLon = longitude as number;
+
+  // Maximum radius in km to prevent unbounded queries (e.g. 50km around Kano)
+  const maxRadiusKm = typeof raw.maxRadiusKm === 'number' && Number.isFinite(raw.maxRadiusKm) && raw.maxRadiusKm > 0
+    ? Math.min(raw.maxRadiusKm, 25)
+    : 20;
+
+  // Query only approved, active properties within the approved study area
+  const propertiesSnap = await db
+    .collection('properties')
+    .where('verificationStatus', '==', 'approved')
+    .where('locationVerificationStatus', '==', 'verified')
+    .get();
+
+  if (propertiesSnap.empty) {
+    return { results: [] };
+  }
+
+  // Filter properties in memory for active status and allowed case study areas
+  const candidatePropertyIds: string[] = [];
+  for (const doc of propertiesSnap.docs) {
+    const data = doc.data();
+    if (data.isActive !== false && data.moderationStatus !== 'suspended') {
+      const area = data.area || data.neighbourhood;
+      if (ALLOWED_AREAS.has(area)) {
+        candidatePropertyIds.push(doc.id);
+      }
+    }
+  }
+
+  if (candidatePropertyIds.length === 0) {
+    return { results: [] };
+  }
+
+  // Read the private property locations using Admin SDK
+  // Firestore getAll supports up to 500 document references
+  const chunkSize = 200;
+  const locationDocs: FirebaseFirestore.DocumentSnapshot[] = [];
+  for (let i = 0; i < candidatePropertyIds.length; i += chunkSize) {
+    const chunkIds = candidatePropertyIds.slice(i, i + chunkSize);
+    const refs = chunkIds.map((id) => db.doc(`propertyLocations/${id}`));
+    const chunkSnaps = await db.getAll(...refs);
+    locationDocs.push(...chunkSnaps);
+  }
+
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const toDeg = (rad: number) => (rad * 180) / Math.PI;
+
+  const ranked: Array<{
+    propertyId: string;
+    rawDistanceKm: number;
+    distanceKm: number;
+    compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null;
+  }> = [];
+
+  for (const locDoc of locationDocs) {
+    if (!locDoc.exists) continue;
+    const loc = locDoc.data() as LocationRecord;
+
+    if (loc.verificationStatus !== 'verified') continue;
+    if (!ALLOWED_AREAS.has(loc.area)) continue;
+
+    // Use the verified property coordinates (publicLatitude/publicLongitude or latitude/longitude)
+    const propLat = typeof loc.publicLatitude === 'number' && Number.isFinite(loc.publicLatitude)
+      ? loc.publicLatitude
+      : loc.latitude;
+    const propLon = typeof loc.publicLongitude === 'number' && Number.isFinite(loc.publicLongitude)
+      ? loc.publicLongitude
+      : loc.longitude;
+
+    if (!isFiniteCoordinate(propLat, propLon)) continue;
+
+    // Spherical distance (Haversine)
+    const dLat = toRad(propLat - studentLat);
+    const dLon = toRad(propLon - studentLon);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(studentLat)) * Math.cos(toRad(propLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+    const rawDistanceKm = 6371 * c;
+
+    if (rawDistanceKm > maxRadiusKm) continue;
+
+    // Coarse 8-point compass direction
+    let compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null = null;
+    const epsilon = 1e-7;
+    if (Math.abs(studentLat - propLat) >= epsilon || Math.abs(studentLon - propLon) >= epsilon) {
+      const y = Math.sin(dLon) * Math.cos(toRad(propLat));
+      const x =
+        Math.cos(toRad(studentLat)) * Math.sin(toRad(propLat)) -
+        Math.sin(toRad(studentLat)) * Math.cos(toRad(propLat)) * Math.cos(dLon);
+      const θ = Math.atan2(y, x);
+      const bearing = (toDeg(θ) + 360) % 360;
+
+      if (bearing >= 337.5 || bearing < 22.5) compassDirection = 'N';
+      else if (bearing < 67.5) compassDirection = 'NE';
+      else if (bearing < 112.5) compassDirection = 'E';
+      else if (bearing < 157.5) compassDirection = 'SE';
+      else if (bearing < 202.5) compassDirection = 'S';
+      else if (bearing < 247.5) compassDirection = 'SW';
+      else if (bearing < 292.5) compassDirection = 'W';
+      else compassDirection = 'NW';
+    }
+
+    // Expose ONLY rounded distance to 0.1km
+    const distanceKm = Math.round(rawDistanceKm * 10) / 10;
+
+    ranked.push({
+      propertyId: loc.propertyId,
+      rawDistanceKm,
+      distanceKm,
+      compassDirection,
+    });
+  }
+
+  // Sort by full-precision spherical distance
+  ranked.sort((a, b) => a.rawDistanceKm - b.rawDistanceKm);
+
+  // Return strictly minimal fields: propertyId, distanceKm (0.1km rounded), compassDirection
+  const results: NearbyPropertyResult[] = ranked.map((item) => ({
+    propertyId: item.propertyId,
+    distanceKm: item.distanceKm,
+    compassDirection: item.compassDirection,
+  }));
+
+  return { results };
+});

@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminRecordSecurityEvent = exports.adminSaveSettings = exports.adminReviewProperty = exports.adminReviewVerification = exports.adminSetUserStatus = exports.reviewPropertyLocation = exports.synchronizeVerifiedPropertyLocation = exports.submitPropertyLocation = void 0;
+exports.adminRecordSecurityEvent = exports.adminSaveSettings = exports.adminReviewProperty = exports.adminReviewVerification = exports.adminSetUserStatus = exports.searchNearbyProperties = exports.reviewPropertyLocation = exports.synchronizeVerifiedPropertyLocation = exports.submitPropertyLocation = void 0;
 var locationVerification_1 = require("./locationVerification");
 Object.defineProperty(exports, "submitPropertyLocation", { enumerable: true, get: function () { return locationVerification_1.submitPropertyLocation; } });
 Object.defineProperty(exports, "synchronizeVerifiedPropertyLocation", { enumerable: true, get: function () { return locationVerification_1.synchronizeVerifiedPropertyLocation; } });
 Object.defineProperty(exports, "reviewPropertyLocation", { enumerable: true, get: function () { return locationVerification_1.reviewPropertyLocation; } });
+Object.defineProperty(exports, "searchNearbyProperties", { enumerable: true, get: function () { return locationVerification_1.searchNearbyProperties; } });
 var adminOperations_1 = require("./adminOperations");
 Object.defineProperty(exports, "adminSetUserStatus", { enumerable: true, get: function () { return adminOperations_1.adminSetUserStatus; } });
 Object.defineProperty(exports, "adminReviewVerification", { enumerable: true, get: function () { return adminOperations_1.adminReviewVerification; } });

@@ -153,6 +153,60 @@ export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lo
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
   return Number((R * c).toFixed(2));
+}
+
+export type CompassSector = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+
+/**
+ * Rounds a distance to the nearest 0.1 km (100 meters).
+ */
+export function roundDistanceToTenthKm(distanceKm: number): number {
+  if (!Number.isFinite(distanceKm) || distanceKm < 0) return 0;
+  return Math.round(distanceKm * 10) / 10;
+}
+
+/**
+ * Maps a numeric bearing [0, 360) to one of the eight standard compass sectors.
+ */
+export function bearingToCompassSector(bearing: number): CompassSector {
+  const normalized = ((bearing % 360) + 360) % 360;
+  if (normalized >= 337.5 || normalized < 22.5) return 'N';
+  if (normalized < 67.5) return 'NE';
+  if (normalized < 112.5) return 'E';
+  if (normalized < 157.5) return 'SE';
+  if (normalized < 202.5) return 'S';
+  if (normalized < 247.5) return 'SW';
+  if (normalized < 292.5) return 'W';
+  return 'NW';
+}
+
+/**
+ * Calculates coarse compass direction from a student's point toward a property point.
+ * Returns null if points are coincident.
+ */
+export function calculateCoarseDirection(
+  studentLat: number,
+  studentLon: number,
+  propertyLat: number,
+  propertyLon: number,
+  epsilon = 1e-7
+): CompassSector | null {
+  if (Math.abs(studentLat - propertyLat) < epsilon && Math.abs(studentLon - propertyLon) < epsilon) {
+    return null;
+  }
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const toDeg = (rad: number) => (rad * 180) / Math.PI;
+
+  const φ1 = toRad(studentLat);
+  const φ2 = toRad(propertyLat);
+  const Δλ = toRad(propertyLon - studentLon);
+
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+
+  const θ = Math.atan2(y, x);
+  const bearing = (toDeg(θ) + 360) % 360;
+  return bearingToCompassSector(bearing);
 }

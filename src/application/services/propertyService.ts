@@ -10,7 +10,16 @@ import {
   LocationSource,
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
-import { encodeGeohash, computePublicCoordinates, AREA_CENTERS } from '../../domain/geoUtils';
+import { encodeGeohash, computePublicCoordinates, AREA_CENTERS, CompassSector } from '../../domain/geoUtils';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../infrastructure/firebase/firebaseConfig';
+import { appConfig } from '../../infrastructure/config/appConfig';
+
+export interface NearbyAccommodationItem {
+  property: Property;
+  proximityDistanceKm: number;
+  compassDirection: CompassSector | null;
+}
 
 export interface PropertyFilterParams {
   query?: string;
@@ -413,6 +422,51 @@ class PropertyService {
 
   public updatePropertyAvailability(propertyId: string, unitId: string, count: number) {
     return repository.updatePropertyAvailability(propertyId, unitId, count);
+  }
+
+  /**
+   * Performs trusted nearby accommodation ranking for an authenticated student.
+   * Calls the trusted Cloud Function in Firebase mode.
+   * In mock mode, explicitly refuses to pretend secure server ranking works and
+   * informs the caller of the mock limitation.
+   */
+  public async findNearbyAccommodations(
+    latitude: number,
+    longitude: number,
+    maxRadiusKm?: number
+  ): Promise<NearbyAccommodationItem[]> {
+    if (appConfig.backendMode === 'mock') {
+      throw new Error(
+        'Nearby accommodation search requires live Firebase backend authentication. In mock mode, please use manual area filters (Dambare or Rimin Gata).'
+      );
+    }
+
+    const callable = httpsCallable<
+      { latitude: number; longitude: number; maxRadiusKm?: number },
+      { results: Array<{ propertyId: string; distanceKm: number; compassDirection: CompassSector | null }> }
+    >(functions, 'searchNearbyProperties');
+
+    const response = await callable({
+      latitude,
+      longitude,
+      maxRadiusKm,
+    });
+
+    const serverResults = response.data?.results || [];
+    const items: NearbyAccommodationItem[] = [];
+
+    for (const r of serverResults) {
+      const prop = repository.getPropertyById(r.propertyId);
+      if (prop && prop.verificationStatus === 'approved') {
+        items.push({
+          property: prop,
+          proximityDistanceKm: r.distanceKm,
+          compassDirection: r.compassDirection,
+        });
+      }
+    }
+
+    return items;
   }
 }
 

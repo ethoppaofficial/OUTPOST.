@@ -40,3 +40,21 @@ src/
    - The landlord confirms receipt credit, which changes reservation status to `confirmed`.
 3. **Automated 7-Day Hold Expiration**:
    - Idempotent expiration engine checks unverified holds and safely releases inventory back into availability.
+
+## Geospatial Architecture & Nearby Accommodation Search
+1. **MVP Scope: Map-Free Discovery**:
+   - Interactive maps, mapping tiles, and geocoding services are deferred as future enhancements. Student discovery is centered on the BUK New Site off-campus residential settlements: Danbare and Rimin Gata.
+2. **Opt-in One-Time Device Location**:
+   - Browser location is requested strictly through an explicit user gesture ("Use my location" on student search, or "Capture private property location" on the landlord form).
+   - Never requested on page load, navigation, or background intervals.
+   - Coordinates are transient for the query lifecycle and never saved to localStorage, Firestore, or user profiles.
+   - Requires HTTPS or localhost runtime contexts.
+3. **Private Property-Point Storage**:
+   - Landlord-captured device points supplement written addresses and directions; they do not bypass administrative verification.
+   - Stored in a separate restricted collection (`propertyLocations/{propertyId}`). Public property documents never contain raw exact coordinates.
+4. **Trusted Server-Side Ranking**:
+   - A trusted Firebase Cloud Function (`searchNearbyProperties`) uses the Firebase Admin SDK to evaluate distance on private points.
+   - Outputs strictly minimal data: property ID, distance rounded to 0.1 km, and a coarse 8-point compass sector (N, NE, E, SE, S, SW, W, NW).
+   - Distances and directions are explicitly labeled as approximate straight-line estimates, not turn-by-turn navigation.
+5. **Backend State**:
+   - Firebase (Auth, Firestore, Cloud Functions, Cloud Storage) serves as the active backend. Supabase migration is separate future work.

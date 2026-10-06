@@ -1,6 +1,6 @@
 import firebaseConfig from '../../../firebase-applet-config.json';
 
-export type BackendMode = 'firebase';
+export type BackendMode = 'firebase' | 'mock';
 
 export interface AppConfig {
   backendMode: BackendMode;

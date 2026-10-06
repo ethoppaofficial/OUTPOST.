@@ -23,6 +23,11 @@ import { PropertyCardSkeleton } from '../../components/ui/LoadingSkeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LOCATIONS, getLocationById } from '../../domain/locations';
 import { PropertyMap } from '../../components/map/PropertyMap';
+import { requestCurrentDevicePosition, GeolocationErrorResult } from '../../application/services/geolocationService';
+import { useFirebase } from '../../application/context/FirebaseContext';
+import { Compass, Loader2 } from 'lucide-react';
+import { appConfig } from '../../infrastructure/config/appConfig';
+import { NearbyAccommodationItem } from '../../application/services/propertyService';
 
 const COMMON_AMENITIES = [
   'Solar Inverter Backup',
@@ -44,6 +49,12 @@ export const PropertiesPage: React.FC = () => {
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+
+  // Device-location nearby search state (sensitive, one-time only; never stored)
+  const { currentUser } = useFirebase();
+  const [isLocating, setIsLocating] = useState(false);
+  const [nearbyResults, setNearbyResults] = useState<NearbyAccommodationItem[] | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // References for smooth scrolling
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -89,6 +100,59 @@ export const PropertiesPage: React.FC = () => {
     setSearchParams(new URLSearchParams(), { replace: true });
     setHasError(false);
     setSelectedPropertyId(null);
+    setNearbyResults(null);
+    setLocationError(null);
+  };
+
+  const clearNearbySearch = () => {
+    setNearbyResults(null);
+    setLocationError(null);
+  };
+
+  const handleUseMyLocation = async () => {
+    setLocationError(null);
+    setIsLocating(true);
+
+    try {
+      // 1. One-time explicit geolocation request using browser Geolocation API
+      const position = await requestCurrentDevicePosition();
+
+      // 2. Derive results from backend ranking
+      if (appConfig.backendMode === 'mock') {
+        setLocationError(
+          'Nearby ranking with trusted Cloud Functions requires live Firebase authentication. In demo/mock mode, please use manual settlement filters (Dambare or Rimin Gata).'
+        );
+        setIsLocating(false);
+        return;
+      }
+
+      if (!currentUser) {
+        setLocationError(
+          'Please sign in with your student account to search accommodations near your device.'
+        );
+        setIsLocating(false);
+        return;
+      }
+
+      const results = await propertyService.findNearbyAccommodations(
+        position.latitude,
+        position.longitude
+      );
+
+      setNearbyResults(results);
+      if (results.length === 0) {
+        setLocationError(
+          'No verified accommodations found within range of your current location. Try exploring Dambare or Rimin Gata manually.'
+        );
+      }
+    } catch (err: any) {
+      const geoErr = err as GeolocationErrorResult;
+      setLocationError(
+        geoErr?.message || err?.message || 'Could not determine device location. Please search manually.'
+      );
+    } finally {
+      setIsLocating(false);
+    }
   };
 
   // Determine active location IDs
@@ -138,6 +202,40 @@ export const PropertiesPage: React.FC = () => {
     selectedAmenities,
     sortBy,
   ]);
+
+  // Combine standard search with nearby ranking if activated
+  const displayedProperties = useMemo(() => {
+    if (!nearbyResults || nearbyResults.length === 0) {
+      return properties.map((p) => ({ property: p, proximity: undefined }));
+    }
+
+    // Map each nearby item to property and proximity metadata
+    const nearbyMap = new Map<string, { distanceKm: number; compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null }>();
+    for (const item of nearbyResults) {
+      nearbyMap.set(item.property.id, {
+        distanceKm: item.proximityDistanceKm,
+        compassDirection: item.compassDirection,
+      });
+    }
+
+    // Filter by existing active search filters (e.g. price, propertyType, etc.)
+    const matched: Array<{
+      property: (typeof properties)[number];
+      proximity?: { distanceKm: number; compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null };
+    }> = [];
+
+    for (const item of nearbyResults) {
+      const foundInFiltered = properties.find((p) => p.id === item.property.id);
+      if (foundInFiltered) {
+        matched.push({
+          property: foundInFiltered,
+          proximity: nearbyMap.get(foundInFiltered.id),
+        });
+      }
+    }
+
+    return matched;
+  }, [properties, nearbyResults]);
 
   const activeFilterCount = [
     query ? 1 : 0,
@@ -274,6 +372,33 @@ export const PropertiesPage: React.FC = () => {
           >
             Spaces Available
           </button>
+
+          {/* Explicit 'Use my location' control */}
+          <button
+            type="button"
+            onClick={nearbyResults ? clearNearbySearch : handleUseMyLocation}
+            disabled={isLocating}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+              nearbyResults
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+            }`}
+            title="Search accommodations near your current device location"
+            aria-label="Use my location for accommodation search"
+          >
+            {isLocating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Compass className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {isLocating
+                ? 'Locating device…'
+                : nearbyResults
+                ? `Proximity Search Active (${nearbyResults.length}) • Clear`
+                : 'Use my location'}
+            </span>
+          </button>
         </div>
 
         {/* Mobile Map / List Toggle Button */}
@@ -311,19 +436,70 @@ export const PropertiesPage: React.FC = () => {
             mobileViewMode === 'map' ? 'hidden lg:block' : 'block'
           }`}
         >
+          {/* Active Nearby Search Banner & Disclaimers */}
+          {nearbyResults && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-200">
+                  <Compass className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Sorted by Proximity from Your Current Device Position</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearNearbySearch}
+                  className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer"
+                >
+                  Clear proximity sort
+                </button>
+              </div>
+              <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-relaxed">
+                Distance is rounded to the nearest 0.1 km and direction shows coarse 8-point compass sector (N, NE, E, SE, S, SW, W, NW).
+                <strong> Note:</strong> Distance and direction are approximate straight-line estimates and are not turn-by-turn navigation.
+              </p>
+            </div>
+          )}
+
+          {/* Location Error Display */}
+          {locationError && (
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-1">
+                <p className="font-semibold">Nearby Search Notice</p>
+                <p>{locationError}</p>
+                <div className="flex items-center gap-3 pt-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    className="font-bold underline text-amber-900 dark:text-amber-200 hover:text-amber-700"
+                  >
+                    Retry location request
+                  </button>
+                  <span className="text-amber-400">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setLocationError(null)}
+                    className="text-amber-700 dark:text-amber-400 hover:underline"
+                  >
+                    Dismiss and search manually
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Active Filters Bar & Sorter */}
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-700 dark:text-slate-300">
-                {properties.length} Accommodations
+                {displayedProperties.length} Accommodations
               </span>
-              {activeFilterCount > 0 && (
+              {(activeFilterCount > 0 || nearbyResults !== null) && (
                 <button
                   onClick={resetFilters}
-                  className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 font-medium"
+                  className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 font-medium cursor-pointer"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>Reset ({activeFilterCount})</span>
+                  <span>Reset All</span>
                 </button>
               )}
             </div>
@@ -368,7 +544,7 @@ export const PropertiesPage: React.FC = () => {
                 <PropertyCardSkeleton key={i} />
               ))}
             </div>
-          ) : properties.length === 0 ? (
+          ) : displayedProperties.length === 0 ? (
             <EmptyState
               icon={<Building2 className="w-10 h-10 text-slate-400" />}
               title="No Accommodations Match Criteria"
@@ -380,7 +556,7 @@ export const PropertiesPage: React.FC = () => {
             />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {properties.map((property) => (
+              {displayedProperties.map(({ property, proximity }) => (
                 <div
                   key={property.id}
                   ref={(el) => {
@@ -390,6 +566,7 @@ export const PropertiesPage: React.FC = () => {
                 >
                   <PropertyCard
                     property={property}
+                    proximity={proximity}
                     isSelected={selectedPropertyId === property.id}
                     onSelect={(id) => setSelectedPropertyId(id)}
                     onMouseEnter={() => setHoveredPropertyId(property.id)}
