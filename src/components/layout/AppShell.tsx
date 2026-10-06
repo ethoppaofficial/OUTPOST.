@@ -79,7 +79,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     housing: true,
     roommates: true,
     workspace: true,
-    settlements: true,
   });
 
   const location = useLocation();
@@ -170,6 +169,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   };
 
   const userRole = session?.user?.role || 'student';
+  const profilePath =
+    userRole === 'admin'
+      ? '/admin/account'
+      : userRole === 'landlord'
+      ? '/landlord/verification'
+      : '/student/profile';
 
   // Typed navigation groups by role
   const studentNavGroups: NavGroup[] = [
@@ -179,7 +184,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       items: [
         { id: 'dash', label: 'Overview', to: '/student/dashboard', icon: Home, exact: true },
         { id: 'browse', label: 'Browse Accommodations', to: '/student/properties', icon: Compass },
-        { id: 'map', label: 'BUK Verified Map', to: '/map', icon: MapPin },
         { id: 'res', label: 'My Reservations', to: '/student/reservations', icon: CalendarCheck },
       ],
     },
@@ -434,50 +438,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               </div>
             );
           })}
-
-          {/* BUK Off-Campus Case Study Settlements Group */}
-          <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-            {!collapsed ? (
-              <div className="px-2.5 py-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                <span>BUK Settlements</span>
-                <MapPin className="w-3 h-3 text-emerald-500" />
-              </div>
-            ) : (
-              <div className="w-full border-t border-slate-100 dark:border-slate-800 my-1" />
-            )}
-
-            <Link
-              to="/properties?loc=loc-dambare"
-              title={collapsed ? 'Dambare Settlement (~0.4km)' : undefined}
-              className={`flex items-center ${
-                collapsed ? 'justify-center p-2' : 'justify-between px-3 py-1.5'
-              } rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 transition`}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                {!collapsed && <span className="truncate">Dambare Settlement</span>}
-              </div>
-              {!collapsed && (
-                <span className="text-[10px] text-slate-400 font-mono">~0.4km</span>
-              )}
-            </Link>
-
-            <Link
-              to="/properties?loc=loc-rimin-gata"
-              title={collapsed ? 'Rimin Gata Area (~0.9km)' : undefined}
-              className={`flex items-center ${
-                collapsed ? 'justify-center p-2' : 'justify-between px-3 py-1.5'
-              } rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 transition`}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" />
-                {!collapsed && <span className="truncate">Rimin Gata Area</span>}
-              </div>
-              {!collapsed && (
-                <span className="text-[10px] text-slate-400 font-mono">~0.9km</span>
-              )}
-            </Link>
-          </div>
         </div>
 
         {/* User Card & Logout in Sidebar */}
@@ -485,25 +445,31 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           <div className="p-2.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50">
             {!collapsed ? (
               <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 shadow-2xs">
-                <img
-                  src={
-                    session.user.avatarUrl ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                  }
-                  alt={session.displayName}
-                  className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0"
-                />
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                    {session.displayName}
-                  </span>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                    {session.user.email}
-                  </span>
-                </div>
+                <Link
+                  to={profilePath}
+                  title="View Account Profile"
+                  className="flex items-center gap-2.5 min-w-0 flex-1 group"
+                >
+                  <img
+                    src={
+                      session.user.avatarUrl ||
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
+                    }
+                    alt={session.displayName}
+                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
+                  />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
+                      {session.displayName}
+                    </span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                      {session.user.email}
+                    </span>
+                  </div>
+                </Link>
                 <button
                   onClick={handleLogout}
-                  className="p-1 text-slate-400 hover:text-rose-600 transition"
+                  className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                   title="Sign Out"
                 >
                   <LogOut className="w-4 h-4" />
@@ -511,18 +477,20 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2">
-                <img
-                  src={
-                    session.user.avatarUrl ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                  }
-                  alt={session.displayName}
-                  title={session.displayName}
-                  className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700"
-                />
+                <Link to={profilePath} title="View Account Profile">
+                  <img
+                    src={
+                      session.user.avatarUrl ||
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
+                    }
+                    alt={session.displayName}
+                    title={session.displayName}
+                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
+                  />
+                </Link>
                 <button
                   onClick={handleLogout}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 transition"
+                  className="p-1.5 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                   title="Sign Out"
                 >
                   <LogOut className="w-4 h-4" />
@@ -651,17 +619,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                   Off-Campus Accommodations
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40">
-                  Dambare & Rimin Gata
-                </span>
-                <Link
-                  to="/map"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-xs ml-1"
-                  title="Explore BUK Verified Accommodations on Interactive Map"
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>Map</span>
-                </Link>
               </div>
             </div>
 

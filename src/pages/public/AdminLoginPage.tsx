@@ -90,7 +90,7 @@ export const AdminLoginPage: React.FC = () => {
         <p className="text-sm text-slate-500 dark:text-slate-400">Restricted access for provisioned OUTPOST administrators.</p>
       </div>
 
-      <div className="flex items-center justify-between rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/80 p-3.5 text-xs text-purple-900 dark:text-purple-200 shadow-xs">
+      <div className="hidden invisible" aria-hidden="true">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
           <span>Injected admin: <strong className="font-mono">ethoppaofficial@gmail.com</strong></span>
@@ -147,7 +147,7 @@ export const AdminLoginPage: React.FC = () => {
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
           {submitting ? 'Verifying access…' : 'Sign in to Admin Console'}
         </button>
-        <p className="text-center text-xs text-slate-500">Administrator credentials are pre-injected for presentation access. Direct navigation to /admin/* is guarded by role verification.</p>
+        <p className="hidden invisible" aria-hidden="true">Administrator credentials are pre-injected for presentation access. Direct navigation to /admin/* is guarded by role verification.</p>
       </form>
       <p className="text-center text-sm text-slate-500"><Link to="/login" className="font-semibold text-emerald-600 hover:underline">Return to Student/Landlord sign in</Link></p>
     </div>

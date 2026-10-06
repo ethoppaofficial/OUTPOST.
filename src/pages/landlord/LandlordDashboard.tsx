@@ -6,8 +6,10 @@ import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { useFirebase } from '../../application/context/FirebaseContext';
 
 export const LandlordDashboard: React.FC = () => {
+  const { currentUser } = useFirebase();
   const session = authService.getSession();
   const profile = authService.getCurrentLandlordProfile();
   const properties = propertyService.getLandlordProperties(session.user.id);
@@ -19,6 +21,29 @@ export const LandlordDashboard: React.FC = () => {
 
   const isVerified = profile?.verificationStatus === 'approved';
 
+  const rawFullName =
+    profile?.legalName ||
+    currentUser?.fullName ||
+    session?.user?.fullName ||
+    session?.displayName ||
+    currentUser?.email ||
+    '';
+
+  const getFirstName = (name: string): string => {
+    if (!name) return 'Host';
+    const trimmed = name.trim();
+    if (trimmed.includes('@')) {
+      const local = trimmed.split('@')[0];
+      const clean = local.replace(/[._-]/g, ' ').trim();
+      const first = clean.split(/\s+/)[0];
+      return first ? first.charAt(0).toUpperCase() + first.slice(1) : 'Host';
+    }
+    const firstWord = trimmed.split(/\s+/)[0];
+    return firstWord || 'Host';
+  };
+
+  const firstName = getFirstName(rawFullName || profile?.businessName || 'Host');
+
   return (
     <div className="space-y-8">
       {/* Welcome Banner */}
@@ -26,7 +51,7 @@ export const LandlordDashboard: React.FC = () => {
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              {profile?.legalName || profile?.businessName || session.displayName}
+              Hello, {firstName}
             </h1>
             <VerificationBadge type="landlord" status={profile?.verificationStatus || 'pending'} />
           </div>

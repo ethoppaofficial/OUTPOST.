@@ -17,8 +17,10 @@ import { reservationService } from '../../application/services/reservationServic
 import { roommateService } from '../../application/services/roommateService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge, ReservationStatusBadge } from '../../components/ui/Badge';
+import { useFirebase } from '../../application/context/FirebaseContext';
 
 export const StudentDashboard: React.FC = () => {
+  const { currentUser } = useFirebase();
   const session = authService.getSession();
   const student = authService.getCurrentStudentProfile();
   const reservations = reservationService.getStudentReservations(session.user.id);
@@ -30,6 +32,29 @@ export const StudentDashboard: React.FC = () => {
   const isPendingReview = documents.some((d) => d.status === 'pending');
   const isRejected = documents.some((d) => d.status === 'rejected');
 
+  const rawFullName =
+    student?.fullName ||
+    currentUser?.fullName ||
+    session?.user?.fullName ||
+    session?.displayName ||
+    currentUser?.email ||
+    'Student';
+
+  const getFirstName = (name: string): string => {
+    if (!name) return 'Student';
+    const trimmed = name.trim();
+    if (trimmed.includes('@')) {
+      const local = trimmed.split('@')[0];
+      const clean = local.replace(/[._-]/g, ' ').trim();
+      const first = clean.split(/\s+/)[0];
+      return first ? first.charAt(0).toUpperCase() + first.slice(1) : 'Student';
+    }
+    const firstWord = trimmed.split(/\s+/)[0];
+    return firstWord || 'Student';
+  };
+
+  const firstName = getFirstName(rawFullName);
+
   return (
     <div className="space-y-8">
       {/* Welcome Banner */}
@@ -37,12 +62,19 @@ export const StudentDashboard: React.FC = () => {
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              Hello, {student?.fullName || session.displayName}
+              Hello, {firstName}
             </h1>
             <VerificationBadge type="student" status={!!isVerified} />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {student?.registrationNumber} • {student?.programme} • {student?.university} ({student?.campus})
+            {[
+              student?.registrationNumber,
+              student?.programme,
+              student?.university,
+              student?.campus ? `(${student.campus})` : null,
+            ]
+              .filter(Boolean)
+              .join(' • ') || 'Verified Student Profile'}
           </p>
         </div>
 

@@ -48,9 +48,18 @@ import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
 import { AdminAccountPage } from './pages/admin/AdminAccountPage';
 import { ThemeProvider } from './application/context/ThemeContext';
-import { FirebaseProvider } from './application/context/FirebaseContext';
+import { FirebaseProvider, useFirebase } from './application/context/FirebaseContext';
 import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
 import { configValidationError } from './infrastructure/config/appConfig';
+
+const ProfileRouteRedirect: React.FC = () => {
+  const { currentUser, loading } = useFirebase();
+  if (loading) return null;
+  if (!currentUser) return <Navigate to="/login" replace />;
+  if (currentUser.role === 'admin') return <Navigate to="/admin/account" replace />;
+  if (currentUser.role === 'landlord') return <Navigate to="/landlord/verification" replace />;
+  return <Navigate to="/student/profile" replace />;
+};
 
 export default function App() {
   if (configValidationError) {
@@ -73,6 +82,7 @@ export default function App() {
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/unauthorized" element={<UnauthorizedPage />} />
+              <Route path="/profile" element={<ProfileRouteRedirect />} />
 
               {/* Student Routes */}
               <Route
