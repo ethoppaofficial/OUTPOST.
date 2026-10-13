@@ -8,8 +8,8 @@ import { useFirebase } from '../../application/context/FirebaseContext';
 export const AdminLoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, loading: sessionLoading, signOut, signInWithEmail } = useFirebase();
-  const [email, setEmail] = useState('ethoppaofficial@gmail.com');
-  const [password, setPassword] = useState('#blaqqking@25');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resetSending, setResetSending] = useState(false);
@@ -47,14 +47,6 @@ export const AdminLoginPage: React.FC = () => {
     }
   };
 
-  const handleFillInjectedCredentials = () => {
-    setEmail('ethoppaofficial@gmail.com');
-    setPassword('#blaqqking@25');
-    setError(null);
-    setResetSuccessMessage(null);
-    setResetErrorMessage(null);
-  };
-
   const handleSendAdminPasswordReset = async () => {
     const targetEmail = email.trim();
     if (!targetEmail || !targetEmail.includes('@')) {
@@ -88,20 +80,6 @@ export const AdminLoginPage: React.FC = () => {
         </div>
         <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Administrator sign in</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">Restricted access for provisioned OUTPOST administrators.</p>
-      </div>
-
-      <div className="hidden invisible" aria-hidden="true">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
-          <span>Injected admin: <strong className="font-mono">ethoppaofficial@gmail.com</strong></span>
-        </div>
-        <button
-          type="button"
-          onClick={handleFillInjectedCredentials}
-          className="text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:underline px-2 py-0.5 rounded-md hover:bg-purple-100 dark:hover:bg-purple-900/50 transition cursor-pointer"
-        >
-          Reset to default
-        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900 sm:p-8">
@@ -147,7 +125,6 @@ export const AdminLoginPage: React.FC = () => {
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
           {submitting ? 'Verifying access…' : 'Sign in to Admin Console'}
         </button>
-        <p className="hidden invisible" aria-hidden="true">Administrator credentials are pre-injected for presentation access. Direct navigation to /admin/* is guarded by role verification.</p>
       </form>
       <p className="text-center text-sm text-slate-500"><Link to="/login" className="font-semibold text-emerald-600 hover:underline">Return to Student/Landlord sign in</Link></p>
     </div>

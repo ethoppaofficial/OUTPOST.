@@ -170,8 +170,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const storedRole = snap.exists() ? snap.data().role : undefined;
       const role: UserRole = token.claims.admin === true
-        || user.email === 'ethoppaofficial@gmail.com'
-        || user.email === 'admin@outpost.ng'
         ? 'admin'
         : storedRole === 'student' || storedRole === 'landlord'
         ? storedRole
@@ -213,11 +211,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const signInWithEmail = async (email: string, password?: string) => {
+    setLoading(true);
     const res = await authService.loginWithFirebase(email, password);
     if (res.success && res.user) {
       setCurrentUser(res.user);
-      setLoading(false);
     }
+    setLoading(false);
     return res;
   };
 

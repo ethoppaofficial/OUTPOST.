@@ -30,7 +30,7 @@ This implementation uses the existing Firebase Authentication and OUTPOST's **na
 
    ```bash
    gcloud auth application-default login
-   npm --prefix functions run admin:promote -- ethoppaofficial@gmail.com --confirm
+   npm --prefix functions run admin:promote -- <existing-verified-admin-email> --confirm
    ```
 
    The script reads the project ID and named Firestore database ID from `firebase-applet-config.json`. It sets only the custom claim and the matching role/status profile fields; it never creates or reads a password. The signed-in Google identity needs an appropriate privileged IAM role. If `gcloud` is unavailable, run the script in an environment with valid Application Default Credentials and the Firebase Admin SDK.

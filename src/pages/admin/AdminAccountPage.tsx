@@ -9,9 +9,13 @@ export const AdminAccountPage: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
 
-  const adminEmail = firebaseUser?.email || currentUser?.email || 'ethoppaofficial@gmail.com';
+  const adminEmail = firebaseUser?.email || currentUser?.email || '';
 
   const handleSendResetEmail = async () => {
+    if (!adminEmail) {
+      setResetError('No administrator email address associated with the active session.');
+      return;
+    }
     setResetSuccess(null);
     setResetError(null);
     setSendingReset(true);
