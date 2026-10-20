@@ -59,7 +59,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     // 2. Initialize repository
-    repository.init().catch(() => {});
+    repository.init().catch((err) => {
+      console.warn('[App Init] Repository initialization notice:', err?.message || 'offline fallback');
+    });
 
     // 3. Listen to Firebase Auth and the account's persisted Firestore profile.
     let unsubscribeProfile: (() => void) | undefined;

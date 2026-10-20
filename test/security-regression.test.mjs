@@ -163,7 +163,12 @@ describe('OUTPOST Master Security Regression Test Suite', () => {
         'src/infrastructure/firebase/storageService.ts',
         'functions/src/firebaseAdmin.ts',
         'functions/src/reservationOperations.ts',
-        'functions/src/adminOperations.ts'
+        'functions/src/adminOperations.ts',
+        'supabase/config.toml',
+        'supabase/migrations/20261020000001_initial_schema.sql',
+        'supabase/migrations/20261020000002_row_level_security.sql',
+        'supabase/migrations/20261020000003_storage_buckets_and_policies.sql',
+        'supabase/migrations/20261020000004_functions_triggers_and_automation.sql'
       ];
 
       for (const rel of trackedFiles) {
@@ -172,7 +177,130 @@ describe('OUTPOST Master Security Regression Test Suite', () => {
         assert.doesNotMatch(content, /-----BEGIN [A-Z ]*PRIVATE KEY-----/, `${rel} must not contain raw private key headers`);
         assert.doesNotMatch(content, /"type":\s*"service_account"/, `${rel} must not contain raw GCP service account JSON`);
         assert.doesNotMatch(content, /AKIA[0-9A-Z]{16}/, `${rel} must not contain AWS access keys`);
+        assert.doesNotMatch(content, /service_role.*eyJhbGciOi/, `${rel} must not contain raw hardcoded service-role JWTs`);
+      }
+    });
+  });
+
+  describe('5. Supabase PostgreSQL Schema & Integrity Verification', () => {
+    const schemaSql = fs.readFileSync('supabase/migrations/20261020000001_initial_schema.sql', 'utf8');
+
+    const expectedTables = [
+      'profiles',
+      'student_profiles',
+      'landlord_profiles',
+      'student_verification_documents',
+      'landlord_verification_submissions',
+      'properties',
+      'units',
+      'property_locations',
+      'roommate_preferences',
+      'roommate_requests',
+      'accommodation_groups',
+      'group_members',
+      'group_join_requests',
+      'group_invitations',
+      'reservations',
+      'invoices',
+      'payment_receipts',
+      'conversations',
+      'conversation_participants',
+      'messages',
+      'notifications',
+      'audit_logs'
+    ];
+
+    test('All 22 target domain tables are defined in schema migration', () => {
+      for (const table of expectedTables) {
+        assert.match(
+          schemaSql,
+          new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}\\s*\\(`, 'i'),
+          `Table public.${table} must be declared in initial schema`
+        );
+      }
+    });
+
+    test('Financial and reservation invariants are defined with CHECK constraints', () => {
+      assert.match(schemaSql, /available_spaces >= 0 AND available_spaces <= total_spaces/);
+      assert.match(schemaSql, /hold_expires_at > created_at/);
+      assert.match(schemaSql, /amount > 0/);
+      assert.match(schemaSql, /file_size > 0 AND file_size <= 10485760/);
+    });
+
+    test('Audit logs table is append-only and immutable', () => {
+      assert.match(schemaSql, /CREATE TABLE IF NOT EXISTS public\.audit_logs/);
+    });
+  });
+
+  describe('6. Supabase Row Level Security (RLS) & Function Security', () => {
+    const rlsSql = fs.readFileSync('supabase/migrations/20261020000002_row_level_security.sql', 'utf8');
+    const automationSql = fs.readFileSync('supabase/migrations/20261020000004_functions_triggers_and_automation.sql', 'utf8');
+
+    test('RLS is explicitly enabled on all 22 domain tables', () => {
+      const expectedTables = [
+        'profiles', 'student_profiles', 'landlord_profiles', 'student_verification_documents',
+        'landlord_verification_submissions', 'properties', 'units', 'property_locations',
+        'roommate_preferences', 'roommate_requests', 'accommodation_groups', 'group_members',
+        'group_join_requests', 'group_invitations', 'reservations', 'invoices',
+        'payment_receipts', 'conversations', 'conversation_participants', 'messages',
+        'notifications', 'audit_logs'
+      ];
+      for (const table of expectedTables) {
+        assert.match(
+          rlsSql,
+          new RegExp(`ALTER TABLE public\\.${table} ENABLE ROW LEVEL SECURITY;`, 'i'),
+          `RLS must be enabled on public.${table}`
+        );
+      }
+    });
+
+    test('Security Definer functions specify search_path = public, auth', () => {
+      const securityDefinerMatches = rlsSql.match(/SECURITY DEFINER[\s\S]*?SET search_path = public, auth/g);
+      assert.ok(securityDefinerMatches && securityDefinerMatches.length >= 3, 'All helper functions must set search_path');
+    });
+
+    test('Message 15-minute edit restriction trigger is installed', () => {
+      assert.match(automationSql, /CREATE TRIGGER tr_messages_edit_window/);
+      assert.match(automationSql, /interval '15 minutes'/);
+    });
+
+    test('Group last-admin protection trigger is installed', () => {
+      assert.match(automationSql, /CREATE TRIGGER tr_group_members_last_admin/);
+      assert.match(automationSql, /v_admin_count = 0/);
+    });
+
+    test('Atomic stored procedures for reservation hold and receipt review exist', () => {
+      assert.match(automationSql, /CREATE OR REPLACE FUNCTION public\.create_reservation_atomic/);
+      assert.match(automationSql, /CREATE OR REPLACE FUNCTION public\.review_payment_receipt_atomic/);
+      assert.match(automationSql, /CREATE OR REPLACE FUNCTION public\.expire_pending_reservations/);
+    });
+  });
+
+  describe('7. Supabase Storage & Edge Functions Architecture', () => {
+    const storageSql = fs.readFileSync('supabase/migrations/20261020000003_storage_buckets_and_policies.sql', 'utf8');
+
+    test('Storage buckets define private buckets with MIME type restrictions', () => {
+      assert.match(storageSql, /'student-docs', 'student-docs', false/);
+      assert.match(storageSql, /'landlord-docs', 'landlord-docs', false/);
+      assert.match(storageSql, /'payment-receipts', 'payment-receipts', false/);
+      assert.match(storageSql, /'chat-attachments', 'chat-attachments', false/);
+    });
+
+    test('All 6 primary Supabase Edge Functions exist on disk', () => {
+      const edgeFunctions = [
+        'supabase/functions/request-receipt-upload/index.ts',
+        'supabase/functions/finalize-receipt-upload/index.ts',
+        'supabase/functions/review-payment-receipt/index.ts',
+        'supabase/functions/request-chat-attachment-upload/index.ts',
+        'supabase/functions/finalize-chat-attachment-upload/index.ts',
+        'supabase/functions/get-private-asset-url/index.ts',
+        'supabase/functions/create-reservation/index.ts',
+        'supabase/functions/expire-reservations/index.ts'
+      ];
+      for (const funcPath of edgeFunctions) {
+        assert.ok(fs.existsSync(funcPath), `Edge function file ${funcPath} must exist`);
       }
     });
   });
 });
+

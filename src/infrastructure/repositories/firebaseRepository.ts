@@ -116,6 +116,11 @@ export class FirebaseRepository {
     return auth.currentUser.uid === targetOwnerId;
   }
 
+  private logSyncNotice(context: string, error: unknown): void {
+    const code = (error as any)?.code || (error as any)?.message || 'sync_notice';
+    console.warn(`[Outpost Repository] ${context} notice: ${code}`);
+  }
+
   public async init(): Promise<void> {
     if (this.isLiveInitialized) return;
     this.isLiveInitialized = true;
@@ -672,7 +677,7 @@ export class FirebaseRepository {
           updatedAt: serverTimestamp(),
         }),
         { merge: true }
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('saveRoommatePreference', err));
     }
     return pref;
   }
@@ -785,7 +790,9 @@ export class FirebaseRepository {
     save(STORAGE_KEYS.ROOMMATE_REQUESTS, all);
 
     if (this.canSyncToFirestore(senderId)) {
-      setDoc(doc(db, 'roommateRequests', req.id), stripUndefined(req)).catch(() => {});
+      setDoc(doc(db, 'roommateRequests', req.id), stripUndefined(req)).catch((err) =>
+        this.logSyncNotice('sendRoommateRequest', err)
+      );
     }
 
     return { success: true, request: req };
@@ -808,7 +815,7 @@ export class FirebaseRepository {
       updateDoc(doc(db, 'roommateRequests', requestId), {
         status: req.status,
         updatedAt: req.updatedAt,
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('respondToRoommateRequest', err));
     }
 
     if (action === 'accept') {
@@ -835,7 +842,9 @@ export class FirebaseRepository {
     const list = this.getAccommodationGroups().map((g) => (g.id === group.id ? group : g));
     save(STORAGE_KEYS.GROUPS, list);
     if (this.canSyncToFirestore()) {
-      setDoc(doc(db, 'accommodationGroups', group.id), stripUndefined(group), { merge: true }).catch(() => {});
+      setDoc(doc(db, 'accommodationGroups', group.id), stripUndefined(group), { merge: true }).catch((err) =>
+        this.logSyncNotice('updateGroup', err)
+      );
     }
     return group;
   }
@@ -913,8 +922,12 @@ export class FirebaseRepository {
     save(STORAGE_KEYS.GROUPS, groups);
 
     if (this.canSyncToFirestore(leaderId)) {
-      setDoc(doc(db, 'accommodationGroups', groupId), stripUndefined(newGroup)).catch(() => {});
-      setDoc(doc(db, 'conversations', convoId), stripUndefined(newConvo)).catch(() => {});
+      setDoc(doc(db, 'accommodationGroups', groupId), stripUndefined(newGroup)).catch((err) =>
+        this.logSyncNotice('createGroup', err)
+      );
+      setDoc(doc(db, 'conversations', convoId), stripUndefined(newConvo)).catch((err) =>
+        this.logSyncNotice('createGroupConversation', err)
+      );
     }
 
     return newGroup;
@@ -1276,7 +1289,7 @@ export class FirebaseRepository {
           ...newRes,
           serverCreatedAt: serverTimestamp(),
         })
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('createReservation', err));
 
       setDoc(
         doc(db, 'invoices', newInv.id),
@@ -1284,7 +1297,7 @@ export class FirebaseRepository {
           ...newInv,
           serverCreatedAt: serverTimestamp(),
         })
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('createInvoice', err));
     }
 
     return { success: true, reservation: newRes, invoice: newInv };
@@ -1313,7 +1326,7 @@ export class FirebaseRepository {
         status: 'cancelled',
         cancellationReason: res.cancellationReason,
         serverCancelledAt: serverTimestamp(),
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('cancelReservation', err));
     }
 
     return { success: true };
@@ -1372,12 +1385,12 @@ export class FirebaseRepository {
           ...newReceipt,
           serverUploadedAt: serverTimestamp(),
         })
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('uploadPaymentReceipt', err));
 
       updateDoc(doc(db, 'reservations', newReceipt.reservationId), {
         status: 'receipt_submitted',
         serverReceiptSubmittedAt: serverTimestamp(),
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('updateReservationForReceipt', err));
     }
 
     return { success: true, receipt: newReceipt };
@@ -1418,13 +1431,13 @@ export class FirebaseRepository {
         reviewedAt: serverTimestamp(),
         reviewedBy: auth.currentUser?.uid || reviewerId,
         rejectionReason: rejectionReason || null,
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('reviewPaymentReceipt', err));
 
       updateDoc(doc(db, 'reservations', receipt.reservationId), {
         status: decision === 'approved' ? 'confirmed' : 'rejected',
         confirmedAt: decision === 'approved' ? serverTimestamp() : null,
         cancellationReason: decision === 'rejected' ? rejectionReason || null : null,
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('updateReservationAfterReview', err));
     }
 
     return receipt;
@@ -1476,7 +1489,7 @@ export class FirebaseRepository {
           ...notif,
           serverCreatedAt: serverTimestamp(),
         })
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('createNotification', err));
     }
 
     appEventBus.publish(`notifications:${data.userId}`, notif);
@@ -1578,12 +1591,12 @@ export class FirebaseRepository {
           ...newMsg,
           serverCreatedAt: serverTimestamp(),
         })
-      ).catch(() => {});
+      ).catch((err) => this.logSyncNotice('sendMessage', err));
 
       updateDoc(doc(db, 'conversations', conversationId), {
         lastMessageText: newMsg.text,
         lastMessageTimestamp: serverTimestamp(),
-      }).catch(() => {});
+      }).catch((err) => this.logSyncNotice('updateConversationLastMessage', err));
     }
 
     appEventBus.publish(`chat:${conversationId}`, newMsg);
@@ -1711,7 +1724,9 @@ export class FirebaseRepository {
     save(STORAGE_KEYS.CONVERSATIONS, convos);
 
     if (this.canSyncToFirestore(userIdA)) {
-      setDoc(doc(db, 'conversations', newConvo.id), stripUndefined(newConvo)).catch(() => {});
+      setDoc(doc(db, 'conversations', newConvo.id), stripUndefined(newConvo)).catch((err) =>
+        this.logSyncNotice('startDirectConversation', err)
+      );
     }
 
     return newConvo;

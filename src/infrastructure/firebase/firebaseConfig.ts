@@ -33,7 +33,9 @@ export async function testConnection(): Promise<boolean> {
 
 // Perform initial connection verification in browser
 if (typeof window !== 'undefined') {
-  testConnection().catch(() => {});
+  testConnection().catch((err) => {
+    console.warn('[Firebase Connectivity] Test notice:', err?.message || 'offline check');
+  });
 }
 
 export default app;

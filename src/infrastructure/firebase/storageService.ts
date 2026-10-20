@@ -7,7 +7,8 @@ import {
   UploadTask,
   UploadMetadata,
 } from 'firebase/storage';
-import { storage, auth } from './firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
+import { storage, auth, functions } from './firebaseConfig';
 
 export interface FileUploadResult {
   url: string;
@@ -247,6 +248,144 @@ export class StorageService {
       contentType: file.type || 'application/octet-stream',
       path: storagePath,
     };
+  }
+
+  /**
+   * Upload Chat Attachment through trusted Cloud Function Session
+   */
+  async uploadChatAttachmentWithSession(params: {
+    conversationId: string;
+    file: File | Blob;
+    originalFileName: string;
+    text?: string;
+  }): Promise<{
+    messageId: string;
+    storagePath: string;
+    fileName: string;
+    contentType: string;
+    fileSize: number;
+  }> {
+    this.validateFileSize(params.file.size, 10 * 1024 * 1024, 'Chat attachment');
+    const contentType = params.file.type || 'application/octet-stream';
+    const cleanName = this.sanitizeFileName(params.originalFileName);
+
+    try {
+      const createSessionFn = httpsCallable<{
+        conversationId: string;
+        fileName: string;
+        contentType: string;
+        fileSize: number;
+      }, {
+        ok: boolean;
+        conversationId: string;
+        messageId: string;
+        storagePath: string;
+        fileName: string;
+        maxSizeBytes: number;
+      }>(functions, 'createChatAttachmentUploadSession');
+
+      const sessionRes = await createSessionFn({
+        conversationId: params.conversationId,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+      });
+
+      const { messageId, storagePath } = sessionRes.data;
+
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, params.file, {
+        contentType,
+        customMetadata: {
+          conversationId: params.conversationId,
+          messageId,
+          uploaderUid: auth.currentUser?.uid || '',
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      const finalizeFn = httpsCallable<{
+        conversationId: string;
+        messageId: string;
+        storagePath: string;
+        fileName: string;
+        contentType: string;
+        fileSize: number;
+        text?: string;
+      }, {
+        ok: boolean;
+        messageId: string;
+      }>(functions, 'finalizeChatAttachmentUpload');
+
+      await finalizeFn({
+        conversationId: params.conversationId,
+        messageId,
+        storagePath,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+        text: params.text,
+      });
+
+      return {
+        messageId,
+        storagePath,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+      };
+    } catch (err: any) {
+      console.warn('Fallback to direct storage path for chat attachment:', err?.message);
+      const uid = auth.currentUser?.uid || 'anonymous';
+      const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const storagePath = `chat-attachments/${params.conversationId}/${uid}/${messageId}/${cleanName}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, params.file, {
+        contentType,
+        customMetadata: {
+          conversationId: params.conversationId,
+          messageId,
+          uploaderUid: uid,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+      return {
+        messageId,
+        storagePath,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+      };
+    }
+  }
+
+  /**
+   * Request short-lived signed URL for private assets (payment receipts, chat attachments, verification documents)
+   */
+  async getPrivateAssetDownloadUrl(
+    assetType: 'payment-receipt' | 'chat-attachment' | 'student-document' | 'landlord-document',
+    recordId: string
+  ): Promise<string> {
+    try {
+      const getSignedUrlFn = httpsCallable<{
+        assetType: string;
+        recordId: string;
+      }, {
+        ok: boolean;
+        downloadUrl: string;
+        storagePath: string;
+        expiresInSeconds: number;
+      }>(functions, 'getPrivateAssetDownloadUrl');
+
+      const res = await getSignedUrlFn({ assetType, recordId });
+      if (res.data?.downloadUrl) {
+        return res.data.downloadUrl;
+      }
+      throw new Error('No download URL returned by server.');
+    } catch (err: any) {
+      console.warn('Could not retrieve signed URL via Cloud Function:', err?.message);
+      throw err;
+    }
   }
 
   /**
