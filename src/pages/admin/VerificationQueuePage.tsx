@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle, Loader2 } from 'lucide-react';
 import { adminService, AdminRecord } from '../../application/services/adminService';
+import { storageService } from '../../infrastructure/firebase/storageService';
 import { Modal } from '../../components/ui/Modal';
 
 type Kind = 'student' | 'landlord';
@@ -20,9 +21,30 @@ export const VerificationQueuePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openingEvidenceId, setOpeningEvidenceId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
+
+  const handleOpenEvidence = async (item: AdminRecord, kind: Kind) => {
+    const id = kind === 'student' ? item.id : item.userId || item.id;
+    setOpeningEvidenceId(id);
+    try {
+      const signedUrl = await storageService.getPrivateAssetDownloadUrl(
+        kind === 'student' ? 'student-document' : 'landlord-document',
+        id
+      );
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      if (item.documentUrl) {
+        window.open(item.documentUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        alert('Evidence document could not be retrieved.');
+      }
+    } finally {
+      setOpeningEvidenceId(null);
+    }
+  };
 
   const refresh = async () => {
     const queue = await adminService.getVerificationQueues();
@@ -72,11 +94,35 @@ export const VerificationQueuePage: React.FC = () => {
           return <article key={id} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><FileCheck2 className="h-4 w-4 text-amber-600" /><h2 className="font-bold text-slate-900 dark:text-white">{name || (activeTab === 'student' ? 'Student' : 'Landlord')}</h2></div><p className="mt-1 text-xs text-slate-500">{activeTab === 'student' ? `${item.studentEmail || 'No email'} · ${item.registrationNumber || 'Registration number not supplied'}` : `${item.email || 'No email'} · ${item.businessName || 'Individual landlord'}`}</p></div><span className="w-fit rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">Pending review</span></div>
             <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-xs dark:bg-slate-800/70 sm:grid-cols-2 lg:grid-cols-4">
-              {activeTab === 'student' ? <><div><span className="text-slate-500">University / campus</span><p className="mt-1 font-semibold">{[item.university, item.campus].filter(Boolean).join(' · ') || 'Not supplied'}</p></div><div><span className="text-slate-500">Programme / level</span><p className="mt-1 font-semibold">{[item.programme, item.studyLevel].filter(Boolean).join(' · ') || 'Not supplied'}</p></div><div><span className="text-slate-500">Document type</span><p className="mt-1 font-semibold">{item.documentType || 'Not supplied'}</p></div></> : <><div><span className="text-slate-500">Identity type</span><p className="mt-1 font-semibold">{item.idType || 'Not supplied'}</p></div><div><span className="text-slate-500">Reference (partially masked)</span><p className="mt-1 font-semibold">{maskIdentifier(item.idNumber)}</p></div><div><span className="text-slate-500">Ownership evidence</span><p className="mt-1 font-semibold">{item.ownershipDocType || 'Not supplied'}</p></div></>}
+              {activeTab === 'student' ? (
+                <>
+                  <div><span className="text-slate-500">University / campus</span><p className="mt-1 font-semibold">{[item.university, item.campus].filter(Boolean).join(' · ') || 'Not supplied'}</p></div>
+                  <div><span className="text-slate-500">Programme / level</span><p className="mt-1 font-semibold">{[item.programme, item.studyLevel].filter(Boolean).join(' · ') || 'Not supplied'}</p></div>
+                  <div><span className="text-slate-500">Document type</span><p className="mt-1 font-semibold">{item.documentType || 'Not supplied'}</p></div>
+                </>
+              ) : (
+                <>
+                  <div><span className="text-slate-500">Identity type</span><p className="mt-1 font-semibold">{item.idType || 'Not supplied'}</p></div>
+                  <div><span className="text-slate-500">Reference (partially masked)</span><p className="mt-1 font-semibold">{maskIdentifier(item.idNumber)}</p></div>
+                  <div><span className="text-slate-500">Ownership evidence</span><p className="mt-1 font-semibold">{item.ownershipDocType || 'Not supplied'}</p></div>
+                </>
+              )}
               <div><span className="text-slate-500">Submitted</span><p className="mt-1 font-semibold">{item.submittedAt ? new Date(item.submittedAt).toLocaleString() : 'Date unavailable'}</p></div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-              {documentUrl ? <a href={documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400"><ExternalLink className="h-3.5 w-3.5" />Open submitted evidence</a> : <span className="text-xs text-amber-700 dark:text-amber-300">No document link is stored for this submission.</span>}
+              <button
+                type="button"
+                disabled={openingEvidenceId === id}
+                onClick={() => handleOpenEvidence(item, activeTab)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+              >
+                {openingEvidenceId === id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-3.5 w-3.5" />
+                )}
+                <span>Open submitted evidence (signed link)</span>
+              </button>
               <div className="flex gap-2"><button type="button" disabled={busyId === id} onClick={() => setTarget({ kind: activeTab, id, name: String(name || activeTab) })} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300"><XCircle className="mr-1 inline h-3.5 w-3.5" />Reject</button><button type="button" disabled={busyId === id} onClick={() => decide(item, activeTab, 'approved')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{busyId === id ? 'Saving…' : 'Approve'}</button></div>
             </div>
           </article>;

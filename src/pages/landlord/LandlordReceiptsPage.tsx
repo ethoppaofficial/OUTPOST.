@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { CheckCircle2, XCircle, Clock, FileText, ExternalLink, ShieldCheck, AlertCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, FileText, ExternalLink, ShieldCheck, AlertCircle, Eye, Loader2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
+import { storageService } from '../../infrastructure/firebase/storageService';
 import { PaymentReceipt } from '../../domain/types';
 import { ReceiptStatusBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
@@ -16,6 +17,22 @@ export const LandlordReceiptsPage: React.FC = () => {
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('Payment reference not reflecting in bank statement');
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<{ id: string; url: string; studentName: string } | null>(null);
+  const [loadingReceiptId, setLoadingReceiptId] = useState<string | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  const handleViewReceipt = async (receipt: PaymentReceipt) => {
+    setLoadingReceiptId(receipt.id);
+    setViewError(null);
+    try {
+      const signedUrl = await storageService.getPrivateAssetDownloadUrl('payment-receipt', receipt.id);
+      setViewingReceipt({ id: receipt.id, url: signedUrl, studentName: receipt.studentName });
+    } catch (err: any) {
+      setViewError('Unable to access private receipt evidence: ' + (err.message || 'Unauthorized or expired session.'));
+    } finally {
+      setLoadingReceiptId(null);
+    }
+  };
 
   const handleApprove = (receiptId: string) => {
     const res = reservationService.reviewPaymentReceipt(receiptId, 'approved');
@@ -121,7 +138,21 @@ export const LandlordReceiptsPage: React.FC = () => {
                 )}
 
                 {/* Actions */}
-                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="pt-2 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => handleViewReceipt(rec)}
+                    disabled={loadingReceiptId === rec.id}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition"
+                  >
+                    {loadingReceiptId === rec.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    )}
+                    <span>Inspect Bank Receipt</span>
+                  </button>
+
                   {isPending && (
                     <>
                       <button
@@ -196,6 +227,62 @@ export const LandlordReceiptsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Secure Bank Receipt Evidence Viewer Modal */}
+      <Modal
+        isOpen={!!viewingReceipt}
+        onClose={() => setViewingReceipt(null)}
+        title={`Payment Evidence: ${viewingReceipt?.studentName || 'Student'}`}
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-500 dark:text-slate-400">
+            Authorized private preview generated strictly for this accommodation's verified landlord. Short-lived token expires in 15 minutes.
+          </p>
+
+          <div className="rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 min-h-[250px] max-h-[65vh] flex items-center justify-center p-2">
+            {viewingReceipt?.url?.includes('.pdf') ? (
+              <iframe
+                src={viewingReceipt.url}
+                className="w-full h-96 rounded-xl border-0"
+                title="Payment Receipt PDF"
+              />
+            ) : (
+              <img
+                src={viewingReceipt?.url || ''}
+                alt="Payment Receipt Evidence"
+                className="max-h-[60vh] object-contain rounded-xl"
+              />
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+            <a
+              href={viewingReceipt?.url || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-500"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open in new window</span>
+            </a>
+            <button
+              type="button"
+              onClick={() => setViewingReceipt(null)}
+              className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-xs font-semibold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {viewError && (
+        <div className="fixed bottom-6 right-6 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2 shadow-lg z-50">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{viewError}</span>
+          <button onClick={() => setViewError(null)} className="ml-2 font-bold hover:underline">Dismiss</button>
+        </div>
+      )}
     </div>
   );
 };

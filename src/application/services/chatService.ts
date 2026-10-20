@@ -7,6 +7,7 @@ import {
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { appEventBus } from '../../infrastructure/events/eventBus';
+import { storageService } from '../../infrastructure/firebase/storageService';
 
 class ChatService {
   public getConversations(userId: string): Conversation[] {
@@ -38,9 +39,64 @@ class ChatService {
     conversationId: string,
     senderId: string,
     text: string,
-    options?: { replyTo?: MessageReplyReference; mentions?: MessageMention[] }
+    options?: {
+      replyTo?: MessageReplyReference;
+      mentions?: MessageMention[];
+      attachment?: {
+        storagePath: string;
+        fileName: string;
+        contentType: string;
+        fileSize: number;
+        uploadedBy: string;
+        uploadedAt: string;
+      };
+    }
   ): ChatMessage {
     return repository.sendMessage(conversationId, senderId, text, options);
+  }
+
+  public async sendAttachmentMessage(
+    conversationId: string,
+    senderId: string,
+    file: File | Blob,
+    fileName: string,
+    text?: string
+  ): Promise<{ success: boolean; message?: ChatMessage; error?: string }> {
+    try {
+      const conv = this.getConversationById(conversationId);
+      if (!conv) {
+        return { success: false, error: 'Target conversation not found.' };
+      }
+      if (!conv.participantIds.includes(senderId)) {
+        return { success: false, error: 'You are not an active participant in this conversation.' };
+      }
+
+      const res = await storageService.uploadChatAttachmentWithSession({
+        conversationId,
+        file,
+        originalFileName: fileName,
+        text,
+      });
+
+      const message = this.sendMessage(conversationId, senderId, text || `Attachment: ${res.fileName}`, {
+        attachment: {
+          storagePath: res.storagePath,
+          fileName: res.fileName,
+          contentType: res.contentType,
+          fileSize: res.fileSize,
+          uploadedBy: senderId,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      return { success: true, message };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to send attachment.' };
+    }
+  }
+
+  public async getAttachmentSignedUrl(messageId: string): Promise<string> {
+    return storageService.getPrivateAssetDownloadUrl('chat-attachment', messageId);
   }
 
   public editMessage(

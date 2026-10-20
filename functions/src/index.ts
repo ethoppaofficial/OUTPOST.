@@ -18,3 +18,12 @@ export {
   reviewPaymentReceipt,
   expireOverdueReservations,
 } from './reservationOperations';
+
+export {
+  createPaymentReceiptUploadSession,
+  finalizePaymentReceiptUpload,
+  createChatAttachmentUploadSession,
+  finalizeChatAttachmentUpload,
+  getPrivateAssetDownloadUrl,
+  migrateLegacySensitiveAsset,
+} from './storageOperations';

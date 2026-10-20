@@ -22,7 +22,11 @@ import {
   ShieldCheck,
   ArrowLeft,
   ChevronRight,
-  MoreVertical
+  MoreVertical,
+  Paperclip,
+  FileText,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { chatService } from '../../application/services/chatService';
@@ -81,6 +85,8 @@ export const ChatPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const activeConv = conversations.find((c) => c.id === activeConvId);
 
@@ -227,6 +233,47 @@ export const ChatPage: React.FC = () => {
       chatService.setTypingState(activeConv.id, session.user.id, session.displayName, false);
     } catch (err: any) {
       alert(err?.message || 'Failed to send message.');
+    }
+  };
+
+  // Handle Chat Attachment Selection & Trusted Upload
+  const handleAttachmentSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConv) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Attachment exceeds maximum allowed size of 10 MB.');
+      return;
+    }
+    setUploadingAttachment(true);
+    try {
+      const res = await chatService.sendAttachmentMessage(
+        activeConv.id,
+        session.user.id,
+        file,
+        file.name,
+        inputText.trim() || undefined
+      );
+      if (!res.success) {
+        alert(res.error || 'Failed to send attachment.');
+      } else {
+        setInputText('');
+        setMessages(chatService.getMessages(activeConv.id));
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Error uploading chat attachment.');
+    } finally {
+      setUploadingAttachment(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  };
+
+  // Open private chat attachment via short-lived signed URL
+  const handleOpenAttachment = async (messageId: string) => {
+    try {
+      const signedUrl = await chatService.getAttachmentSignedUrl(messageId);
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      alert('Unable to load private chat attachment: ' + (err?.message || 'Unauthorized'));
     }
   };
 
@@ -623,6 +670,32 @@ export const ChatPage: React.FC = () => {
                         </div>
                       )}
 
+                      {msg.attachment && (
+                        <div
+                          className={`mt-2 p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                            isMe
+                              ? 'bg-emerald-700/60 border-emerald-500/40 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate font-medium">{msg.attachment.fileName}</span>
+                            <span className="text-[10px] opacity-75">
+                              ({(msg.attachment.fileSize / 1024).toFixed(0)} KB)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAttachment(msg.id)}
+                            className="p-1 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold flex items-center gap-1 transition"
+                            title="Open private file via short-lived signed link"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+
                       {/* Quick Action Toolbar (Pencil for 15-min edit, Reply button) */}
                       {!isEditingThis && (
                         <div
@@ -752,6 +825,27 @@ export const ChatPage: React.FC = () => {
             onSubmit={handleSend}
             className="p-3 sm:p-4 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2"
           >
+            <button
+              type="button"
+              disabled={uploadingAttachment}
+              onClick={() => attachmentInputRef.current?.click()}
+              className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              title="Attach private document or image (Max 10MB)"
+            >
+              {uploadingAttachment ? (
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+              ) : (
+                <Paperclip className="w-4 h-4" />
+              )}
+            </button>
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              className="hidden"
+              accept="image/jpeg,image/png,image/webp,application/pdf,text/plain"
+              onChange={handleAttachmentSelected}
+            />
+
             <input
               ref={inputRef}
               type="text"

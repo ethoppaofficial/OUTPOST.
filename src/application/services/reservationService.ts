@@ -105,7 +105,8 @@ class ReservationService {
   public uploadPaymentReceipt(data: {
     reservationId: string;
     studentId: string;
-    fileUrl: string;
+    fileUrl?: string;
+    storagePath?: string;
     fileName?: string;
     fileSize?: number;
     paymentReference: string;
@@ -122,6 +123,7 @@ class ReservationService {
       reservationId: data.reservationId,
       studentId: data.studentId,
       fileUrl: data.fileUrl,
+      storagePath: data.storagePath,
       paymentReference: data.paymentReference,
       payerBankName: data.payerBankName,
       amountPaid: data.amountPaid,

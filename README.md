@@ -40,3 +40,19 @@ Deploy the Firebase rules and functions to the configured project, then deploy t
 - **Landlord Property-Point Capture**: Landlord device-captured GPS coordinates are optional, private, and stored separately from public listing data. They supplement—and never bypass—written addresses, landmarks, directions, and administrative review. Exact latitude/longitude is never written to public listing documents or returned to students.
 - **Trusted Server-Side Ranking**: Nearby search ranking is performed by a trusted Firebase Cloud Function (`searchNearbyProperties`) reading private points with the Admin SDK. The function returns only minimal public fields: property ID, distance rounded to 0.1 km, and coarse 8-point compass direction (N, NE, E, SE, S, SW, W, NW).
 - **Backend Status & Future Migration**: Firebase (Auth, Firestore, Storage, Cloud Functions) is the active operational backend. The Supabase/PostgreSQL migration remains separate future work. Local builds and unit tests verify software correctness but do not prove live production deployment or activation.
+
+## Storage Security Architecture & Path Isolation (Stage 1C-C)
+
+- **Strict Path Scoping & Least Privilege**:
+  - Payment Receipts: `payment-receipts/{landlordId}/{studentId}/{reservationId}/{receiptId}/{fileName}`. Only the owning student or admin may read directly via Storage Rules. Landlords access receipts strictly through the trusted Cloud Function `getPrivateAssetDownloadUrl`, which cryptographically checks the Firestore reservation relationship before issuing a 15-minute signed URL. Blanket `isLandlord()` access is eliminated.
+  - Chat Attachments: `chat-attachments/{conversationId}/{senderId}/{messageId}/{fileName}`. The vulnerable `allow read: if signedIn()` rule is eliminated. Storage Rules allow direct reads only to the message sender or admin. All conversation peers receive short-lived signed download URLs only after server-side conversation membership validation.
+  - Property Images: `property-images/{landlordId}/{propertyId}/{fileName}`. The insecure shared `pending_submission` path is permanently disabled (`allow read, write: if false`). Landlords pre-allocate property IDs and can only write to their own scoped property directory.
+- **Trusted Cloud Functions & Server-Authoritative Sessions**:
+  - `createPaymentReceiptUploadSession`: Pre-validates reservation ownership, hold status, MIME type, and 10 MB size limit before generating the scoped storage path.
+  - `finalizePaymentReceiptUpload`: Verifies storage path integrity and creates canonical `paymentReceipts` records with server timestamps.
+  - `createChatAttachmentUploadSession` & `finalizeChatAttachmentUpload`: Enforces real-time conversation participant membership.
+  - `getPrivateAssetDownloadUrl`: Issues 15-minute signed URLs for private receipts, chat attachments, and verification evidence after backend authorization.
+  - `migrateLegacySensitiveAsset`: Admin-only migration tool for copying legacy assets to scoped paths and updating Firestore records.
+- **Legacy Paths & Token Revocation Strategy**:
+  - All legacy upload paths (`property-images/{propertyId}/{fileName}`, `payment-receipts/{reservationId}/{fileName}`, `chat-attachments/{chatId}/{fileName}`) have `allow create: if false`.
+  - Historical `getDownloadURL()` tokens remain active until explicitly migrated and revoked via the Admin SDK, preserving historical readability without regression during transition. New files never generate permanent public tokenized URLs.

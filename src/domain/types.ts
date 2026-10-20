@@ -589,7 +589,8 @@ export interface PaymentReceipt {
   propertyTitle?: string;
   roomName?: string;
   landlordId: string;
-  fileUrl: string;
+  fileUrl?: string;
+  storagePath?: string;
   fileName: string;
   fileSize: number;
   paymentReference: string;
@@ -690,6 +691,14 @@ export interface ChatMessage {
   isDeleted?: boolean;
   mentions?: MessageMention[];
   replyTo?: MessageReplyReference;
+  attachment?: {
+    storagePath: string;
+    fileName: string;
+    contentType: string;
+    fileSize: number;
+    uploadedBy: string;
+    uploadedAt: string;
+  };
   createdAt: string;
   updatedAt?: string;
 }

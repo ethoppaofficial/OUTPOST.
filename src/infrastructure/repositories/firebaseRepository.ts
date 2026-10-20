@@ -1324,7 +1324,8 @@ export class FirebaseRepository {
     studentId: string;
     fileName: string;
     fileSize: number;
-    fileUrl: string;
+    fileUrl?: string;
+    storagePath?: string;
     paymentReference: string;
     payerBankName: string;
     paymentDate: string;
@@ -1349,6 +1350,7 @@ export class FirebaseRepository {
       fileName: data.fileName,
       fileSize: data.fileSize,
       fileUrl: data.fileUrl,
+      storagePath: data.storagePath,
       paymentReference: data.paymentReference,
       payerBankName: data.payerBankName,
       paymentDate: data.paymentDate,
@@ -1522,6 +1524,14 @@ export class FirebaseRepository {
     options?: {
       replyTo?: MessageReplyReference;
       mentions?: MessageMention[];
+      attachment?: {
+        storagePath: string;
+        fileName: string;
+        contentType: string;
+        fileSize: number;
+        uploadedBy: string;
+        uploadedAt: string;
+      };
     }
   ): ChatMessage {
     const msgs = load<ChatMessage[]>(STORAGE_KEYS.MESSAGES, []);
@@ -1548,6 +1558,7 @@ export class FirebaseRepository {
       isEdited: false,
       replyTo: options?.replyTo,
       mentions: options?.mentions,
+      attachment: options?.attachment,
     };
 
     msgs.push(newMsg);
