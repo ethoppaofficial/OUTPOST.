@@ -22,6 +22,7 @@ export const NewPropertyPage: React.FC = () => {
   const [university, setUniversity] = useState('Bayero University Kano (BUK)');
   const [campus, setCampus] = useState('New Campus (Gwarzo Road)');
   const [address, setAddress] = useState('');
+  const [propertyDraftId] = useState(() => `prop-${Date.now()}`);
   const [streetOrRoad, setStreetOrRoad] = useState('');
   const [nearestLandmark, setNearestLandmark] = useState('');
   const [directions, setDirections] = useState('');
@@ -251,6 +252,7 @@ export const NewPropertyPage: React.FC = () => {
       .filter(Boolean);
 
     const newProp = propertyService.createProperty({
+      id: propertyDraftId,
       landlordId: session.user.id,
       landlordName: profile?.legalName || profile?.businessName || session.displayName,
       landlordVerified: profile?.verificationStatus === 'approved',
@@ -856,6 +858,8 @@ export const NewPropertyPage: React.FC = () => {
               onChange={setImages}
               minImages={3}
               maxImages={5}
+              landlordId={session.user.id}
+              propertyId={propertyDraftId}
             />
           </div>
         </div>

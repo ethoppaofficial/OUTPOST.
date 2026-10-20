@@ -128,25 +128,30 @@ export class StorageService {
 
   /**
    * Upload Property Listing Image (images only, max 5 MB)
-   * Path: property-images/{propertyId}/{fileName}
+   * Tenant-isolated path: property-images/{landlordId}/{propertyId}/{fileName}
    */
   async uploadPropertyImage(
     file: File | Blob,
     originalFileName: string,
-    propertyId: string = 'pending_submission'
+    propertyId?: string,
+    landlordId?: string
   ): Promise<FileUploadResult> {
     this.validateFileSize(file.size, 5 * 1024 * 1024, 'Property image');
-    this.validateFileType(file.type, ['image/'], 'Property image');
+    this.validateFileType(file.type, ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'], 'Property image');
 
-    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `property-images/${propertyId}/${Date.now()}_${cleanName}`;
+    const uploaderUid = auth.currentUser?.uid || '';
+    const resolvedLandlordId = (landlordId || uploaderUid || 'unknown_landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const resolvedPropId = (propertyId || `draft_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanName = this.sanitizeFileName(originalFileName);
+    const storagePath = `property-images/${resolvedLandlordId}/${resolvedPropId}/${Date.now()}_${cleanName}`;
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'image/jpeg',
       customMetadata: {
-        propertyId,
-        uploaderUid: auth.currentUser?.uid || '',
+        landlordId: resolvedLandlordId,
+        propertyId: resolvedPropId,
+        uploaderUid,
         uploadedAt: new Date().toISOString(),
       },
     });
@@ -163,25 +168,34 @@ export class StorageService {
 
   /**
    * Upload Payment Receipt for a Reservation (image or PDF, max 5 MB)
-   * Path: payment-receipts/{reservationId}/{fileName}
+   * Tenant-isolated path: payment-receipts/{landlordId}/{studentId}/{reservationId}/{fileName}
    */
   async uploadPaymentReceipt(
     reservationId: string,
     file: File | Blob,
-    originalFileName: string
+    originalFileName: string,
+    landlordId?: string,
+    studentId?: string
   ): Promise<FileUploadResult> {
     this.validateFileSize(file.size, 5 * 1024 * 1024, 'Payment receipt');
-    this.validateFileType(file.type, ['image/', 'application/pdf'], 'Payment receipt');
+    this.validateFileType(file.type, ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'application/pdf'], 'Payment receipt');
 
-    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `payment-receipts/${reservationId}/${Date.now()}_${cleanName}`;
+    const uploaderUid = auth.currentUser?.uid || '';
+    const resolvedStudentId = (studentId || uploaderUid || 'unknown_student').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const resolvedLandlordId = (landlordId || 'landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanResId = reservationId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanName = this.sanitizeFileName(originalFileName);
+
+    const storagePath = `payment-receipts/${resolvedLandlordId}/${resolvedStudentId}/${cleanResId}/${Date.now()}_${cleanName}`;
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'image/jpeg',
       customMetadata: {
-        reservationId,
-        uploaderUid: auth.currentUser?.uid || '',
+        reservationId: cleanResId,
+        landlordId: resolvedLandlordId,
+        studentId: resolvedStudentId,
+        uploaderUid,
         uploadedAt: new Date().toISOString(),
       },
     });
@@ -198,20 +212,31 @@ export class StorageService {
 
   /**
    * Upload Chat Attachment (image, PDF, text, max 5 MB)
-   * Path: chat-attachments/{chatId}/{fileName}
+   * Sender-isolated path: chat-attachments/{conversationId}/{senderId}/{fileName}
    */
   async uploadChatAttachment(
-    chatId: string,
+    conversationId: string,
     file: File | Blob,
-    originalFileName: string
+    originalFileName: string,
+    senderId?: string
   ): Promise<FileUploadResult> {
     this.validateFileSize(file.size, 5 * 1024 * 1024, 'Chat attachment');
-    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `chat-attachments/${chatId}/${Date.now()}_${cleanName}`;
+    const uploaderUid = auth.currentUser?.uid || '';
+    const resolvedSenderId = (senderId || uploaderUid || 'unknown_sender').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanConvoId = conversationId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanName = this.sanitizeFileName(originalFileName);
+
+    const storagePath = `chat-attachments/${cleanConvoId}/${resolvedSenderId}/${Date.now()}_${cleanName}`;
 
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, file, {
       contentType: file.type || 'application/octet-stream',
+      customMetadata: {
+        conversationId: cleanConvoId,
+        senderId: resolvedSenderId,
+        uploaderUid,
+        uploadedAt: new Date().toISOString(),
+      },
     });
 
     const url = await getDownloadURL(snapshot.ref);
@@ -245,19 +270,38 @@ export class StorageService {
     try {
       let storageRef;
       if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
-        // Firebase storage URL or direct reference
         storageRef = ref(storage, pathOrUrl);
       } else {
         storageRef = ref(storage, pathOrUrl);
       }
       await deleteObject(storageRef);
     } catch (err: any) {
-      // If object doesn't exist, ignore (already deleted)
       if (err?.code === 'storage/object-not-found') {
         return;
       }
-      console.warn('Storage file deletion notice:', err);
+      console.warn('Storage file deletion notice:', err?.code || 'notice');
     }
+  }
+
+  /**
+   * Redact sensitive query parameters (e.g. Firebase bearer tokens) for safe logging.
+   */
+  public sanitizeUrlForLog(url: string): string {
+    if (!url) return '';
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('token')) {
+        parsed.searchParams.set('token', 'REDACTED');
+      }
+      return parsed.toString();
+    } catch {
+      return url.split('?')[0] + '?REDACTED_QUERY';
+    }
+  }
+
+  private sanitizeFileName(fileName: string): string {
+    const base = fileName.split('/').pop()?.split('\\').pop() || 'file';
+    return base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
   }
 
   private validateFileSize(size: number, maxBytes: number, label: string) {
@@ -267,10 +311,15 @@ export class StorageService {
     }
   }
 
-  private validateFileType(type: string, allowedPrefixes: string[], label: string) {
-    const isAllowed = allowedPrefixes.some((prefix) => type.startsWith(prefix) || type === prefix);
+  private validateFileType(type: string, allowedTypes: string[], label: string) {
+    const isAllowed = allowedTypes.some((allowed) => {
+      if (allowed.endsWith('/')) {
+        return type.startsWith(allowed);
+      }
+      return type === allowed;
+    });
     if (!isAllowed) {
-      throw new Error(`${label} must be an image or PDF document.`);
+      throw new Error(`${label} format is invalid. Accepted types: ${allowedTypes.join(', ')}.`);
     }
   }
 }

@@ -54,7 +54,7 @@ function validateConfiguration(): { config: AppConfig; error?: string } {
         storageBucket,
         messagingSenderId: firebaseConfig.messagingSenderId,
       },
-      isProduction: import.meta.env.PROD || false,
+      isProduction: Boolean((import.meta as any)?.env?.PROD),
       validationError: error,
     },
     error,

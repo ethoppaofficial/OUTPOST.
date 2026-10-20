@@ -171,14 +171,14 @@ class PropertyService {
 
   public createPropertyDraft(
     landlordId: string,
-    data: Omit<Property, 'id' | 'landlordId' | 'landlordName' | 'landlordVerified' | 'slug' | 'verificationStatus' | 'createdAt' | 'updatedAt'>
+    data: Omit<Property, 'id' | 'landlordId' | 'landlordName' | 'landlordVerified' | 'slug' | 'verificationStatus' | 'createdAt' | 'updatedAt'> & { id?: string }
   ): Property {
     const landlord = repository.getLandlordProfile(landlordId);
     const slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(100 + Math.random() * 900);
 
     const locationId = data.locationId || (data.neighbourhood?.toLowerCase().includes('rimin') ? 'loc-rimin-gata' : 'loc-dambare');
     const area: HousingArea = locationId === 'loc-rimin-gata' ? 'Rimin Gata' : 'Dambare';
-    const propId = `prop-${Date.now()}`;
+    const propId = (data.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : `prop-${Date.now()}`;
 
     // Ensure property location is initialized
     let location: PropertyLocation;

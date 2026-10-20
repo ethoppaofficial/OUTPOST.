@@ -1,9 +1,24 @@
 node_modules/
 build/
 dist/
+functions/lib/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
 backups/
+
+# Firebase / Emulator
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log
+
+# Credentials & Keys
+*.pem
+*.key
+*.p12
+*.pfx
+*serviceAccount*.json
+*credentials*.json

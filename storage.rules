@@ -7,18 +7,25 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return signedIn() && request.auth.token.get('admin', false) == true;
-    }
-
     function isOwner(uid) {
       return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.get('admin', false) == true;
     }
 
     function isLandlord() {
       return signedIn() && (
         request.auth.token.get('role', '') == 'landlord'
-        || request.auth.token.get('admin', false) == true
+        || isAdmin()
+      );
+    }
+
+    function isStudent() {
+      return signedIn() && (
+        request.auth.token.get('role', '') == 'student'
+        || request.auth.token.get('role', '') == ''
       );
     }
 
@@ -44,72 +51,102 @@ service firebase.storage {
 
     // ----------------------------------------------------------------------
     // System Healthchecks & Self-test
-    // Path: _healthchecks/{uid}/{fileName}
     // ----------------------------------------------------------------------
     match /_healthchecks/{uid}/{fileName} {
       allow read, write, delete: if isOwner(uid) || isAdmin();
     }
 
     // ----------------------------------------------------------------------
-    // Profile Pictures
-    // Path: profile-pictures/{uid}/{fileName} (images only, max 2 MB)
+    // Profile Pictures (public read, owner-only write, max 2MB image)
     // ----------------------------------------------------------------------
     match /profile-pictures/{uid}/{fileName} {
-      allow read: if true; // Publicly readable for avatars
-      allow write: if (isOwner(uid) || isAdmin()) && validImage(2 * 1024 * 1024);
+      allow read: if true;
+      allow write: if (isOwner(uid) || isAdmin())
+        && validImage(2 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid;
       allow delete: if isOwner(uid) || isAdmin();
     }
 
-    // Legacy profile-images path support
+    // Legacy profile-images path
     match /profile-images/{uid}/{fileName} {
       allow read: if true;
-      allow write: if (isOwner(uid) || isAdmin()) && validImage(2 * 1024 * 1024);
+      allow write: if (isOwner(uid) || isAdmin())
+        && validImage(2 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid;
       allow delete: if isOwner(uid) || isAdmin();
     }
 
     // ----------------------------------------------------------------------
-    // Student Verification Documents
-    // Path: student-docs/{uid}/{docId}/{fileName} (image or PDF, max 5 MB)
+    // Student Verification Documents (private to student owner and admin)
+    // Path: student-docs/{uid}/{docId}/{fileName}
     // ----------------------------------------------------------------------
     match /student-docs/{uid}/{docId}/{fileName} {
       allow read: if isOwner(uid) || isAdmin();
-      allow write: if (isOwner(uid) || isAdmin()) && validDocument(5 * 1024 * 1024);
+      allow write: if (isOwner(uid) || isAdmin())
+        && validDocument(5 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid;
       allow delete: if isOwner(uid) || isAdmin();
     }
 
     // ----------------------------------------------------------------------
-    // Landlord Verification Documents
-    // Path: landlord-docs/{uid}/{docId}/{fileName} (image or PDF, max 5 MB)
+    // Landlord Verification Documents (private to landlord owner and admin)
+    // Path: landlord-docs/{uid}/{docId}/{fileName}
     // ----------------------------------------------------------------------
     match /landlord-docs/{uid}/{docId}/{fileName} {
       allow read: if isOwner(uid) || isAdmin();
-      allow write: if (isOwner(uid) || isAdmin()) && validDocument(5 * 1024 * 1024);
+      allow write: if (isOwner(uid) || isAdmin())
+        && validDocument(5 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid;
       allow delete: if isOwner(uid) || isAdmin();
     }
 
     // ----------------------------------------------------------------------
-    // Property Images
-    // Path: property-images/{propertyId}/{fileName} (images only, max 5 MB)
-    // Only landlords or administrators can upload property media.
-    // Deletion is restricted to the uploader landlord or an administrator.
+    // Tenant-Isolated Property Images
+    // Path: property-images/{landlordId}/{propertyId}/{fileName}
+    // Only the authenticated landlord owner or administrator can upload or delete.
     // ----------------------------------------------------------------------
+    match /property-images/{landlordId}/{propertyId}/{fileName} {
+      allow read: if true;
+      allow write: if (isOwner(landlordId) || isAdmin())
+        && validImage(5 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && request.resource.metadata.landlordId == landlordId;
+      allow delete: if isOwner(landlordId) || isAdmin();
+    }
+
+    // Legacy property-images support (restricted: prevents cross-landlord overwrites)
     match /property-images/{propertyId}/{fileName} {
       allow read: if true;
-      allow write: if (isLandlord() || isAdmin()) && validImage(5 * 1024 * 1024);
+      allow write: if isAdmin()
+        || (isLandlord() && (resource == null || resource.metadata.uploaderUid == request.auth.uid)
+            && validImage(5 * 1024 * 1024)
+            && request.resource.metadata.uploaderUid == request.auth.uid);
       allow delete: if isAdmin()
         || (isLandlord() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     // ----------------------------------------------------------------------
-    // Payment Receipts
-    // Path: payment-receipts/{reservationId}/{fileName} (image or PDF, max 5 MB)
-    // Read: Only the uploading student, property landlords, or administrators.
-    // Write: Signed-in students tagging their own uploader UID.
-    // Delete: Only the student owner or administrator.
+    // Tenant-Isolated Payment Receipts
+    // Path: payment-receipts/{landlordId}/{studentId}/{reservationId}/{fileName}
+    // Read: ONLY the specific student, the specific landlord, or an administrator.
+    // Write: ONLY the specific student submitting for their own reservation.
     // ----------------------------------------------------------------------
+    match /payment-receipts/{landlordId}/{studentId}/{reservationId}/{fileName} {
+      allow read: if isAdmin()
+        || (signedIn() && (isOwner(studentId) || isOwner(landlordId)));
+      allow write: if (isOwner(studentId) || isAdmin())
+        && validDocument(5 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && request.resource.metadata.studentId == studentId
+        && request.resource.metadata.landlordId == landlordId
+        && request.resource.metadata.reservationId == reservationId;
+      allow delete: if isAdmin() || isOwner(studentId);
+    }
+
+    // Legacy payment-receipts path (HARDENED: Removed arbitrary landlord read)
     match /payment-receipts/{reservationId}/{fileName} {
       allow read: if isAdmin()
-        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
       allow write: if signedIn()
         && request.resource.metadata.uploaderUid == request.auth.uid
         && validDocument(5 * 1024 * 1024);
@@ -117,10 +154,10 @@ service firebase.storage {
         || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
-    // Legacy receipts path support with strict access
+    // Legacy receipts path (HARDENED: Removed arbitrary landlord read)
     match /receipts/{reservationId}/{fileName} {
       allow read: if isAdmin()
-        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
       allow write: if signedIn()
         && request.resource.metadata.uploaderUid == request.auth.uid
         && validDocument(5 * 1024 * 1024);
@@ -130,7 +167,7 @@ service firebase.storage {
 
     match /receipts/{reservationId}/{receiptId}/{fileName} {
       allow read: if isAdmin()
-        || (signedIn() && (resource.metadata.uploaderUid == request.auth.uid || isLandlord()));
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
       allow write: if signedIn()
         && request.resource.metadata.uploaderUid == request.auth.uid
         && validDocument(5 * 1024 * 1024);
@@ -139,18 +176,34 @@ service firebase.storage {
     }
 
     // ----------------------------------------------------------------------
-    // Chat Attachments
-    // Path: chat-attachments/{chatId}/{fileName} (max 5 MB)
+    // Sender-Isolated Chat Attachments
+    // Path: chat-attachments/{conversationId}/{senderId}/{fileName}
+    // Read: Only the sender or administrator (private attachment).
+    // Write: Only the authenticated sender.
     // ----------------------------------------------------------------------
+    match /chat-attachments/{conversationId}/{senderId}/{fileName} {
+      allow read: if isAdmin() || (signedIn() && isOwner(senderId));
+      allow write: if (isOwner(senderId) || isAdmin())
+        && validChatAttachment(5 * 1024 * 1024)
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && request.resource.metadata.senderId == senderId
+        && request.resource.metadata.conversationId == conversationId;
+      allow delete: if isAdmin() || isOwner(senderId);
+    }
+
+    // Legacy chat-attachments path (HARDENED: Removed broad signedIn read)
     match /chat-attachments/{chatId}/{fileName} {
-      allow read: if signedIn();
-      allow write: if signedIn() && validChatAttachment(5 * 1024 * 1024);
+      allow read: if isAdmin()
+        || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
+      allow write: if signedIn()
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && validChatAttachment(5 * 1024 * 1024);
       allow delete: if isAdmin()
         || (signedIn() && resource.metadata.uploaderUid == request.auth.uid);
     }
 
     // ----------------------------------------------------------------------
-    // Deny every other path by default
+    // Default-deny all other paths
     // ----------------------------------------------------------------------
     match /{allPaths=**} {
       allow read, write: if false;

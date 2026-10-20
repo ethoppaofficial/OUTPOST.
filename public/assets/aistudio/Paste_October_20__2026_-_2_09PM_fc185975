@@ -1,0 +1,522 @@
+# OUTPOST — MASTER SECURITY REMEDIATION AND HARDENING MISSION
+
+## 1. ROLE AND MISSION
+
+Act as a principal application security engineer, senior full-stack engineer, Firebase security specialist, software architect, and quality assurance lead.
+
+Your assignment is to conduct and execute a comprehensive, repository-wide security remediation of the existing OUTPOST application.
+
+This is an implementation task, not merely an audit or a list of recommendations.
+
+**Investigate the application, verify the recovery baseline, fix confirmed vulnerabilities, strengthen authorization boundaries, implement regression tests, execute all feasible verification, and report the actual final state.**
+
+Do not stop after identifying vulnerabilities. Fix them where safe and within the authority and capabilities of this environment.
+
+Do not ask me to approve each individual file change. You have authorization to modify the local development repository and its tests, provided you follow the safeguards below.
+
+Do not claim that the application is secure simply because it compiles, the development server responds, or a test suite passes.
+
+## 2. PROJECT ENVIRONMENT
+
+Project: OUTPOST — Smart Student Accommodation Discovery and Shared Accommodation Coordination Platform.
+
+Known project root: `/app/applet`
+
+Known recovery archive:
+`/app/backups/outpost-recovery-baseline-20261020T125200Z.tar.gz`
+
+Reported SHA-256:
+`255b8e66d880325b067cd6a4111050bb508f3cdf3930a862c03c16178ff5451c`
+
+Reported baseline commit:
+`f405f7fa0227ac5b683f475597f2c3dea816b943`
+
+Expected branch: `main`.
+
+Known technology includes React, TypeScript, Firebase Authentication, Cloud Firestore, Firebase Storage, Cloud Functions, and Vite. Confirm the actual repository configuration before relying on these assumptions.
+
+The intended product has exactly three primary personas:
+
+- Student
+- Landlord
+- Administrator
+
+Caretaker functionality is out of scope.
+
+The application handles accommodation listings, reservations, payment receipt submissions, verification documents, conversations, and property images.
+
+## 3. NON-NEGOTIABLE OPERATING RULES
+
+### 3.1 Verify recovery before making changes
+
+Before modifying any application or security file:
+
+1. Confirm the real project root.
+2. Verify the recovery archive exists and is outside the project root.
+3. Calculate and compare its SHA-256 against the reported checksum.
+4. Verify archive integrity.
+5. Inspect the Git repository, branch, baseline commit, and working-tree status.
+6. Check that the baseline includes the source files and configuration required for recovery.
+7. Review the existing `.gitignore` and identify sensitive files that may already be tracked.
+8. Perform a non-destructive credential scan without printing secret values.
+
+If the archive is invalid, missing, or inconsistent, stop implementation and report the precise blocker.
+
+If the reported Git baseline cannot be verified, do not overwrite or rewrite existing Git history. Establish what state actually exists and report the discrepancy.
+
+Where feasible, test archive extraction in a new temporary directory without overwriting the application.
+
+Do not create nested backup archives or recursively include prior backups.
+
+### 3.2 Protect credentials and production systems
+
+You may modify the local repository and run safe local tests.
+
+You must NOT, without explicit authorization:
+
+- Deploy to production or change production hosting.
+- Modify production Firebase rules or production infrastructure.
+- Delete or overwrite production data.
+- Run destructive migrations against real data.
+- Rotate credentials, revoke sessions, or revoke tokens.
+- Disable user accounts or alter real administrator access.
+- Change billing, IAM permissions, authentication providers, or external service settings.
+- Install or run untrusted tools with privileged access.
+- Perform destructive cleanup outside temporary files created by this task.
+
+Never print credentials, private keys, access tokens, session cookies, payment data, or sensitive document contents.
+
+Do not commit secrets. Do not add generated build output, dependencies, environment files, credentials, or user uploads to Git.
+
+Do not silently disable a security control merely to make a test pass.
+
+### 3.3 Preserve functionality and scope
+
+Do not redesign the application unnecessarily.
+
+Do not replace Firebase with another backend or introduce a new architecture without compelling evidence that the existing design cannot be secured.
+
+Preserve existing business functionality and user experience unless a change is necessary for security.
+
+Prefer small, maintainable fixes over unnecessary frameworks or excessive abstractions.
+
+Inspect actual files and call sites before editing. Never assume that an earlier report accurately describes the current source tree.
+
+## 4. PHASE A — BUILD A COMPLETE ATTACK-SURFACE INVENTORY
+
+Inspect the whole repository, including:
+
+- Frontend pages, components, hooks, and state management.
+- Firebase initialization and configuration.
+- Firebase Authentication and administrator role handling.
+- Firestore security rules and indexes.
+- Storage security rules.
+- Cloud Functions and scheduled jobs.
+- Client-side repository and service methods.
+- Upload and download URL handling.
+- Reservation and payment receipt workflows.
+- Chat conversations and attachments.
+- Property creation, approval, publication, and image uploads.
+- Document verification.
+- Environment variables and configuration.
+- Dependencies, lockfiles, build scripts, and deployment settings.
+- Logging, error handling, redirects, and external links.
+- Existing tests, emulator configuration, and CI configuration.
+- Any other security-sensitive code discovered during inspection.
+
+Search for authorization decisions implemented only in the UI, direct database writes, insecure object references, unsafe URL handling, permissive rules, missing validation, and client-controlled ownership metadata.
+
+Inspect the entire rules files, not just the previously reported lines.
+
+Create an internal inventory of each confirmed issue with severity, affected files, exploit preconditions, impact, proposed fix, and verification test.
+
+Use evidence from the actual code. Do not invent vulnerabilities or assume that a feature exists when it does not.
+
+## 5. PHASE B — AUTHENTICATION AND AUTHORIZATION
+
+Review and remediate the following where applicable.
+
+### Administrator access
+
+- Ensure administrator privileges are established through a trusted authorization mechanism.
+- Never trust a client-controlled role field, local storage, a route guard, an email address, or a hidden UI control as proof of administrator access.
+- Verify the actual Firebase token and trusted custom-claim flow, or the project's existing secure equivalent.
+- Review administrator bootstrap, promotion, demotion, and recovery procedures.
+- Ensure unauthorized users cannot grant themselves administrative privileges.
+- Ensure sensitive backend operations revalidate authorization.
+- Review how revoked or changed privileges propagate to existing sessions.
+- Identify any previously exposed credentials or compromised accounts without printing secret values.
+- Document required manual credential rotation and session revocation actions if exposure is confirmed.
+
+Do not remove the only legitimate administrator access path without establishing a safe recovery procedure.
+
+### Student and landlord authorization
+
+- Enforce ownership and participant relationships on the server or through security rules.
+- Do not trust IDs supplied by the browser merely because the authenticated user submitted them.
+- Verify authorization independently for reads, creates, updates, and deletes.
+- Prevent students from modifying another student's reservations or documents.
+- Prevent landlords from accessing unrelated students' private information or reservations.
+- Prevent landlords from editing or deleting properties belonging to other landlords.
+- Ensure changing an ownership field cannot transfer access or privilege.
+- Validate allowed status transitions and prevent unauthorized state changes.
+- Review every direct Firestore write and every Cloud Function that accepts object IDs.
+
+### Sessions and account lifecycle
+
+- Inspect authentication state handling, sign-out, expired sessions, and sensitive action reauthorization.
+- Verify account deletion, disabled-account behavior, and role changes where implemented.
+- Do not invent unsupported requirements or claim that revocation has occurred when only a local code change was made.
+
+## 6. PHASE C — FIRESTORE SECURITY RULES AND DATA INTEGRITY
+
+Review every collection and nested collection in the actual Firestore rules.
+
+For each collection, identify:
+
+- Who can read documents and fields.
+- Who can create documents.
+- Who can update or delete documents.
+- Which ownership and participant relationships must hold.
+- Which fields users may change.
+- Which fields are server-controlled.
+- Whether updates allow illegal state transitions.
+- Whether nested documents inherit assumptions that are not actually enforced.
+
+Implement least-privilege access.
+
+Validate immutable identifiers and relationships such as student IDs, landlord IDs, property IDs, reservation IDs, participant IDs, ownership, and document status.
+
+Where appropriate, restrict updates to explicit field allowlists and reject changes to protected fields.
+
+Do not rely on frontend validation for data integrity.
+
+Ensure payment verification, reservation approval, expiration, administrative decisions, and other privileged state transitions cannot be forged through direct client writes.
+
+Review concurrent reservation creation and property availability for race conditions. Where a transaction or trusted backend operation is necessary, implement the smallest reliable solution that fits the current architecture.
+
+Prevent unauthorized collection enumeration and cross-user reads.
+
+Preserve legitimate application behavior. Do not solve access problems by granting broad authenticated-user permissions.
+
+## 7. PHASE D — FIREBASE STORAGE: FIX THE KNOWN AND DISCOVERED GAPS
+
+The previous audit reported these critical risks. Reconfirm each against the actual files before implementation.
+
+### A. Payment receipts
+
+Previously identified path:
+`/payment-receipts/{reservationId}/{fileName}`
+
+Previously identified risk: broad landlord read access could expose receipts belonging to unrelated reservations.
+
+Use a tenant-isolated path consistent with the actual data model, such as:
+
+`/payment-receipts/{landlordId}/{studentId}/{reservationId}/{fileName}`
+
+The exact path may be adjusted if the verified implementation requires a safer design.
+
+Rules must enforce the authenticated user's relationship to the path and prevent cross-tenant reads, writes, overwrites, and deletes.
+
+Do not assume path values alone prove that a receipt belongs to a legitimate reservation. Validate the reservation and its participants through a trusted authorization mechanism.
+
+Because Storage rules cannot query Firestore directly, do not pretend that they can verify arbitrary reservation relationships through a database lookup unavailable to the rules engine.
+
+Where strong relationship validation is necessary, use a trusted backend or another design that can actually enforce it.
+
+### B. Chat attachments
+
+Previously identified path:
+`/chat-attachments/{chatId}/{fileName}`
+
+Previously identified risk: any signed-in user could read or upload attachments for unrelated conversations.
+
+Use a sender-isolated path such as:
+
+`/chat-attachments/{conversationId}/{senderId}/{fileName}`
+
+Validate the authenticated sender against the path and restrict access to legitimate conversation participants.
+
+Do not trust client-controlled `recipientId` metadata as proof of conversation membership.
+
+Inspect how conversation membership is established and how attachments are referenced by messages.
+
+Ensure a malicious user cannot forge a conversation ID or sender ID to gain access to another conversation.
+
+If Storage rules alone cannot establish membership, use a secure backend authorization strategy or a path design that provides the necessary isolation. Do not leave a known authorization gap merely because the current architecture is inconvenient.
+
+### C. Property images
+
+Use a tenant-isolated path such as:
+
+`/property-images/{landlordId}/{propertyId}/{fileName}`
+
+Remove unsafe shared placeholder paths such as `pending_submission`.
+
+Inspect property creation and image upload sequencing. Support secure uploads before a final property ID exists without creating shared writable namespaces.
+
+Only authorized owners should upload, replace, or delete images for their own properties.
+
+Public reads, if required, must be limited to the intended images of approved and published listings. Draft, rejected, or private properties must not become publicly readable merely because an image URL is known.
+
+### D. Upload validation
+
+Review file type, file size, naming, overwrite behavior, content handling, and permitted MIME types.
+
+Do not rely exclusively on file extensions or client-provided MIME types as proof that a file is safe.
+
+Use sensible limits appropriate to each file category.
+
+Where file content scanning is not available, document the residual risk rather than claiming malware detection exists.
+
+### E. Every other Storage path
+
+Audit all remaining Storage paths and ensure least-privilege authorization, including verification documents, identity documents, landlord documents, and any other sensitive uploads.
+
+Test anonymous access, unrelated authenticated access, cross-tenant access, forged paths, overwrites, and unauthorized deletes.
+
+Do not accidentally make private documents public.
+
+## 8. PHASE E — DOWNLOAD URLS AND LEGACY FILE ACCESS
+
+The previous audit reported persistent Firebase `getDownloadURL()` URLs in records including:
+
+- `reservations/{id}.paymentReceipts[].receiptUrl`
+- `verifications/{id}.documentUrl`
+- `conversations/{id}/messages/{id}.attachment.url`
+
+Inspect actual usage and determine which files are public assets versus sensitive documents.
+
+Treat long-lived tokenized download URLs for sensitive files as bearer credentials: anyone possessing a valid URL may be able to access the resource depending on the URL and Storage behavior.
+
+Implement an appropriate secure access design for sensitive files, preferably using authenticated backend authorization and short-lived access URLs where supported.
+
+Requirements:
+
+- Verify the requester is authorized before issuing access.
+- Keep sensitive storage objects non-public.
+- Avoid returning persistent bearer URLs to unauthorized clients.
+- Do not log complete tokenized URLs.
+- Handle expired or invalid links gracefully.
+- Ensure public property images continue to work where intended.
+- Review every page, service, notification, and backend response that exposes a download URL.
+- Avoid introducing a permanent public proxy that bypasses authorization.
+
+Do not assume changing Storage rules automatically invalidates previously issued tokenized URLs.
+
+Determine a safe strategy for legacy URLs, including any required reissuance, migration, or revocation process supported by the actual Firebase environment.
+
+Do not revoke production tokens, delete existing files, or run production migrations without explicit authorization.
+
+If the repository cannot safely resolve legacy access without a production operation, implement the safe code-side controls that are possible, clearly document the remaining exposure, and specify the exact operator action required.
+
+## 9. PHASE F — RESERVATIONS, RECEIPTS, INVOICES, AND EXPIRATION
+
+Inspect the real implementation of:
+
+- Reservation creation.
+- Reservation status transitions.
+- Invoice generation.
+- Receipt submission.
+- Receipt verification and rejection.
+- Automatic reservation expiration.
+- Notifications associated with reservation state changes.
+
+Enforce the following invariants where supported by the existing requirements:
+
+- Students can act only on their own reservations.
+- Landlords can act only on reservations for properties they own.
+- Payment verification is a privileged action.
+- Client-supplied ownership, payment status, verification status, amount, and approval fields cannot override trusted state.
+- Expiration logic cannot be bypassed by manipulating client timestamps.
+- Concurrent requests cannot create inconsistent reservation states or bypass availability constraints.
+- Repeated requests should not produce duplicate irreversible operations where idempotency is required.
+- Notifications must not leak sensitive reservation or document information to unrelated users.
+- Invoice and receipt references must be tied to the correct reservation.
+
+Use trusted server time for time-sensitive decisions.
+
+Avoid unnecessarily changing financial calculations or existing business policies. Where a business rule is ambiguous, preserve current behavior where safe and document the ambiguity.
+
+## 10. PHASE G — CHAT AND PRIVATE COMMUNICATION
+
+Inspect conversation creation, membership changes, message reads and writes, attachments, and any real-time subscriptions.
+
+Enforce participant-only access to conversations and messages.
+
+Prevent users from joining conversations by changing client-supplied participant IDs.
+
+Validate message and attachment ownership.
+
+Ensure a user cannot read, edit, or delete another user's messages or attachments unless explicitly permitted by the existing product design.
+
+Review any broad Firestore or Storage rule that allows every authenticated user to read private content.
+
+Ensure error responses and logs do not disclose private message content or document URLs.
+
+## 11. PHASE H — FRONTEND, API, INPUT, AND DEPENDENCY HARDENING
+
+Review the application for:
+
+- Secrets accidentally included in client bundles.
+- Unsafe HTML rendering and injection.
+- Open redirects and unsafe external links.
+- Missing validation of user-supplied data.
+- Insecure direct object references.
+- Trust in local storage or client-controlled authorization state.
+- Sensitive information in logs and error messages.
+- Missing rate limits on sensitive backend operations.
+- Missing authorization or validation in Cloud Functions.
+- CORS misconfiguration where an HTTP API exists.
+- Excessively permissive security headers or missing headers where the hosting configuration supports them.
+- Unnecessary exposure of internal errors.
+- Dependency vulnerabilities and outdated critical packages.
+- Unsafe environment-variable handling.
+- Abuse of file upload, account recovery, verification, or notification workflows.
+- Unbounded queries or requests that could create avoidable resource exhaustion.
+
+Fix confirmed issues within the existing architecture.
+
+Use maintained dependencies and compatible versions. Avoid blind upgrades, unnecessary packages, and lockfile destruction.
+
+Run dependency audit tools already available in the environment. Do not blindly apply force upgrades or claim that a dependency is safe just because the audit command is unavailable.
+
+Do not place server-only secrets in frontend environment variables or browser bundles.
+
+Add practical validation, error handling, and rate limiting where needed and supported by the existing architecture.
+
+Do not invent API endpoints or configuration capabilities that the repository does not contain.
+
+## 12. PHASE I — TESTING AND AUTOMATED SECURITY REGRESSION PROTECTION
+
+Inspect the existing test framework and use the appropriate supported tooling.
+
+Configure Firebase Emulator tests if feasible without disrupting the existing project.
+
+If required dependencies or configuration are absent, add the smallest maintainable setup compatible with the project and lockfiles.
+
+Prioritize automated tests for:
+
+### Authentication and roles
+- Anonymous access to private resources is denied.
+- A student cannot grant themselves administrator privileges.
+- A landlord cannot perform administrator operations.
+- Privilege changes are enforced by trusted authorization.
+
+### Firestore
+- Cross-student reservation reads and writes are denied.
+- Cross-landlord property writes are denied.
+- Unauthorized status and ownership changes are denied.
+- Unrelated users cannot read private conversations.
+- Privileged verification and approval transitions cannot be forged.
+- Invalid identifiers, states, and protected-field changes are rejected.
+
+### Storage
+- Unauthorized receipt reads are denied.
+- A landlord cannot read another landlord's private receipts.
+- A student cannot read another student's private receipts.
+- A nonparticipant cannot read chat attachments.
+- A user cannot upload as another sender.
+- A landlord cannot modify another landlord's property images.
+- Draft and rejected property images are not exposed publicly when privacy is required.
+- Anonymous and unrelated authenticated users cannot read sensitive documents.
+- File size and content-type constraints are enforced where supported.
+
+### Reservations and backend workflows
+- Ownership is revalidated server-side.
+- Invalid state transitions fail.
+- Expiration uses trusted time.
+- Concurrent or repeated operations preserve invariants.
+- Failed operations do not partially corrupt state.
+
+Include both positive tests for legitimate access and negative tests for attack attempts.
+
+Do not weaken security rules to make existing tests pass.
+
+If an emulator is unavailable, distinguish tests that were actually run from tests that were merely authored.
+
+## 13. PHASE J — IMPLEMENTATION METHOD
+
+Work in coherent batches without asking me to approve every file:
+
+1. Verify the baseline.
+2. Inventory confirmed risks and prioritize critical/high severity.
+3. Implement authentication and authorization fixes.
+4. Implement Firestore rules and backend enforcement.
+5. Implement Storage path isolation and upload/download changes.
+6. Address reservations, receipts, chat, and other business workflows.
+7. Address remaining frontend, API, configuration, and dependency issues.
+8. Add and run security regression tests.
+9. Run type checks, builds, and existing tests.
+10. Review the complete diff and produce the final report.
+
+Do not stop merely because one subsystem passes.
+
+Fix regressions introduced by your own changes.
+
+If a critical blocker prevents the remaining work, complete the safe independent work, record the blocker precisely, and never claim full completion.
+
+Do not silently skip a security-sensitive file because it is inconvenient to inspect.
+
+## 14. REQUIRED FINAL VERIFICATION
+
+Run every relevant check actually available, including where applicable:
+
+- TypeScript type checks.
+- Frontend production build.
+- Cloud Functions compilation.
+- Existing unit tests.
+- Firebase Firestore Rules emulator tests.
+- Firebase Storage Rules emulator tests.
+- Dependency vulnerability audit.
+- Secret scanning.
+- Git diff and whitespace checks.
+- Tracked-file and generated-artifact review.
+- Configuration validation.
+
+Report exact commands and real exit statuses.
+
+Distinguish clearly between:
+- PASS: executed successfully.
+- FAIL: executed and failed.
+- BLOCKED: could not execute due to a specific constraint.
+- NOT RUN: not attempted.
+
+Do not fabricate logs, test results, scanner output, or coverage numbers.
+
+Review all changed files for accidental secrets, unrelated changes, and authorization regressions.
+
+Do not commit changes automatically unless the existing project workflow explicitly requires a local commit and doing so is safe. Never push or deploy.
+
+## 15. FINAL DELIVERABLE
+
+Produce a concise but complete report containing:
+
+1. Recovery archive verification and Git baseline verification.
+2. Confirmed vulnerabilities discovered.
+3. Files changed and the security purpose of each change.
+4. The actual authorization model after remediation.
+5. Storage path changes and migration requirements.
+6. Legacy download URL exposure and the remediation status.
+7. Firestore and Storage test results.
+8. Build, type-check, unit-test, dependency-audit, and secret-scan results.
+9. Any remaining critical, high, medium, or low risks.
+10. Exact manual steps required for production configuration, credential rotation, legacy URL revocation, or migration.
+11. Deployment and rollback instructions.
+12. A final status using one of these labels:
+
+   - `REMEDIATION COMPLETE — ALL EXECUTED CHECKS PASSED`
+   - `REMEDIATION PARTIALLY COMPLETE — BLOCKERS OR RISKS REMAIN`
+   - `REMEDIATION BLOCKED — BASELINE OR SAFETY GATE FAILED`
+
+Only use the first label if all in-scope code changes are complete, relevant feasible tests have passed, and no known critical or high-severity in-scope vulnerabilities remain unresolved.
+
+If a high-severity risk requires production access or external configuration that you do not have, report it explicitly and do not label the system fully remediated.
+
+## 16. BEGIN NOW
+
+Start by verifying the recovery baseline and inspecting the repository.
+
+Then proceed through the complete remediation mission without pausing for routine approval of individual code changes.
+
+Your objective is a defensible, tested, maintainable security improvement to the existing OUTPOST application—not a superficial patch, not an audit-only report, and not an unsupported claim that the system is perfectly secure.

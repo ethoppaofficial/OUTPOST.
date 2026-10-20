@@ -72,7 +72,13 @@ export const ReservationDetailPage: React.FC = () => {
       let finalSize = 1024 * 400;
 
       if (receiptFile) {
-        const uploadRes = await storageService.uploadPaymentReceipt(reservation.id, receiptFile, fileName || receiptFile.name);
+        const uploadRes = await storageService.uploadPaymentReceipt(
+          reservation.id,
+          receiptFile,
+          fileName || receiptFile.name,
+          reservation.landlordId,
+          session.user.id
+        );
         receiptUrl = uploadRes.url;
         finalSize = uploadRes.fileSize;
       }

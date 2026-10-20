@@ -21,6 +21,8 @@ export interface PropertyImageCaptureUploadProps {
   onChange: (images: string[]) => void;
   minImages?: number;
   maxImages?: number;
+  landlordId?: string;
+  propertyId?: string;
 }
 
 // Curated authentic off-campus student accommodation sample photos (BUK Kano context)
@@ -52,6 +54,8 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
   onChange,
   minImages = 3,
   maxImages = 5,
+  landlordId,
+  propertyId,
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -171,7 +175,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
           if (!blob) return;
           const fileName = `camera_photo_${Date.now()}.jpg`;
           try {
-            const uploadRes = await storageService.uploadPropertyImage(blob, fileName);
+            const uploadRes = await storageService.uploadPropertyImage(blob, fileName, propertyId, landlordId);
             const newUrl = uploadRes.url;
             setCapturedInSession((prev) => [...prev, newUrl]);
             onChange([...images, newUrl]);
@@ -218,7 +222,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
         }
 
         try {
-          const uploadRes = await storageService.uploadPropertyImage(file, file.name);
+          const uploadRes = await storageService.uploadPropertyImage(file, file.name, propertyId, landlordId);
           newUrls.push(uploadRes.url);
         } catch {
           // Fallback to local Object URL for instant preview

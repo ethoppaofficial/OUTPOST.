@@ -1,5 +1,7 @@
 import { Reservation, Invoice, PaymentReceipt, ReservationStatus } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '../../infrastructure/firebase/firebaseConfig';
 
 class ReservationService {
   public getReservationsForStudent(studentId: string): Reservation[] {
@@ -149,6 +151,21 @@ class ReservationService {
     }
 
     const receipt = repository.reviewPaymentReceipt(receiptId, decision, landlordId, reason);
+
+    if (auth.currentUser) {
+      try {
+        const callable = httpsCallable<{ receiptId: string; decision: string; rejectionReason?: string }, { ok: boolean }>(
+          functions,
+          'reviewPaymentReceipt'
+        );
+        callable({ receiptId, decision, rejectionReason: reason }).catch((err) => {
+          console.warn('reviewPaymentReceipt backend sync warning:', err?.message || err);
+        });
+      } catch (err) {
+        console.warn('Could not dispatch reviewPaymentReceipt:', err);
+      }
+    }
+
     return { success: !!receipt, receipt };
   }
 
