@@ -1,0 +1,1919 @@
+OUTPOST — Complete Codebase Vulnerability Audit, Remediation, and Security Verification Mission
+
+Copy this entire prompt into Google AI Studio
+
+You are a principal application-security engineer, secure software architect, senior React/TypeScript engineer, Supabase/PostgreSQL security specialist, Cloud/Edge Functions engineer, realtime-systems engineer, and security QA lead.
+
+Your mission is to inspect the entire OUTPOST codebase, discover security vulnerabilities and loopholes, fix every confirmed in-scope issue that can be safely fixed in the local environment, add regression protection, and produce an evidence-based security-readiness report.
+
+This is not an audit-only assignment. Do not merely list recommendations. Investigate, implement, test, and verify.
+
+At the same time, do not make unsupported claims. No code review can guarantee that every possible vulnerability has been eliminated, especially without access to production infrastructure, real user accounts, deployed Supabase configuration, external service dashboards, penetration-testing infrastructure, or production data. Therefore:
+
+•
+Confirm every finding using actual repository evidence.
+
+•
+Fix every confirmed issue that is safely fixable.
+
+•
+Distinguish code fixes from production operational requirements.
+
+•
+Run real tests and report their actual status.
+
+•
+Do not claim a fix was deployed when only local code was changed.
+
+•
+Do not claim full security when critical or high risks remain.
+
+The final outcome must be a defensible, tested, maintainable security improvement to the existing OUTPOST application—not a superficial report and not an unsupported “all secure” statement.
+
+
+
+
+1. PROJECT AND BACKEND CONTEXT
+
+Project:
+
+Plain Text
+
+
+OUTPOST — Smart Student Accommodation Discovery and Shared Accommodation Coordination Platform
+
+
+
+Primary personas:
+
+Plain Text
+
+
+Student
+Landlord
+Administrator
+
+
+
+Caretaker functionality is out of scope unless it already exists and cannot be removed safely.
+
+The product handles:
+
+•
+User registration, email verification, login, logout, and password recovery.
+
+•
+Student profiles and identity verification.
+
+•
+Landlord profiles and landlord verification.
+
+•
+Accommodation listings, rooms, units, images, and property locations.
+
+•
+Dambare and Rimin Gata, Kano State, Nigeria as the case-study areas.
+
+•
+Search, filtering, addresses, directions, and approved property coordinates.
+
+•
+Foreground device-location proximity discovery.
+
+•
+Roommate preferences, compatibility suggestions, and roommate requests.
+
+•
+Shared accommodation groups.
+
+•
+Direct and group realtime chat.
+
+•
+Member profiles, mentions, replies, delivery/read indicators, and attachments.
+
+•
+Reservations, seven-day unpaid reservation expiration, invoices, and payment evidence.
+
+•
+Landlord receipt review and administrator moderation.
+
+•
+Notifications and audit records.
+
+Supabase is the intended authoritative backend:
+
+•
+Supabase Auth
+
+•
+PostgreSQL
+
+•
+Row Level Security
+
+•
+Supabase Storage
+
+•
+Supabase Realtime
+
+•
+Supabase Edge Functions
+
+•
+PostgreSQL functions, triggers, transactions, indexes, and scheduled jobs
+
+If Firebase remains in the active runtime, identify it as a migration/security issue. Do not leave Firebase, localStorage, and Supabase as competing production sources of truth.
+
+
+
+
+2. SAFETY AND OPERATING RULES
+
+2.1 Verify the workspace first
+
+Before modifying anything:
+
+1.
+Confirm the real project root.
+
+2.
+List the project structure.
+
+3.
+Check whether Git exists.
+
+4.
+Inspect branch, commit, staged changes, unstaged changes, untracked files, and ignored files.
+
+5.
+Check for an existing recovery archive outside the project root.
+
+6.
+Do not overwrite an existing backup.
+
+7.
+Do not discard user changes.
+
+8.
+If no safe baseline exists and local backup creation is authorized, create a uniquely named archive outside the project root.
+
+9.
+Verify archive integrity and record its checksum.
+
+10.
+Inspect .gitignore and sensitive-file handling.
+
+11.
+Perform a non-destructive secret scan without printing secret values.
+
+If the repository or backup state is ambiguous, stop before destructive changes, report the blocker, and preserve the current state.
+
+2.2 Production restrictions
+
+You may modify the local codebase, migrations, tests, and local configuration.
+
+Do not perform these actions without explicit authorization:
+
+•
+Deploy to production.
+
+•
+Modify a production Supabase project.
+
+•
+Run destructive migrations against real data.
+
+•
+Delete production rows or Storage objects.
+
+•
+Revoke production sessions.
+
+•
+Rotate production credentials.
+
+•
+Disable real users.
+
+•
+Change production Auth providers.
+
+•
+Change billing or IAM.
+
+•
+Revoke historical signed/tokenized URLs.
+
+•
+Push to a remote Git repository.
+
+Never print:
+
+•
+Supabase service-role keys.
+
+•
+Database passwords.
+
+•
+Access tokens.
+
+•
+Session cookies.
+
+•
+Private keys.
+
+•
+Full signed URLs.
+
+•
+Payment data.
+
+•
+Identity documents.
+
+•
+Private messages.
+
+•
+Sensitive user profile data.
+
+2.3 No insecure shortcuts
+
+Do not:
+
+•
+Disable RLS.
+
+•
+Add broad public policies.
+
+•
+Grant all authenticated users access to private data.
+
+•
+Trust a browser-supplied role, ownership ID, status, or approval flag.
+
+•
+Use localStorage as proof of authorization.
+
+•
+Put a service-role key in frontend code.
+
+•
+Hide an error and report an empty successful state.
+
+•
+Remove a security control merely to make a test pass.
+
+•
+Use Firebase rules as a substitute for Supabase RLS.
+
+•
+Claim malware scanning if no malware scanner exists.
+
+2.4 Work in complete batches
+
+Do not ask for approval for every individual file. Work through the complete mission in coherent stages. Stop only for a genuine safety blocker, missing baseline, ambiguous destructive operation, or production authorization requirement.
+
+
+
+
+3. PHASE 0 — REPOSITORY AND BASELINE VERIFICATION
+
+Inspect and report:
+
+Plain Text
+
+
+Current working directory
+Actual project root
+Git repository status
+Current branch
+Current commit
+Uncommitted changes
+Untracked files
+Existing backup/archive
+Package manager
+Node/runtime version
+Supabase CLI availability
+Existing migration state
+Existing local Supabase configuration
+Existing test setup
+
+
+
+Do not assume these files exist; inspect first:
+
+Plain Text
+
+
+package.json
+package-lock.json
+pnpm-lock.yaml
+bun.lock
+.gitignore
+.env.example
+README.md
+vite.config.*
+tsconfig*.json
+supabase/config.toml
+supabase/migrations/**
+supabase/functions/**
+supabase/seed.sql
+src/**
+tests/**
+
+
+
+If a previously reported baseline or checksum is provided separately, verify it against the actual filesystem. If it does not match, report the discrepancy and do not rewrite Git history.
+
+
+
+
+4. PHASE 1 — COMPLETE ATTACK-SURFACE DISCOVERY
+
+Inspect the entire codebase and build a security inventory.
+
+Search for:
+
+Plain Text
+
+
+firebase
+firestore
+firebase-admin
+getDownloadURL
+getSignedUrl
+localStorage
+sessionStorage
+indexedDB
+role
+admin
+isAdmin
+service_role
+SUPABASE_SERVICE_ROLE_KEY
+createClient
+from(
+.rpc(
+.functions.invoke
+.channel(
+onAuthStateChange
+onSnapshot
+setDoc
+updateDoc
+addDoc
+upload
+remove
+signIn
+signUp
+resetPassword
+watchPosition
+getCurrentPosition
+window.location
+innerHTML
+dangerouslySetInnerHTML
+redirect
+returnUrl
+receipt
+attachment
+conversation
+group
+reservation
+verification
+
+
+
+Inspect every:
+
+•
+Frontend page, component, hook, context, route, and provider.
+
+•
+Supabase client initialization.
+
+•
+Auth and session flow.
+
+•
+Profile and role resolution.
+
+•
+Database service/repository.
+
+•
+Migration and seed file.
+
+•
+PostgreSQL function and trigger.
+
+•
+RLS policy.
+
+•
+Storage bucket and object policy.
+
+•
+Edge Function.
+
+•
+Realtime subscription.
+
+•
+Reservation and payment workflow.
+
+•
+Chat and group workflow.
+
+•
+Device-location workflow.
+
+•
+External API call.
+
+•
+Error handler and logger.
+
+•
+Environment variable.
+
+•
+Build/deployment configuration.
+
+•
+Test and CI file.
+
+Create an issue register with this exact information:
+
+Plain Text
+
+
+Issue ID
+Category
+Severity: Critical / High / Medium / Low / Informational
+Affected file and line
+Confirmed evidence
+Attack precondition
+Attacker capability
+Business impact
+Data affected
+Fix applied
+Regression test
+Residual risk
+Production action required
+Verification status
+
+
+
+Do not include speculative findings as confirmed vulnerabilities. Put unverified concerns under “Needs verification.”
+
+
+
+
+5. PHASE 2 — AUTHENTICATION AND SESSION SECURITY
+
+Audit and fix:
+
+5.1 Registration and email verification
+
+•
+Active email address is mandatory.
+
+•
+Email confirmation is handled by Supabase Auth.
+
+•
+Unverified users cannot perform workflows that require verified identity.
+
+•
+Duplicate profile creation is prevented.
+
+•
+Auth UID is the immutable identity key.
+
+•
+Signup metadata cannot assign a privileged role.
+
+•
+Passwords are never stored in application tables.
+
+•
+Password-reset links cannot be redirected to untrusted domains.
+
+5.2 Login and logout
+
+•
+Session is obtained from Supabase Auth, not localStorage values.
+
+•
+Auth state is restored safely.
+
+•
+Token refresh is handled correctly.
+
+•
+Logout clears user-specific application state and Realtime subscriptions.
+
+•
+Disabled/suspended users cannot continue sensitive operations.
+
+•
+Expired sessions do not continue to authorize mutations.
+
+5.3 Role and administrator security
+
+•
+A user cannot become admin by editing profiles.role.
+
+•
+A user cannot become admin through localStorage, route guards, hidden controls, email matching, or browser state.
+
+•
+Admin promotion/demotion is trusted backend-only.
+
+•
+Privileged operations revalidate authorization server-side.
+
+•
+Role changes are audited.
+
+•
+Session refresh behavior after role changes is documented.
+
+•
+Admin recovery exists without hardcoded credentials.
+
+•
+Previously exposed credentials are reported as requiring operational rotation; do not claim rotation occurred locally.
+
+5.4 Account lifecycle
+
+Audit account deletion, suspension, email change, password change, and profile cleanup. Ensure ownership records are handled intentionally with foreign-key and privacy-safe deletion policies.
+
+
+
+
+6. PHASE 3 — POSTGRESQL SCHEMA AND DATA INTEGRITY
+
+Inspect or create versioned migrations for the actual schema.
+
+Verify or implement appropriate tables, relationships, constraints, and indexes for:
+
+Plain Text
+
+
+profiles
+student_profiles
+landlord_profiles
+student_verification_documents
+landlord_verification_submissions
+properties
+units
+property_locations
+roommate_preferences
+roommate_requests
+accommodation_groups
+group_members
+group_join_requests
+group_invitations
+reservations
+invoices
+payment_receipts
+conversations
+conversation_participants
+messages
+notifications
+audit_logs
+
+
+
+Use:
+
+•
+UUID primary keys.
+
+•
+Foreign keys with deliberate delete behavior.
+
+•
+UTC timestamptz values.
+
+•
+created_at and updated_at.
+
+•
+Check constraints for states and positive values.
+
+•
+Unique constraints for emails, registration numbers, invoice identifiers, and direct conversations.
+
+•
+Server-side defaults.
+
+•
+Safe triggers for updated_at.
+
+•
+Indexes for actual filters, joins, and RLS predicates.
+
+•
+Transactions for multi-record state changes.
+
+•
+Idempotency keys for irreversible workflows.
+
+Protect fields such as:
+
+Plain Text
+
+
+role
+account_status
+verification_status
+verified_at
+verified_by
+reviewed_at
+reviewed_by
+reservation.status
+reservation.hold_expires_at
+reservation.expired_at
+invoice.amount
+invoice.status
+payment_receipt.status
+property.approval_status
+property.is_published
+property.available_spaces
+property.public_latitude
+property.public_longitude
+conversation membership
+admin membership
+
+
+
+Client code must not directly modify protected fields.
+
+Use RPCs, Edge Functions, database functions, triggers, or backend-only operations for protected state transitions.
+
+
+
+
+7. PHASE 4 — ROW LEVEL SECURITY REVIEW AND FIX
+
+Enable RLS on every exposed table, including newly created tables. Verify that no table is accessible through the Data API without an appropriate policy.
+
+Test both positive and negative paths.
+
+7.1 Profiles
+
+•
+User reads and updates only their own editable fields.
+
+•
+Public profile view exposes only approved safe fields.
+
+•
+Role, verification, suspension, and reviewer fields are protected.
+
+•
+Admin access is deliberate and audited.
+
+7.2 Verification documents
+
+•
+Student reads/writes only their own pending documents.
+
+•
+Landlord reads/writes only their own pending documents.
+
+•
+Admin reviews documents.
+
+•
+No anonymous or public access.
+
+•
+Users cannot approve themselves.
+
+7.3 Properties and units
+
+•
+Landlord manages only their own draft/pending listings.
+
+•
+Landlord cannot approve or publish their own listing.
+
+•
+Students see only approved active listings.
+
+•
+Rejected, draft, archived, and suspended listings are not public.
+
+•
+Property ownership cannot be transferred by a client update.
+
+7.4 Locations
+
+•
+Landlord submits location for their own property.
+
+•
+Admin approves or rejects exact/public coordinate release.
+
+•
+Students see only approved public coordinates.
+
+•
+Student device coordinates remain temporary and private.
+
+•
+No user location history is stored unless a separate explicit product requirement exists.
+
+7.5 Reservations and invoices
+
+•
+Student reads only own reservations and invoices.
+
+•
+Related landlord reads only records for their properties.
+
+•
+Admin access is controlled.
+
+•
+Ownership, amount, status, and expiration fields are protected.
+
+•
+Cross-student and cross-landlord access is denied.
+
+7.6 Receipts
+
+•
+Student can submit only for their own eligible reservation.
+
+•
+Related landlord/admin can review through a trusted workflow.
+
+•
+Receipt approval/rejection is privileged.
+
+•
+Rejection reason is controlled.
+
+•
+Receipt records cannot be reassigned by a browser update.
+
+7.7 Groups and chat
+
+•
+Active members can access permitted group data.
+
+•
+Nonmembers cannot read private group content.
+
+•
+Only group admins can administer membership.
+
+•
+Last admin cannot be removed or demoted.
+
+•
+Conversation membership cannot be changed by editing a client array.
+
+•
+Messages are participant-only.
+
+•
+Message editing is sender-only and limited to 15 minutes.
+
+•
+Attachments are participant-only.
+
+7.8 Notifications and audit logs
+
+•
+Users read only their own notifications.
+
+•
+Users can update only allowed read-state fields.
+
+•
+Browser cannot create or edit audit records.
+
+•
+Backend-generated system events are auditable.
+
+Avoid unsafe security definer functions. If used, set a fixed search_path, qualify objects, and restrict execution privileges.
+
+
+
+
+8. PHASE 5 — SUPABASE STORAGE SECURITY
+
+Audit every bucket and object policy.
+
+Use private buckets for:
+
+Plain Text
+
+
+student-docs
+landlord-docs
+payment-receipts
+chat-attachments
+
+
+
+Use controlled paths:
+
+Plain Text
+
+
+student-docs/{uid}/{documentId}/{filename}
+landlord-docs/{uid}/{documentId}/{filename}
+payment-receipts/{landlordId}/{studentId}/{reservationId}/{receiptId}/{filename}
+chat-attachments/{conversationId}/{senderId}/{messageId}/{filename}
+property-images/{landlordId}/{propertyId}/{filename}
+profile-pictures/{uid}/{filename}
+
+
+
+Audit and fix:
+
+•
+Cross-user reads.
+
+•
+Cross-landlord reads.
+
+•
+Cross-landlord writes.
+
+•
+Arbitrary deletes.
+
+•
+Public exposure of private files.
+
+•
+Shared pending_submission paths.
+
+•
+Unsafe file names and overwrites.
+
+•
+Missing file-size limits.
+
+•
+Missing content-type validation.
+
+•
+Permanent sensitive URLs.
+
+•
+Client-controlled metadata.
+
+Rules must not assume that a client-supplied path proves a relationship. Use Edge Functions/database validation before creating canonical references.
+
+Use short-lived signed URLs for private document, receipt, and chat attachment display.
+
+Do not claim malware scanning unless it is actually configured and tested.
+
+
+
+
+9. PHASE 6 — TRUSTED BACKEND WORKFLOWS
+
+Create or repair Edge Functions and PostgreSQL functions for all privileged operations.
+
+9.1 Receipt upload
+
+Implement:
+
+Plain Text
+
+
+request_receipt_upload
+finalize_receipt_upload
+review_payment_receipt
+get_private_receipt_url
+
+
+
+Required behavior:
+
+•
+Authenticate caller.
+
+•
+Verify student owns reservation.
+
+•
+Read trusted landlord/property relationship.
+
+•
+Validate reservation state.
+
+•
+Generate server-controlled receipt ID/path.
+
+•
+Verify uploaded object.
+
+•
+Create canonical receipt record.
+
+•
+Prevent arbitrary receipt URL writes.
+
+•
+Approve/reject through trusted authorization.
+
+•
+Require rejection reason when rejected.
+
+•
+Use idempotency.
+
+•
+Notify relevant user.
+
+•
+Audit the operation.
+
+•
+Clean up failed/orphaned objects safely.
+
+9.2 Chat attachments
+
+Implement:
+
+Plain Text
+
+
+request_chat_attachment_upload
+finalize_chat_attachment_upload
+get_private_chat_attachment_url
+
+
+
+Required behavior:
+
+•
+Authenticate caller.
+
+•
+Verify active conversation membership.
+
+•
+Verify group membership where relevant.
+
+•
+Generate server-controlled path.
+
+•
+Validate object metadata.
+
+•
+Attach only to a legitimate message/conversation.
+
+•
+Prevent arbitrary recipientId authorization.
+
+•
+Issue short-lived signed URL only to active participants.
+
+•
+Make retries idempotent.
+
+•
+Delete orphaned objects only when safely confirmed orphaned.
+
+9.3 Reservation workflows
+
+Implement/repair trusted operations for:
+
+Plain Text
+
+
+create_reservation
+cancel_reservation
+expire_pending_reservations
+submit_payment_receipt
+review_payment_receipt
+
+
+
+Use transactions, row locks where appropriate, server time, idempotency keys, and safe state transitions.
+
+Reservation expiration must be backend scheduled, not only frontend logic. Expire eligible unpaid reservations after seven days, restore availability exactly once, update invoice state, notify the student, and audit the event.
+
+9.4 Group/chat administration
+
+Implement trusted operations for:
+
+Plain Text
+
+
+create_group
+rename_group
+invite_member
+approve_join_request
+remove_member
+leave_group
+promote_admin
+demote_admin
+
+
+
+Enforce first-member-admin, multiple admins, last-admin protection, capacity, active membership, and auditability.
+
+
+
+
+10. PHASE 7 — AUTHORIZATION-SENSITIVE FRONTEND REVIEW
+
+Inspect and fix all frontend assumptions without redesigning unrelated UI.
+
+Ensure:
+
+•
+UI guards are not the only security control.
+
+•
+Forms cannot submit protected fields.
+
+•
+Browser cannot select another owner’s IDs to gain access.
+
+•
+Error states distinguish denied, empty, offline, and failed states.
+
+•
+Loading and retry states exist.
+
+•
+Sensitive URLs are not permanently stored or logged.
+
+•
+Realtime listeners unsubscribe on logout/unmount.
+
+•
+Stale user data is cleared after account changes.
+
+•
+No hidden credential injection exists.
+
+•
+No hardcoded credentials exist.
+
+•
+No service-role key is bundled.
+
+•
+No unsafe HTML rendering exists.
+
+•
+External links use safe validation and appropriate rel attributes.
+
+•
+Redirect destinations are allowlisted.
+
+•
+Query pagination and limits prevent unbounded reads.
+
+•
+All errors are handled visibly and safely.
+
+Search for empty catches such as:
+
+Plain Text
+
+
+.catch(() => {})
+
+
+
+and replace them with meaningful handling, logging that excludes sensitive data, and user-safe error states.
+
+
+
+
+11. PHASE 8 — DEVICE LOCATION AND PROPERTY LOCATION PRIVACY
+
+Audit all geolocation code.
+
+For student device location:
+
+•
+Request only after explicit user action.
+
+•
+Use foreground browser permission.
+
+•
+Use watchPosition() only while the relevant feature is active.
+
+•
+Clear the watch on unmount, logout, route change, and disable action.
+
+•
+Keep raw coordinates in memory by default.
+
+•
+Do not store continuous movement history.
+
+•
+Do not expose one user’s live location to other users.
+
+•
+Handle permission denied, unavailable, timeout, and stale location.
+
+•
+Use reasonable accuracy/timeout settings.
+
+•
+Never claim background tracking if not implemented.
+
+For landlord property location:
+
+•
+Address search and manual pin selection are supported.
+
+•
+Draft coordinates are private.
+
+•
+Exact coordinates are not publicly released before approval.
+
+•
+Public coordinate release requires verified property and admin approval.
+
+•
+Do not invent exact building coordinates when geocoding is uncertain.
+
+•
+Store address, landmark, directions, and coordinate confidence where appropriate.
+
+
+
+
+12. PHASE 9 — INPUT, OUTPUT, AND API SECURITY
+
+Review all user input and external data.
+
+Fix confirmed instances of:
+
+•
+SQL injection risk.
+
+•
+Unsafe RPC parameters.
+
+•
+XSS.
+
+•
+HTML injection.
+
+•
+Open redirects.
+
+•
+Path traversal.
+
+•
+Unsafe filenames.
+
+•
+Unvalidated MIME types.
+
+•
+Oversized uploads.
+
+•
+Insecure direct object references.
+
+•
+Parameter tampering.
+
+•
+Mass assignment.
+
+•
+Prototype pollution.
+
+•
+Unsafe JSON parsing.
+
+•
+Sensitive error disclosure.
+
+•
+Request replay.
+
+•
+Missing idempotency.
+
+•
+Missing rate limits.
+
+•
+CORS mistakes.
+
+•
+Unbounded queries.
+
+•
+Insecure pagination.
+
+Use schema validation at trust boundaries. Validate again in Edge Functions and database functions where the operation is sensitive.
+
+Do not rely on TypeScript types as runtime validation.
+
+
+
+
+13. PHASE 10 — DEPENDENCIES, SECRETS, AND DEPLOYMENT CONFIGURATION
+
+Inspect:
+
+•
+package.json.
+
+•
+Lockfiles.
+
+•
+Vite configuration.
+
+•
+TypeScript configuration.
+
+•
+Supabase configuration.
+
+•
+Edge Function dependencies.
+
+•
+Hosting configuration.
+
+•
+.gitignore.
+
+•
+.env.example.
+
+•
+CI configuration.
+
+•
+Source maps and production bundles.
+
+Run the actual supported dependency audit commands, such as:
+
+Bash
+
+
+npm audit --audit-level=high
+
+
+
+Do not blindly force-upgrade dependencies or destroy lockfiles.
+
+Perform a secret scan without exposing secret values. Check for:
+
+Plain Text
+
+
+SUPABASE_SERVICE_ROLE_KEY
+service_role
+DB_PASSWORD
+PRIVATE_KEY
+BEGIN PRIVATE KEY
+access_token
+refresh_token
+API_KEY
+
+
+
+Do not report a public Supabase URL or publishable/anon key as a secret equivalent to the service-role key, but verify that only intended public configuration appears in frontend code.
+
+Inspect the built bundle for accidental secrets.
+
+
+
+
+14. PHASE 11 — SECURITY TESTING
+
+Add or repair automated tests using the project’s actual framework.
+
+If local Supabase testing is feasible, configure it without destroying existing configuration.
+
+14.1 Auth tests
+
+•
+Anonymous access to private resources denied.
+
+•
+Unverified user restrictions enforced.
+
+•
+Student cannot become admin.
+
+•
+Landlord cannot call admin operations.
+
+•
+Suspended user cannot perform protected operations.
+
+•
+Logout clears private subscriptions/state.
+
+•
+Expired/invalid session cannot mutate records.
+
+14.2 RLS tests
+
+Test anonymous, Student A, Student B, Landlord A, Landlord B, Admin, group member, removed member, and unrelated user.
+
+Verify denied access to:
+
+•
+Another student’s profile/private documents.
+
+•
+Another landlord’s properties.
+
+•
+Unrelated reservations.
+
+•
+Unrelated invoices and receipts.
+
+•
+Unrelated conversations/messages.
+
+•
+Unrelated attachments.
+
+•
+Draft/rejected property data.
+
+•
+Audit logs.
+
+Verify allowed access only for legitimate owners, participants, related landlords, and admins.
+
+14.3 Storage tests
+
+•
+Private document read denied to unrelated users.
+
+•
+Receipt read denied across landlords.
+
+•
+Chat attachment read denied to nonparticipants.
+
+•
+Cross-user writes denied.
+
+•
+Cross-landlord image writes/deletes denied.
+
+•
+pending_submission new upload denied.
+
+•
+Invalid content type denied.
+
+•
+Oversized upload denied.
+
+•
+Public visitor cannot read private assets.
+
+14.4 Backend workflow tests
+
+•
+Receipt ownership revalidated.
+
+•
+Receipt approval cannot be forged.
+
+•
+Reservation ownership revalidated.
+
+•
+Seven-day expiration uses server time.
+
+•
+Duplicate requests are idempotent.
+
+•
+Concurrent reservations preserve availability.
+
+•
+Failed multi-step operations do not leave inconsistent records.
+
+•
+Group last-admin protection works.
+
+•
+Message edit after 15 minutes is denied.
+
+•
+Removed chat member cannot access protected content.
+
+14.5 Frontend tests
+
+•
+Firebase is not an active runtime backend if Supabase is the selected backend.
+
+•
+localStorage is not the authoritative production database.
+
+•
+Service-role credentials are absent from browser bundle.
+
+•
+Backend failures display error states.
+
+•
+Empty results are not shown for permission errors.
+
+•
+Realtime subscriptions clean up.
+
+•
+Private URLs are not permanently persisted.
+
+Include both positive and negative tests. Do not weaken security policies to make tests pass.
+
+
+
+
+15. PHASE 12 — EXECUTION AND VALIDATION
+
+Run every relevant command that actually exists in the repository. At minimum attempt:
+
+Bash
+
+
+npm install
+npm run lint
+npm run build
+npm test
+
+
+
+If Supabase CLI is configured:
+
+Bash
+
+
+supabase start
+supabase db reset
+supabase test db
+supabase gen types typescript --local
+
+
+
+If Edge Functions exist:
+
+Bash
+
+
+supabase functions serve
+
+
+
+Use the project’s real commands if different.
+
+Also run when available:
+
+Bash
+
+
+npm audit --audit-level=high
+
+
+
+Validate:
+
+•
+TypeScript.
+
+•
+Frontend build.
+
+•
+Edge Functions.
+
+•
+Migrations.
+
+•
+PostgreSQL functions.
+
+•
+RLS policies.
+
+•
+Storage policies.
+
+•
+Realtime subscriptions.
+
+•
+Unit tests.
+
+•
+Security tests.
+
+•
+Dependency audit.
+
+•
+Secret scan.
+
+•
+Production bundle.
+
+•
+Git diff.
+
+•
+Configuration.
+
+Classify every check:
+
+Plain Text
+
+
+PASS
+FAIL
+BLOCKED
+NOT RUN
+
+
+
+If an environment is unavailable, explain the exact reason and list the unverified checks.
+
+
+
+
+16. CHANGE REVIEW AND REGRESSION CONTROL
+
+After implementation:
+
+1.
+Review every changed file.
+
+2.
+Confirm no unrelated feature was rewritten.
+
+3.
+Confirm no security rule was loosened.
+
+4.
+Confirm all protected fields remain protected.
+
+5.
+Confirm user changes were preserved.
+
+6.
+Confirm no secret entered source, tests, logs, or build output.
+
+7.
+Confirm migrations are ordered and reversible where possible.
+
+8.
+Confirm destructive operations are not automatically applied to production.
+
+9.
+Confirm error handling is explicit.
+
+10.
+Confirm tests exercise attack attempts.
+
+11.
+Confirm frontend behavior still has loading, empty, error, and permission states.
+
+Do not commit or push automatically unless the repository workflow explicitly requires a safe local commit.
+
+Do not deploy.
+
+
+
+
+17. REQUIRED FINAL REPORT
+
+Return a complete final report with these sections:
+
+A. Environment and safety gate
+
+•
+Actual project root.
+
+•
+Git status.
+
+•
+Baseline/backup status.
+
+•
+Package manager and runtime.
+
+•
+Supabase CLI/local environment status.
+
+•
+Secret-scan result without secret values.
+
+B. Confirmed vulnerabilities
+
+For each issue:
+
+Plain Text
+
+
+ID
+Severity
+Affected file/line
+Evidence
+Impact
+Fix
+Test
+Residual risk
+
+
+
+C. Implemented remediation
+
+Report changes to:
+
+•
+Auth and session handling.
+
+•
+Role/admin security.
+
+•
+PostgreSQL schema.
+
+•
+RLS.
+
+•
+Storage policies.
+
+•
+Edge Functions.
+
+•
+Receipt workflow.
+
+•
+Chat/attachment workflow.
+
+•
+Reservations and expiration.
+
+•
+Groups and Realtime.
+
+•
+Device-location privacy.
+
+•
+Frontend and input validation.
+
+•
+Dependencies/configuration.
+
+D. Testing evidence
+
+List every command actually executed, with:
+
+Plain Text
+
+
+Command
+Result: PASS / FAIL / BLOCKED / NOT RUN
+Exit status
+Short output summary
+
+
+
+Do not fabricate output.
+
+E. Production actions still required
+
+Clearly list any remaining manual operations such as:
+
+•
+Applying migrations to the real Supabase project.
+
+•
+Enabling extensions or scheduled jobs.
+
+•
+Configuring Auth redirect URLs.
+
+•
+Configuring email provider.
+
+•
+Setting Edge Function secrets.
+
+•
+Rotating exposed credentials.
+
+•
+Revoking sessions.
+
+•
+Migrating legacy Storage objects.
+
+•
+Revoking legacy URLs.
+
+•
+Reviewing production RLS policies.
+
+•
+Deploying after human review.
+
+F. Residual risks
+
+Group remaining risks by Critical, High, Medium, Low, and Informational.
+
+Do not hide a risk because it requires production access.
+
+G. Final status
+
+Use exactly one:
+
+Plain Text
+
+
+REMEDIATION COMPLETE — ALL EXECUTED CHECKS PASSED
+
+
+
+Only use this if all feasible in-scope remediation was implemented, relevant tests passed, and no known critical/high code-level vulnerability remains unresolved.
+
+Plain Text
+
+
+REMEDIATION PARTIALLY COMPLETE — BLOCKERS OR RISKS REMAIN
+
+
+
+Use this if code is improved but production actions, blocked tests, or unresolved risks remain.
+
+Plain Text
+
+
+REMEDIATION BLOCKED — SAFETY GATE OR BASELINE FAILED
+
+
+
+Use this if implementation could not safely begin.
+
+
+
+
+18. NON-NEGOTIABLE COMPLETION CHECKLIST
+
+Before declaring completion, verify:
+
+•
+Supabase is the intended active backend.
+
+•
+Firebase/localStorage are not competing production sources of truth.
+
+•
+No service-role key is exposed to the browser.
+
+•
+All exposed public tables have RLS.
+
+•
+RLS tests include both allowed and denied cases.
+
+•
+Storage buckets have least-privilege policies.
+
+•
+Private documents are not public.
+
+•
+Receipts are relationship-bound.
+
+•
+Chat attachments are participant-bound.
+
+•
+Property images are landlord/property-scoped.
+
+•
+New uploads do not use pending_submission.
+
+•
+Permanent sensitive URLs are not newly created.
+
+•
+Legacy URL exposure is documented.
+
+•
+Admin operations are trusted and auditable.
+
+•
+Users cannot self-promote or alter protected status fields.
+
+•
+Reservation inventory is transaction-safe.
+
+•
+Seven-day expiration runs through backend scheduling.
+
+•
+Receipt approval is backend-authorized.
+
+•
+Group membership and last-admin protection are enforced.
+
+•
+Message editing is limited to 15 minutes.
+
+•
+Realtime subscriptions are cleaned up.
+
+•
+Device movement is not persistently stored.
+
+•
+Error states do not mask authorization failures.
+
+•
+Dependency and secret checks are reported.
+
+•
+No production deployment or irreversible action occurred without authorization.
+
+•
+The final report distinguishes local fixes from production requirements.
+
+
+
+
+19. BEGIN NOW
+
+Begin with the workspace safety gate and full attack-surface inventory.
+
+Then execute the complete mission in this order:
+
+1.
+Verify repository and baseline.
+
+2.
+Inventory the entire codebase.
+
+3.
+Confirm every security finding with evidence.
+
+4.
+Prioritize Critical and High issues.
+
+5.
+Implement secure Supabase Auth, schema, RLS, Storage, and backend workflows.
+
+6.
+Harden reservations, payments, groups, chat, Realtime, and device-location privacy.
+
+7.
+Harden frontend, configuration, dependencies, and error handling.
+
+8.
+Add regression tests.
+
+9.
+Run every available check.
+
+10.
+Review the final diff.
+
+11.
+Produce the evidence-based release-readiness report.
+
+Do not stop after reporting vulnerabilities. Do not use insecure shortcuts. Do not claim everything is fixed unless the evidence supports that conclusion.
+
+End of prompt
+
