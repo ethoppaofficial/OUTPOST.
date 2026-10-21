@@ -1,14 +1,5 @@
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signOut as fbSignOut,
-  updateProfile,
-} from 'firebase/auth';
-import { auth, db } from '../../infrastructure/firebase/firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
-import { User, UserRole, AccountStatus } from '../../domain/types';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
+import { User, UserRole, AccountStatus, StudentProfile, LandlordProfile } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { appConfig } from '../../infrastructure/config/appConfig';
 
@@ -19,27 +10,30 @@ export interface AuthSession {
 
 class AuthService {
   public getCurrentUser(): User {
-    const firebaseUser = auth.currentUser;
-    if (!firebaseUser) {
-      throw new Error('Authentication is required to access the current user.');
+    const activeId = repository.getActiveUserId();
+    if (activeId) {
+      const u = repository.getUserById(activeId);
+      if (u) return u;
     }
 
-    const user = repository.getUserById(firebaseUser.uid);
-    if (user && (user.role === 'student' || user.role === 'landlord')) return user;
-
-    // A real Firebase session may exist before its profile has finished syncing.
-    // Never infer administrator access from a Firestore profile or local fixture;
-    // the FirebaseContext and admin routes rely on the refreshed custom claim.
     return {
-      id: firebaseUser.uid,
-      email: firebaseUser.email || '',
+      id: activeId || 'anonymous',
+      email: '',
       role: 'student',
-      accountStatus: firebaseUser.emailVerified ? 'active' : 'email_unverified',
-      emailVerified: firebaseUser.emailVerified,
+      accountStatus: 'email_unverified',
+      emailVerified: false,
       createdAt: new Date().toISOString(),
-      ...(firebaseUser.displayName ? { fullName: firebaseUser.displayName } : {}),
-      ...(firebaseUser.photoURL ? { avatarUrl: firebaseUser.photoURL } : {}),
     };
+  }
+
+  public getCurrentStudentProfile(): StudentProfile | undefined {
+    const user = this.getCurrentUser();
+    return repository.getStudentProfile(user.id);
+  }
+
+  public getCurrentLandlordProfile(): LandlordProfile | undefined {
+    const user = this.getCurrentUser();
+    return repository.getLandlordProfile(user.id);
   }
 
   public getSession(): AuthSession {
@@ -60,69 +54,80 @@ class AuthService {
   }
 
   /**
-   * Firebase-backed Email/Password Login
+   * Supabase-backed Email/Password Login
    */
-  public async loginWithFirebase(email: string, password?: string): Promise<{ success: boolean; user?: User; error?: string }> {
+  public async loginWithSupabase(email: string, password?: string): Promise<{ success: boolean; user?: User; error?: string }> {
     const normalized = email.trim().toLowerCase();
 
-    if (appConfig.backendMode !== 'firebase') {
-      return { success: false, error: 'Firebase Authentication is required; demo sign-in is disabled.' };
-    }
     if (!password) {
       return { success: false, error: 'Enter your password to sign in.' };
     }
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, normalized, password);
-      const fbUser = cred.user;
-      const token = await fbUser.getIdTokenResult(true);
-      repository.setActiveUserId(fbUser.uid);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalized,
+        password,
+      });
 
-      const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
-      const profile = userDoc.exists() ? userDoc.data() : {};
-      const storedRole = profile.role as UserRole | undefined;
-      const role: UserRole = token.claims.admin === true
+      if (error || !data.user) {
+        return { success: false, error: error?.message || 'Invalid email or password.' };
+      }
+
+      const sbUser = data.user;
+      repository.setActiveUserId(sbUser.id);
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', sbUser.id)
+        .single();
+
+      const storedRole = profile?.role as UserRole | undefined;
+      const role: UserRole = storedRole === 'admin'
         ? 'admin'
-        : storedRole === 'student' || storedRole === 'landlord'
-        ? storedRole
+        : storedRole === 'landlord'
+        ? 'landlord'
         : 'student';
-      const existing = repository.getUserById(fbUser.uid);
+
+      const existing = repository.getUserById(sbUser.id);
       const authenticatedUser: User = {
         ...(existing || {
-          id: fbUser.uid,
-          email: fbUser.email || normalized,
-          accountStatus: fbUser.emailVerified ? 'active' : 'email_unverified',
-          emailVerified: fbUser.emailVerified,
-          createdAt: new Date().toISOString(),
+          id: sbUser.id,
+          email: sbUser.email || normalized,
+          accountStatus: (profile?.account_status as AccountStatus) || 'active',
+          emailVerified: Boolean(sbUser.email_confirmed_at),
+          createdAt: sbUser.created_at || new Date().toISOString(),
         }),
-        id: fbUser.uid,
-        email: fbUser.email || normalized,
+        id: sbUser.id,
+        email: sbUser.email || normalized,
         role,
-        ...(profile.accountStatus ? { accountStatus: profile.accountStatus as AccountStatus } : {}),
-        emailVerified: fbUser.emailVerified,
-        ...(profile.fullName ? { fullName: profile.fullName as string } : fbUser.displayName ? { fullName: fbUser.displayName } : {}),
-        ...(fbUser.photoURL ? { avatarUrl: fbUser.photoURL } : {}),
+        accountStatus: (profile?.account_status as AccountStatus) || 'active',
+        emailVerified: Boolean(sbUser.email_confirmed_at),
+        fullName: profile?.full_name || sbUser.user_metadata?.full_name || '',
+        avatarUrl: profile?.avatar_url || sbUser.user_metadata?.avatar_url || '',
       };
-      if (!existing) await repository.createUser(authenticatedUser);
+
+      if (!existing) repository.createUser(authenticatedUser);
 
       if (authenticatedUser.accountStatus === 'suspended') {
-        await fbSignOut(auth);
+        await supabase.auth.signOut();
         return { success: false, error: 'Your account has been suspended by an administrator.' };
       }
 
       return { success: true, user: authenticatedUser };
     } catch (err: any) {
-      const msg = err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password'
-        ? 'Invalid email or password.'
-        : err.message || 'Authentication failed.';
-      return { success: false, error: msg };
+      return { success: false, error: err.message || 'Authentication failed.' };
     }
   }
 
+  public async loginWithFirebase(email: string, password?: string) {
+    return this.loginWithSupabase(email, password);
+  }
+
   /**
-   * Firebase-backed Student Registration with Verification Email
+   * Supabase-backed Student Registration
    */
-  public async registerStudentWithFirebase(data: {
+  public async registerStudentWithSupabase(data: {
     fullName: string;
     email: string;
     password?: string;
@@ -143,40 +148,43 @@ class AuthService {
 
     const regNorm = data.registrationNumber.trim().toUpperCase();
     const existingProfiles = repository.getStudentProfiles();
-    if (existingProfiles.some((p) => p.registrationNumber.toUpperCase() === regNorm)) {
+    if (existingProfiles.some((p) => p.registrationNumber?.toUpperCase() === regNorm)) {
       return { success: false, error: 'This student registration number is already registered on OUTPOST.' };
     }
 
-    if (appConfig.backendMode !== 'firebase') {
-      return { success: false, error: 'Firebase Authentication is required; demo registration is disabled.' };
-    }
     if (!data.password) {
       return { success: false, error: 'A password is required to create an account.' };
     }
 
     try {
-      const cred = await createUserWithEmailAndPassword(auth, emailNorm, data.password);
-      const fbUser = cred.user;
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: emailNorm,
+        password: data.password,
+        options: {
+          data: {
+            full_name: data.fullName.trim(),
+            role: 'student',
+          },
+        },
+      });
 
-      await updateProfile(fbUser, { displayName: data.fullName.trim() });
-      try {
-        await sendEmailVerification(fbUser);
-      } catch (e) {
-        console.warn('Verification email rate-limit notice:', e);
+      if (signUpError || !signUpData.user) {
+        return { success: false, error: signUpError?.message || 'Registration failed.' };
       }
 
+      const sbUser = signUpData.user;
       const newUser: User = {
-        id: fbUser.uid,
+        id: sbUser.id,
         email: emailNorm,
-        role: 'student', // Strict student role enforcement
+        role: 'student',
         accountStatus: 'email_unverified',
-        emailVerified: fbUser.emailVerified,
+        emailVerified: Boolean(sbUser.email_confirmed_at),
         createdAt: new Date().toISOString(),
       };
 
-      await repository.createUser(newUser);
-      await repository.saveStudentProfile({
-        userId: fbUser.uid,
+      repository.createUser(newUser);
+      repository.saveStudentProfile({
+        userId: sbUser.id,
         fullName: data.fullName.trim(),
         phone: data.phone.trim(),
         registrationNumber: regNorm,
@@ -190,22 +198,21 @@ class AuthService {
         isProfileVerified: false,
       });
 
-      repository.setActiveUserId(fbUser.uid);
+      repository.setActiveUserId(sbUser.id);
       return { success: true, user: newUser };
     } catch (err: any) {
-      const msg = err.code === 'auth/email-already-in-use'
-        ? 'An account with this email address already exists.'
-        : err.code === 'auth/weak-password'
-        ? 'Password must be at least 6 characters long.'
-        : err.message || 'Registration failed.';
-      return { success: false, error: msg };
+      return { success: false, error: err.message || 'Registration failed.' };
     }
   }
 
+  public async registerStudentWithFirebase(data: any) {
+    return this.registerStudentWithSupabase(data);
+  }
+
   /**
-   * Firebase-backed Landlord Registration
+   * Supabase-backed Landlord Registration
    */
-  public async registerLandlordWithFirebase(data: {
+  public async registerLandlordWithSupabase(data: {
     legalName: string;
     email: string;
     password?: string;
@@ -220,36 +227,39 @@ class AuthService {
       return { success: false, error: 'A valid business or personal email is required.' };
     }
 
-    if (appConfig.backendMode !== 'firebase') {
-      return { success: false, error: 'Firebase Authentication is required; demo registration is disabled.' };
-    }
     if (!data.password) {
       return { success: false, error: 'A password is required to create an account.' };
     }
 
     try {
-      const cred = await createUserWithEmailAndPassword(auth, emailNorm, data.password);
-      const fbUser = cred.user;
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: emailNorm,
+        password: data.password,
+        options: {
+          data: {
+            full_name: data.legalName.trim(),
+            role: 'landlord',
+          },
+        },
+      });
 
-      await updateProfile(fbUser, { displayName: data.legalName.trim() });
-      try {
-        await sendEmailVerification(fbUser);
-      } catch (e) {
-        console.warn('Verification email rate-limit notice:', e);
+      if (signUpError || !signUpData.user) {
+        return { success: false, error: signUpError?.message || 'Registration failed.' };
       }
 
+      const sbUser = signUpData.user;
       const newUser: User = {
-        id: fbUser.uid,
+        id: sbUser.id,
         email: emailNorm,
-        role: 'landlord', // Strict landlord role
+        role: 'landlord',
         accountStatus: 'profile_pending',
-        emailVerified: fbUser.emailVerified,
+        emailVerified: Boolean(sbUser.email_confirmed_at),
         createdAt: new Date().toISOString(),
       };
 
-      await repository.createUser(newUser);
-      await repository.saveLandlordProfile({
-        userId: fbUser.uid,
+      repository.createUser(newUser);
+      repository.saveLandlordProfile({
+        userId: sbUser.id,
         legalName: data.legalName.trim(),
         phone: data.phone.trim(),
         contactAddress: data.contactAddress.trim(),
@@ -260,20 +270,22 @@ class AuthService {
         submittedAt: new Date().toISOString(),
       });
 
-      repository.setActiveUserId(fbUser.uid);
+      repository.setActiveUserId(sbUser.id);
       return { success: true, user: newUser };
     } catch (err: any) {
-      const msg = err.code === 'auth/email-already-in-use'
-        ? 'An account with this email address already exists.'
-        : err.message || 'Registration failed.';
-      return { success: false, error: msg };
+      return { success: false, error: err.message || 'Registration failed.' };
     }
+  }
+
+  public async registerLandlordWithFirebase(data: any) {
+    return this.registerLandlordWithSupabase(data);
   }
 
   public async sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
     const normalized = email.trim().toLowerCase();
     try {
-      await sendPasswordResetEmail(auth, normalized);
+      const { error } = await supabase.auth.resetPasswordForEmail(normalized);
+      if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to send password reset email.' };
@@ -281,11 +293,13 @@ class AuthService {
   }
 
   public async resendVerificationEmail(): Promise<{ success: boolean; error?: string }> {
-    if (!auth.currentUser) {
-      return { success: false, error: 'No authenticated user session.' };
+    const user = this.getCurrentUser();
+    if (!user || !user.email) {
+      return { success: false, error: 'No active user session.' };
     }
     try {
-      await sendEmailVerification(auth.currentUser);
+      const { error } = await supabase.auth.resend({ type: 'signup', email: user.email });
+      if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to resend verification email.' };
@@ -293,24 +307,28 @@ class AuthService {
   }
 
   public async refreshEmailVerification(): Promise<{ verified: boolean; error?: string }> {
-    if (!auth.currentUser) {
-      return { verified: false, error: 'No authenticated user session.' };
-    }
     try {
-      await auth.currentUser.reload();
-      const isVerified = auth.currentUser.emailVerified;
-      const existing = repository.getUserById(auth.currentUser.uid);
-      if (existing) {
-        existing.emailVerified = isVerified;
-        if (isVerified && existing.accountStatus === 'email_unverified') {
-          existing.accountStatus = 'active';
+      const { data: { user } } = await supabase.auth.getUser();
+      const isVerified = Boolean(user?.email_confirmed_at);
+      if (user) {
+        const existing = repository.getUserById(user.id);
+        if (existing) {
+          existing.emailVerified = isVerified;
+          if (isVerified && existing.accountStatus === 'email_unverified') {
+            existing.accountStatus = 'active';
+          }
+          repository.updateUser(existing);
         }
-        repository.updateUser(existing);
       }
       return { verified: isVerified };
     } catch (err: any) {
       return { verified: false, error: err.message || 'Could not refresh verification status.' };
     }
+  }
+
+  public async logout(): Promise<void> {
+    await supabase.auth.signOut();
+    repository.clearActiveSession();
   }
 
   public login(email: string, role?: UserRole): { success: boolean; user?: User; error?: string } {
@@ -331,131 +349,6 @@ class AuthService {
 
     repository.setActiveUserId(existing.id);
     return { success: true, user: existing };
-  }
-
-  public registerStudent(data: {
-    fullName: string;
-    email: string;
-    password?: string;
-    phone: string;
-    registrationNumber: string;
-    university: string;
-    campus: string;
-    studyLevel: any;
-    programme: string;
-    gender: 'Male' | 'Female' | 'Other';
-    preferredLocation?: string;
-  }): { success: boolean; user?: User; error?: string } {
-    const emailNorm = data.email.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(emailNorm) || emailNorm.includes('tempmail') || emailNorm.includes('disposable')) {
-      return { success: false, error: 'A valid, active academic or personal email is required.' };
-    }
-
-    if (repository.getUserByEmail(emailNorm)) {
-      return { success: false, error: 'An account with this email address already exists.' };
-    }
-
-    const existingProfiles = repository.getStudentProfiles();
-    const regNorm = data.registrationNumber.trim().toUpperCase();
-    if (existingProfiles.some((p) => p.registrationNumber.toUpperCase() === regNorm)) {
-      return { success: false, error: 'This student registration number is already registered on OUTPOST.' };
-    }
-
-    const userId = `user-student-${Date.now()}`;
-    const newUser: User = {
-      id: userId,
-      email: emailNorm,
-      role: 'student',
-      accountStatus: 'email_unverified',
-      emailVerified: true,
-      createdAt: new Date().toISOString(),
-      avatarUrl: `https://images.unsplash.com/photo-${1534528741775 + Math.floor(Math.random() * 1000)}?w=200&auto=format&fit=crop&q=80`,
-    };
-
-    repository.createUser(newUser);
-    repository.saveStudentProfile({
-      userId,
-      fullName: data.fullName.trim(),
-      phone: data.phone.trim(),
-      registrationNumber: regNorm,
-      university: data.university,
-      campus: data.campus,
-      studyLevel: data.studyLevel,
-      programme: data.programme.trim(),
-      gender: data.gender,
-      preferredLocation: data.preferredLocation?.trim() || 'Near Campus',
-      bio: 'New student on Outpost.',
-      isProfileVerified: false,
-    });
-
-    repository.setActiveUserId(userId);
-    return { success: true, user: newUser };
-  }
-
-  public registerLandlord(data: {
-    legalName: string;
-    email: string;
-    password?: string;
-    fullName?: string;
-    phone: string;
-    businessName?: string;
-    contactAddress: string;
-    idType: any;
-    idReference: string;
-  }): { success: boolean; user?: User; error?: string } {
-    const emailNorm = data.email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
-      return { success: false, error: 'A valid business or personal email is required.' };
-    }
-
-    if (repository.getUserByEmail(emailNorm)) {
-      return { success: false, error: 'An account with this email address already exists.' };
-    }
-
-    const userId = `user-landlord-${Date.now()}`;
-    const newUser: User = {
-      id: userId,
-      email: emailNorm,
-      role: 'landlord',
-      accountStatus: 'profile_pending',
-      emailVerified: true,
-      createdAt: new Date().toISOString(),
-      avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    };
-
-    repository.createUser(newUser);
-    repository.saveLandlordProfile({
-      userId,
-      legalName: data.legalName.trim(),
-      phone: data.phone.trim(),
-      contactAddress: data.contactAddress.trim(),
-      idType: data.idType,
-      idReference: data.idReference.trim(),
-      businessName: data.businessName?.trim(),
-      verificationStatus: 'pending',
-      submittedAt: new Date().toISOString(),
-    });
-
-    repository.setActiveUserId(userId);
-    return { success: true, user: newUser };
-  }
-
-  public getCurrentStudentProfile() {
-    const user = this.getCurrentUser();
-    return repository.getStudentProfile(user.id);
-  }
-
-  public getCurrentLandlordProfile() {
-    const user = this.getCurrentUser();
-    return repository.getLandlordProfile(user.id);
-  }
-
-  public async logout(): Promise<void> {
-    try {
-      await fbSignOut(auth);
-    } catch {}
-    repository.setActiveUserId('');
   }
 }
 

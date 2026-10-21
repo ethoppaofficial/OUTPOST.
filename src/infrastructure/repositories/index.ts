@@ -1,11 +1,16 @@
 import { IRepository } from '../../domain/repository';
+import { SupabaseRepository } from '../supabase/supabaseRepository';
 import { FirebaseRepository } from './firebaseRepository';
 
-const firebaseRepoInstance = new FirebaseRepository();
+const supabaseRepoInstance = new SupabaseRepository();
 
+/**
+ * Returns the authoritative production repository.
+ * Supabase is the exclusive production backend.
+ */
 export function getActiveRepository(): IRepository {
-  return firebaseRepoInstance;
+  return supabaseRepoInstance;
 }
 
-export const repository: IRepository = firebaseRepoInstance;
-export { FirebaseRepository };
+export const repository: IRepository = supabaseRepoInstance;
+export { SupabaseRepository, FirebaseRepository };

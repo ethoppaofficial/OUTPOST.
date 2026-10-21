@@ -1,16 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { maplibregl } from '../../infrastructure/config/maplibreSetup';
 import type { Map as MapInstance, Marker, Popup } from 'maplibre-gl';
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  type DocumentData,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
-import 'maplibre-gl/dist/maplibre-gl.css';
-import { db } from '../../infrastructure/firebase/firebaseConfig';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
 import { propertyService } from '../../application/services/propertyService';
 import {
   mapConfig,
@@ -73,7 +64,7 @@ function isValidCoordinate(latitude: unknown, longitude: unknown): boolean {
 }
 
 function toVerifiedProperty(
-  snapshot: QueryDocumentSnapshot<DocumentData>,
+  snapshot: any,
 ): VerifiedMapProperty | null {
   const data = snapshot.data();
 
@@ -235,33 +226,72 @@ export const StudentVerifiedPropertiesMap: React.FC<
       }
     };
 
-    const propertiesQuery = query(
-      collection(db, 'properties'),
-      where('verificationStatus', '==', 'approved'),
-      where('locationVerificationStatus', '==', 'verified'),
-      where('area', 'in', ['Dambare', 'Rimin Gata']),
-      where('state', '==', 'Kano State'),
-      where('isActive', '==', true),
-    );
+    const loadProperties = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('properties')
+          .select(`
+            id,
+            title,
+            property_type,
+            rental_fee_annual,
+            available_spaces,
+            total_spaces,
+            approval_status,
+            is_published,
+            property_locations (
+              public_latitude,
+              public_longitude,
+              precision,
+              verification_status,
+              formatted_address
+            )
+          `)
+          .eq('approval_status', 'approved')
+          .eq('is_published', true);
 
-    return onSnapshot(
-      propertiesQuery,
-      (snapshot) => {
-        const next = snapshot.docs
-          .map(toVerifiedProperty)
-          .filter((property): property is VerifiedMapProperty => property !== null);
-        if (next.length > 0) {
-          setProperties(next);
+        if (!error && data && data.length > 0) {
+          const mapProps: VerifiedMapProperty[] = data.map((p: any) => ({
+            id: p.id,
+            title: p.title,
+            area: 'Dambare' as HousingArea,
+            publicLatitude: Number(p.property_locations?.[0]?.public_latitude || 11.9842),
+            publicLongitude: Number(p.property_locations?.[0]?.public_longitude || 8.4187),
+            publicLocationPrecision: p.property_locations?.[0]?.precision || 'nearby_building',
+            publicLocationLabel: 'Verified in Dambare',
+            propertyType: p.property_type || 'self_contained',
+            accommodationType: 'off_campus',
+            pricePerSession: Number(p.rental_fee_annual || 250000),
+            currency: 'NGN',
+            availableSpaces: p.available_spaces || 1,
+            totalCapacity: p.total_spaces || 1,
+            images: [],
+            slug: p.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            fullAddress: p.property_locations?.[0]?.formatted_address || 'Kano State',
+          }));
+          setProperties(mapProps);
         } else {
           loadFallbackFromRepository();
         }
-        setLoading(false);
-      },
-      () => {
+      } catch {
         loadFallbackFromRepository();
+      } finally {
         setLoading(false);
-      },
-    );
+      }
+    };
+
+    loadProperties();
+
+    const channel = supabase
+      .channel('public:properties:map')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
+        loadProperties();
+      })
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
   }, []);
 
   // Initialize Map

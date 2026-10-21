@@ -1,2 +1,2 @@
-export { storageService, StorageService } from '../../infrastructure/firebase/storageService';
-export type { FileUploadResult } from '../../infrastructure/firebase/storageService';
+export { supabaseStorageService as storageService, SupabaseStorageService as StorageService } from '../../infrastructure/supabase/supabaseStorageService';
+export type { SupabaseFileUploadResult as FileUploadResult } from '../../infrastructure/supabase/supabaseStorageService';

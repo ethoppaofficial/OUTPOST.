@@ -1,7 +1,6 @@
 import { Reservation, Invoice, PaymentReceipt, ReservationStatus } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
-import { httpsCallable } from 'firebase/functions';
-import { auth, functions } from '../../infrastructure/firebase/firebaseConfig';
+import { invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
 
 class ReservationService {
   public getReservationsForStudent(studentId: string): Reservation[] {
@@ -144,7 +143,6 @@ class ReservationService {
     let reason = rejectionReason;
 
     if (landlordIdOrReason && landlordIdOrReason.length > 20 && !rejectionReason) {
-      // It's a rejection reason
       reason = landlordIdOrReason;
     } else if (landlordIdOrReason && landlordIdOrReason.startsWith('user-')) {
       landlordId = landlordIdOrReason;
@@ -154,19 +152,14 @@ class ReservationService {
 
     const receipt = repository.reviewPaymentReceipt(receiptId, decision, landlordId, reason);
 
-    if (auth.currentUser) {
-      try {
-        const callable = httpsCallable<{ receiptId: string; decision: string; rejectionReason?: string }, { ok: boolean }>(
-          functions,
-          'reviewPaymentReceipt'
-        );
-        callable({ receiptId, decision, rejectionReason: reason }).catch((err) => {
-          console.warn('reviewPaymentReceipt backend sync warning:', err?.message || err);
-        });
-      } catch (err) {
-        console.warn('Could not dispatch reviewPaymentReceipt:', err);
-      }
-    }
+    // Invoke Supabase Edge Function 'review-payment-receipt'
+    invokeEdgeFunction('review-payment-receipt', {
+      receiptId,
+      decision,
+      rejectionReason: reason,
+    }).catch((err) => {
+      console.warn('[ReservationService] review-payment-receipt edge function notice:', err?.message || err);
+    });
 
     return { success: !!receipt, receipt };
   }

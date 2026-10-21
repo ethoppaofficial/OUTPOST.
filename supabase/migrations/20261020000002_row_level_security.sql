@@ -83,6 +83,19 @@ AS $$
   ) OR public.is_admin();
 $$;
 
+-- Explicitly revoke execute privileges from PUBLIC and grant to authenticated
+REVOKE EXECUTE ON FUNCTION public.is_admin() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_landlord() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_student() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_group_admin(UUID) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_conversation_participant(UUID) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_landlord() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_student() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_group_admin(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_conversation_participant(UUID) TO authenticated;
+
 -- ============================================================================
 -- 2. Enable RLS on ALL Public Tables
 -- ============================================================================

@@ -7,7 +7,7 @@ import {
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { appEventBus } from '../../infrastructure/events/eventBus';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from './storageService';
 
 class ChatService {
   public getConversations(userId: string): Conversation[] {

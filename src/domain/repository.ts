@@ -1,3 +1,3 @@
-import { FirebaseRepository } from '../infrastructure/repositories/firebaseRepository';
+import { SupabaseRepository } from '../infrastructure/supabase/supabaseRepository';
 
-export type IRepository = FirebaseRepository;
+export type IRepository = SupabaseRepository;

@@ -11,20 +11,16 @@ export const ConfigErrorScreen: React.FC = () => {
           <AlertTriangle className="w-6 h-6" />
         </div>
         <h2 className="text-lg font-black text-slate-900 dark:text-white">
-          Firebase Configuration Required
+          Supabase Configuration Required
         </h2>
         <p className="text-xs text-slate-600 dark:text-slate-400">
-          {configValidationError || 'Firebase backend configuration is incomplete or missing.'}
+          {configValidationError || 'Supabase backend configuration is incomplete or missing.'}
         </p>
         <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl text-left font-mono text-[11px] text-slate-700 dark:text-slate-300">
-          <p className="font-bold text-slate-900 dark:text-white mb-1">Required in firebase-applet-config.json:</p>
+          <p className="font-bold text-slate-900 dark:text-white mb-1">Required Environment Variables:</p>
           <ul className="list-disc pl-4 space-y-0.5">
-            <li>projectId</li>
-            <li>authDomain</li>
-            <li>firestoreDatabaseId</li>
-            <li>storageBucket</li>
-            <li>appId</li>
-            <li>apiKey</li>
+            <li>VITE_SUPABASE_URL</li>
+            <li>VITE_SUPABASE_ANON_KEY</li>
           </ul>
         </div>
         <button
@@ -40,17 +36,17 @@ export const ConfigErrorScreen: React.FC = () => {
 };
 
 export const BackendStatusBadge: React.FC = () => {
-  const { connected, firestoreDatabaseId } = useFirebase();
+  const { connected } = useFirebase();
 
   if (connected) {
     return (
       <div
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold"
-        title={`Connected to Firestore Database: ${firestoreDatabaseId}`}
+        title="Connected to Supabase PostgreSQL & Realtime Backend"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
         <CheckCircle2 className="w-3 h-3" />
-        <span>Connected to Firebase</span>
+        <span>Connected to Supabase</span>
       </div>
     );
   }
@@ -58,7 +54,7 @@ export const BackendStatusBadge: React.FC = () => {
   return (
     <div
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-semibold"
-      title="Firebase connection is not established"
+      title="Supabase connection is not established"
     >
       <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
       <XCircle className="w-3 h-3" />

@@ -1,20 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  User as FirebaseUser,
-  onIdTokenChanged,
-  signInWithPopup,
-  signOut as fbSignOut,
-} from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
-import { auth, db, functions, googleAuthProvider, testConnection } from '../../infrastructure/firebase/firebaseConfig';
+import { supabase, isSupabaseConfigured, invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
 import { authService } from '../services/authService';
 import { repository } from '../../infrastructure/repositories';
 import { appConfig, configValidationError, BackendMode } from '../../infrastructure/config/appConfig';
-import { User, UserRole } from '../../domain/types';
+import { User, UserRole, AccountStatus } from '../../domain/types';
 
-interface FirebaseContextType {
-  firebaseUser: FirebaseUser | null;
+interface AuthContextType {
+  firebaseUser: any | null; // Compatibility alias for Supabase user
   currentUser: User | null;
   loading: boolean;
   connected: boolean;
@@ -29,14 +21,14 @@ interface FirebaseContextType {
   firestoreDatabaseId: string;
 }
 
-const FirebaseContext = createContext<FirebaseContextType>({
+const FirebaseContext = createContext<AuthContextType>({
   firebaseUser: null,
   currentUser: null,
   loading: true,
   connected: false,
   maintenanceMode: false,
   maintenanceLoaded: true,
-  backendMode: 'firebase',
+  backendMode: 'supabase',
   isConfigValid: true,
   signInWithGoogle: async () => ({ success: false }),
   signInWithEmail: async () => ({ success: false }),
@@ -45,7 +37,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
 });
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [connected, setConnected] = useState<boolean>(false);
@@ -53,27 +45,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [maintenanceLoaded, setMaintenanceLoaded] = useState<boolean>(true);
 
   useEffect(() => {
-    // 1. Verify Firestore connectivity
-    testConnection().then((isOk) => {
-      setConnected(isOk);
-    });
+    // 1. Verify Supabase connectivity
+    setConnected(isSupabaseConfigured);
 
     // 2. Initialize repository
     repository.init().catch((err) => {
-      console.warn('[App Init] Repository initialization notice:', err?.message || 'offline fallback');
+      console.warn('[App Init] Supabase repository initialization notice:', err?.message || 'offline');
     });
 
-    // 3. Listen to Firebase Auth and the account's persisted Firestore profile.
-    let unsubscribeProfile: (() => void) | undefined;
-    let unsubscribePublicSettings: (() => void) | undefined;
-    const unsubscribeAuth = onIdTokenChanged(auth, async (user) => {
-      unsubscribeProfile?.();
-      unsubscribeProfile = undefined;
-      unsubscribePublicSettings?.();
-      unsubscribePublicSettings = undefined;
-      setFirebaseUser(user);
+    // 3. Listen to Supabase Auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const user = session?.user ?? null;
+      setSupabaseUser(user);
 
       if (!user) {
+        repository.clearActiveSession();
         setCurrentUser(null);
         setMaintenanceMode(false);
         setMaintenanceLoaded(true);
@@ -81,140 +67,93 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
-      setMaintenanceLoaded(false);
-      unsubscribePublicSettings = onSnapshot(
-        doc(db, 'publicSettings', 'default'),
-        (snap) => {
-          setMaintenanceMode(snap.exists() && snap.data().maintenanceMode === true);
-          setMaintenanceLoaded(true);
-        },
-        (error) => {
-          console.warn('Public platform status listener notice:', error);
-          setMaintenanceMode(false);
-          setMaintenanceLoaded(true);
-        },
-      );
-
       setLoading(true);
-      let hasAdminClaim = false;
+
+      // Check maintenance status
       try {
-        const token = await user.getIdTokenResult();
-        hasAdminClaim = token.claims.admin === true;
-      } catch (error) {
-        console.warn('Could not verify Firebase role claims:', error);
-      }
-      if (auth.currentUser?.uid !== user.uid) return;
-      const userDocRef = doc(db, 'users', user.uid);
-      unsubscribeProfile = onSnapshot(
-        userDocRef,
-        (snap) => {
-          const profileData = snap.exists() ? snap.data() : {};
-          const existingUser = repository.getUserById(user.uid);
-          const storedRole = profileData.role as UserRole | undefined;
-          const role: UserRole = hasAdminClaim
-            ? 'admin'
-            : storedRole === 'student' || storedRole === 'landlord'
-            ? storedRole
-            : 'student';
-          const localUser: User = {
-            ...(existingUser || {
-              id: user.uid,
-              email: user.email || '',
-              accountStatus: user.emailVerified ? 'active' : 'email_unverified',
-              emailVerified: user.emailVerified,
-              createdAt: new Date().toISOString(),
-            }),
-            id: user.uid,
-            email: user.email || existingUser?.email || '',
-            role,
-            emailVerified: user.emailVerified,
-            ...(profileData.accountStatus ? { accountStatus: profileData.accountStatus as User['accountStatus'] } : {}),
-            ...(profileData.fullName ? { fullName: profileData.fullName as string } : user.displayName ? { fullName: user.displayName } : {}),
-            ...(user.photoURL ? { avatarUrl: user.photoURL } : {}),
-          };
-          repository.setActiveUserId(user.uid);
-          setCurrentUser(localUser);
-          setLoading(false);
-        },
-        (err) => {
-          console.warn('Firebase user profile listener notice:', err);
-          const existingUser = repository.getUserById(user.uid);
-          setCurrentUser({
-            ...(existingUser || {}),
-            id: user.uid,
-            email: user.email || '',
-            role: hasAdminClaim ? 'admin' : 'student',
-            accountStatus: user.emailVerified ? 'active' : 'email_unverified',
-            emailVerified: user.emailVerified,
-            createdAt: existingUser?.createdAt || new Date().toISOString(),
-            ...(user.displayName ? { fullName: user.displayName } : {}),
-          });
-          setLoading(false);
+        const { data: settings } = await supabase.from('platform_settings').select('*').limit(1).maybeSingle();
+        if (settings && (settings as any).maintenance_mode === true) {
+          setMaintenanceMode(true);
+        } else {
+          setMaintenanceMode(false);
         }
-      );
+      } catch {
+        setMaintenanceMode(false);
+      } finally {
+        setMaintenanceLoaded(true);
+      }
+
+      // Fetch user profile from Supabase profiles table
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        const storedRole = profile?.role as UserRole | undefined;
+        const role: UserRole = storedRole === 'admin'
+          ? 'admin'
+          : storedRole === 'landlord'
+          ? 'landlord'
+          : 'student';
+
+        const existingUser = repository.getUserById(user.id);
+        const resolvedUser: User = {
+          ...(existingUser || {
+            id: user.id,
+            email: user.email || '',
+            accountStatus: (profile?.account_status as AccountStatus) || (user.email_confirmed_at ? 'active' : 'email_unverified'),
+            emailVerified: Boolean(user.email_confirmed_at),
+            createdAt: user.created_at || new Date().toISOString(),
+          }),
+          id: user.id,
+          email: user.email || existingUser?.email || '',
+          role,
+          emailVerified: Boolean(user.email_confirmed_at),
+          fullName: profile?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+          avatarUrl: profile?.avatar_url || user.user_metadata?.avatar_url || '',
+          accountStatus: (profile?.account_status as AccountStatus) || 'active',
+        };
+
+        repository.setActiveUserId(user.id);
+        setCurrentUser(resolvedUser);
+      } catch (err) {
+        console.warn('[FirebaseContext] Profile sync notice:', err);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => {
-      unsubscribeAuth();
-      unsubscribeProfile?.();
-      unsubscribePublicSettings?.();
+      subscription.unsubscribe();
     };
   }, []);
 
   const signInWithGoogle = async (preferredRole: UserRole = 'student') => {
     try {
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      const user = result.user;
-      const token = await user.getIdTokenResult(true);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          queryParams: {
+            preferred_role: preferredRole,
+          },
+        },
+      });
 
-      const userDocRef = doc(db, 'users', user.uid);
-      const snap = await getDoc(userDocRef);
-
-      const storedRole = snap.exists() ? snap.data().role : undefined;
-      const role: UserRole = token.claims.admin === true
-        ? 'admin'
-        : storedRole === 'student' || storedRole === 'landlord'
-        ? storedRole
-        : preferredRole === 'landlord'
-        ? 'landlord'
-        : 'student';
-
-      if (!snap.exists()) {
-        await setDoc(userDocRef, {
-          id: user.uid,
-          email: user.email || '',
-          ...(user.displayName ? { fullName: user.displayName } : {}),
-          role,
-          accountStatus: user.emailVerified ? 'active' : 'email_unverified',
-          avatarUrl: user.photoURL || '',
-          isActive: true,
-          emailVerified: user.emailVerified,
-          createdAt: new Date().toISOString(),
-        });
+      if (error) {
+        return { success: false, error: error.message };
       }
 
-      const authenticatedUser: User = {
-        id: user.uid,
-        email: user.email || '',
-        role,
-        accountStatus: snap.exists() && snap.data()?.accountStatus ? snap.data().accountStatus : (user.emailVerified ? 'active' : 'email_unverified'),
-        emailVerified: user.emailVerified,
-        createdAt: snap.exists() && snap.data()?.createdAt ? snap.data().createdAt : new Date().toISOString(),
-        ...(user.displayName ? { fullName: user.displayName } : {}),
-        ...(user.photoURL ? { avatarUrl: user.photoURL } : {}),
-      };
-
-      repository.setActiveUserId(user.uid);
-      return { success: true, role, user: authenticatedUser };
+      return { success: true };
     } catch (error: any) {
-      console.error('Google sign-in error:', error);
       return { success: false, error: error?.message || 'Authentication failed.' };
     }
   };
 
   const signInWithEmail = async (email: string, password?: string) => {
     setLoading(true);
-    const res = await authService.loginWithFirebase(email, password);
+    const res = await authService.loginWithSupabase(email, password);
     if (res.success && res.user) {
       setCurrentUser(res.user);
     }
@@ -225,15 +164,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signOut = async () => {
     try {
       if (currentUser?.role === 'admin') {
-        try {
-          await httpsCallable(functions, 'adminRecordSecurityEvent')({ event: 'ADMIN_LOGOUT' });
-        } catch (auditError) {
-          console.warn('Administrator logout audit event could not be recorded:', auditError);
-        }
+        repository.logAudit({
+          actorId: currentUser.id,
+          action: 'ADMIN_LOGOUT',
+          resource: 'auth',
+          details: { timestamp: new Date().toISOString() },
+        });
       }
-      await fbSignOut(auth);
       await authService.logout();
       setCurrentUser(null);
+      setSupabaseUser(null);
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -242,19 +182,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return (
     <FirebaseContext.Provider
       value={{
-        firebaseUser,
+        firebaseUser: supabaseUser,
         currentUser,
         loading,
         connected,
         maintenanceMode,
         maintenanceLoaded,
-        backendMode: appConfig.backendMode,
-        isConfigValid: !configValidationError,
+        backendMode: 'supabase',
+        isConfigValid: isSupabaseConfigured,
         validationError: configValidationError,
         signInWithGoogle,
         signInWithEmail,
         signOut,
-        firestoreDatabaseId: appConfig.firebase.firestoreDatabaseId,
+        firestoreDatabaseId: 'supabase-prod',
       }}
     >
       {children}
@@ -263,3 +203,4 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 };
 
 export const useFirebase = () => useContext(FirebaseContext);
+export const useAuth = () => useContext(FirebaseContext);

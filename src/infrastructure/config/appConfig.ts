@@ -1,9 +1,13 @@
 import firebaseConfig from '../../../firebase-applet-config.json';
 
-export type BackendMode = 'firebase' | 'mock';
+export type BackendMode = 'supabase' | 'mock';
 
 export interface AppConfig {
   backendMode: BackendMode;
+  supabase: {
+    url: string;
+    anonKey: string;
+  };
   firebase: {
     projectId: string;
     appId: string;
@@ -18,33 +22,43 @@ export interface AppConfig {
 }
 
 function validateConfiguration(): { config: AppConfig; error?: string } {
-  const backendMode: BackendMode = 'firebase';
+  const env: any = (import.meta as any)?.env || (typeof process !== 'undefined' ? process.env : {}) || {};
+  const isProduction = Boolean(env.PROD || env.NODE_ENV === 'production');
+  const backendMode: BackendMode = 'supabase';
 
-  const projectId = firebaseConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
-  const authDomain = firebaseConfig.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '';
-  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || import.meta.env.VITE_FIREBASE_DATABASE_ID || '';
-  const storageBucket = firebaseConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '';
-  const appId = firebaseConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || '';
-  const apiKey = firebaseConfig.apiKey || import.meta.env.VITE_FIREBASE_API_KEY || '';
+  const supabaseUrl =
+    env.VITE_SUPABASE_URL ||
+    env.NEXT_PUBLIC_SUPABASE_URL ||
+    'http://127.0.0.1:54321';
+
+  const supabaseAnonKey =
+    env.VITE_SUPABASE_ANON_KEY ||
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_key';
+
+  const projectId = firebaseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || '';
+  const authDomain = firebaseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || '';
+  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || env.VITE_FIREBASE_DATABASE_ID || '';
+  const storageBucket = firebaseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || '';
+  const appId = firebaseConfig.appId || env.VITE_FIREBASE_APP_ID || '';
+  const apiKey = firebaseConfig.apiKey || env.VITE_FIREBASE_API_KEY || '';
 
   let error: string | undefined;
 
-  const missing: string[] = [];
-  if (!projectId) missing.push('projectId');
-  if (!authDomain) missing.push('authDomain');
-  if (!firestoreDatabaseId) missing.push('firestoreDatabaseId');
-  if (!storageBucket) missing.push('storageBucket');
-  if (!appId) missing.push('appId');
-  if (!apiKey) missing.push('apiKey');
-
-  if (missing.length > 0) {
-    error = `Firebase configuration error: Missing required fields: ${missing.join(', ')}. Please check firebase-applet-config.json.`;
+  // In production, Supabase URL and Anon Key are mandatory
+  if (isProduction && (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY)) {
+    error = 'Production configuration error: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required.';
     console.error(error);
   }
 
   return {
     config: {
       backendMode,
+      supabase: {
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+      },
       firebase: {
         projectId,
         appId,
@@ -54,7 +68,7 @@ function validateConfiguration(): { config: AppConfig; error?: string } {
         storageBucket,
         messagingSenderId: firebaseConfig.messagingSenderId,
       },
-      isProduction: Boolean((import.meta as any)?.env?.PROD),
+      isProduction,
       validationError: error,
     },
     error,
@@ -66,6 +80,10 @@ const { config, error } = validateConfiguration();
 export const appConfig = config;
 export const configValidationError = error;
 
-export function isFirebaseMode(): boolean {
+export function isSupabaseMode(): boolean {
   return true;
+}
+
+export function isFirebaseMode(): boolean {
+  return false;
 }

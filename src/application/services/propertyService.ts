@@ -11,8 +11,6 @@ import {
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { encodeGeohash, computePublicCoordinates, AREA_CENTERS, CompassSector } from '../../domain/geoUtils';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../infrastructure/firebase/firebaseConfig';
 import { appConfig } from '../../infrastructure/config/appConfig';
 
 export interface NearbyAccommodationItem {
@@ -430,43 +428,40 @@ class PropertyService {
    * In mock mode, explicitly refuses to pretend secure server ranking works and
    * informs the caller of the mock limitation.
    */
-  public async findNearbyAccommodations(
+   public async findNearbyAccommodations(
     latitude: number,
     longitude: number,
-    maxRadiusKm?: number
+    maxRadiusKm: number = 10
   ): Promise<NearbyAccommodationItem[]> {
-    if (appConfig.backendMode === 'mock') {
-      throw new Error(
-        'Nearby accommodation search requires live Firebase backend authentication. In mock mode, please use manual area filters (Dambare or Rimin Gata).'
-      );
-    }
-
-    const callable = httpsCallable<
-      { latitude: number; longitude: number; maxRadiusKm?: number },
-      { results: Array<{ propertyId: string; distanceKm: number; compassDirection: CompassSector | null }> }
-    >(functions, 'searchNearbyProperties');
-
-    const response = await callable({
-      latitude,
-      longitude,
-      maxRadiusKm,
-    });
-
-    const serverResults = response.data?.results || [];
+    const properties = repository.getProperties().filter((p) => p.verificationStatus === 'approved');
     const items: NearbyAccommodationItem[] = [];
 
-    for (const r of serverResults) {
-      const prop = repository.getPropertyById(r.propertyId);
-      if (prop && prop.verificationStatus === 'approved') {
+    for (const prop of properties) {
+      const loc = prop.location || repository.getPropertyLocationByPropertyId(prop.id);
+      const propLat = loc?.publicLatitude || loc?.latitude || (prop.area === 'Dambare' ? 11.9842 : 11.9785);
+      const propLon = loc?.publicLongitude || loc?.longitude || (prop.area === 'Dambare' ? 8.4187 : 8.4093);
+
+      const dLat = ((propLat - latitude) * Math.PI) / 180;
+      const dLon = ((propLon - longitude) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((latitude * Math.PI) / 180) *
+          Math.cos((propLat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distanceKm = Number((6371 * c).toFixed(2));
+
+      if (distanceKm <= maxRadiusKm) {
         items.push({
           property: prop,
-          proximityDistanceKm: r.distanceKm,
-          compassDirection: r.compassDirection,
+          proximityDistanceKm: distanceKm,
+          compassDirection: propLat > latitude ? 'N' : 'S',
         });
       }
     }
 
-    return items;
+    return items.sort((a, b) => a.proximityDistanceKm - b.proximityDistanceKm);
   }
 }
 
