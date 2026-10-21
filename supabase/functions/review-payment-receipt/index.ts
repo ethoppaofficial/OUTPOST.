@@ -63,6 +63,19 @@ serve(async (req) => {
 
     // Call atomic stored procedure using service role
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('account_status')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const { data: result, error: rpcError } = await adminClient.rpc('review_payment_receipt_atomic', {
       p_receipt_id: receiptId,
       p_decision: decision,
@@ -82,7 +95,8 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[review-payment-receipt error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

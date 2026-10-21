@@ -122,6 +122,7 @@ ALTER TABLE public.conversation_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_settings ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
 -- 3. RLS Policies
@@ -706,6 +707,38 @@ CREATE POLICY "Admins read audit logs"
 CREATE POLICY "System inserts audit logs"
   ON public.audit_logs FOR INSERT
   TO authenticated
-  WITH CHECK (true);
+  WITH CHECK (
+    (public.is_admin() AND (actor_id = auth.uid() OR actor_id IS NULL))
+    OR
+    (
+      actor_id = auth.uid()
+      AND action NOT LIKE 'admin_%'
+      AND action NOT LIKE 'ADMIN_%'
+      AND action NOT LIKE 'system_%'
+      AND action NOT LIKE 'SYSTEM_%'
+      AND action NOT IN (
+        'approve_receipt', 'reject_receipt', 'review_receipt', 'REVIEW_RECEIPT',
+        'verify_landlord', 'verify_student', 'verify_location',
+        'suspend_user', 'promote_admin', 'expire_reservation', 'EXPIRE_RESERVATION',
+        'create_invoice', 'update_invoice'
+      )
+    )
+  );
 
 -- No UPDATE or DELETE policies on public.audit_logs -> strictly immutable!
+REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM authenticated;
+REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM anon;
+
+-- 3.23 Platform Settings
+CREATE POLICY "Platform settings readable by everyone"
+  ON public.platform_settings FOR SELECT
+  TO authenticated, anon
+  USING (true);
+
+CREATE POLICY "Admins manage platform settings"
+  ON public.platform_settings FOR ALL
+  TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+

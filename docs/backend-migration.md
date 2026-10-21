@@ -318,11 +318,56 @@ SELECT cron.schedule('expire-reservations-hourly', '0 * * * *', 'SELECT public.e
 
 ---
 
-## 4. Reconciliation Checks and Rollback Strategy
+## 4. Reconciliation Checks and Staged Non-Destructive Rollback Strategy
 
-1. **Reconciliation Queries:**
-   - Verify `COUNT(*)` matches between exported Firestore collections and Supabase tables.
-   - Verify active inventory: `SUM(units.available_spaces) + COUNT(active_holds) = units.total_capacity`.
-   - Verify no orphan foreign keys in `reservations`, `student_verification_documents`, or `payment_receipts`.
-2. **Rollback Trigger:**
-   - If error rate exceeds 0.5% during staging verification or cutover tests fail, toggle the client repository adapter back to Firebase or local storage immediately without data loss.
+### 4.1 Strict Prohibition of Destructive Rollback Operations
+Destructive database operations—specifically `DROP SCHEMA public CASCADE`, `DROP TABLE ... CASCADE`, or unconditional `TRUNCATE`—are **strictly prohibited** in OUTPOST production and staging environments. Any rollback procedure must preserve existing tenant data, reservation records, payment receipts, and audit history intact.
+
+### 4.2 Pre-Migration Backup and Restoration Verification
+Before any migration or backend cutover is initiated:
+1. **Verified Backup Creation**:
+   - Perform a full transactional backup using `pg_dump -Fc -v -f outpost_pre_migration_$(date +%Y%m%d_%H%M%S).dump`.
+   - Take a Supabase project Point-in-Time Recovery (PITR) snapshot and verify its completion status in the management plane.
+   - Export all active Storage bucket manifests and files from `student-docs`, `landlord-docs`, `payment-receipts`, and `chat-attachments`.
+2. **Restoration Smoke Testing**:
+   - Restore the dump file into an isolated, disposable test database:
+     `pg_restore --clean --if-exists -d outpost_test_staging outpost_pre_migration_*.dump`
+   - Execute verification queries:
+     `SELECT count(*) FROM public.profiles;`
+     `SELECT count(*) FROM public.reservations;`
+     `SELECT count(*) FROM public.payment_receipts;`
+   - Confirm RLS policies and table grants remain intact after restore.
+
+### 4.3 Classification of Reversible vs. Irreversible Migrations
+| Migration File | Classification | Safe Non-Destructive Reversal Strategy |
+|---|---|---|
+| `20261020000001_initial_schema.sql` | **Irreversible without data loss** | Do NOT drop tables. Retain tables in read-only mode; archive data with `ALTER TABLE public.<name> RENAME TO archive_<name>_20261020;` if schema structure is obsolete. |
+| `20261020000002_row_level_security.sql` | **Fully Reversible** | Drop or alter specific RLS policies: `DROP POLICY IF EXISTS "<name>" ON public.<table_name>;` without affecting underlying table data. |
+| `20261020000003_storage_buckets_and_policies.sql` | **Fully Reversible** | Drop storage policies without deleting bucket objects. Retain all uploaded files in buckets for audit and reconciliation. |
+| `20261020000004_functions_triggers_and_automation.sql` | **Fully Reversible** | Drop or revert stored procedures and triggers: `DROP TRIGGER IF EXISTS <trigger> ON <table>; DROP FUNCTION IF EXISTS <function>;`. Existing table state remains unaltered. |
+
+### 4.4 Staged Rollback Execution Workflow
+If critical production errors, elevated error rates (> 0.5%), or reconciliation mismatches occur during or following cutover, follow this staged procedure:
+
+1. **Stage 1 — Application Routing Fallback (Zero Downtime, Immediate)**:
+   - Toggle frontend client repository mode via application configuration environment variables (`VITE_BACKEND_MODE=firebase` or toggle fallback adapter).
+   - In-flight browser sessions safely switch data routing without altering database state or deleting records.
+2. **Stage 2 — Data Reconciliation & Delta Capture**:
+   - Query all reservations, invoices, receipts, and audit logs created during the active Supabase window:
+     ```sql
+     SELECT * FROM public.reservations WHERE created_at >= '<cutover_start_time>' FOR SHARE;
+     SELECT * FROM public.payment_receipts WHERE created_at >= '<cutover_start_time>' FOR SHARE;
+     SELECT * FROM public.audit_logs WHERE created_at >= '<cutover_start_time>' FOR SHARE;
+     ```
+   - Replay captured reservation and payment submissions into the target repository so no user action taken during the cutover window is lost.
+3. **Stage 3 — Safe Database State Quarantine (Non-Destructive)**:
+   - Revoke public write permissions to freeze database tables in read-only mode rather than dropping:
+     ```sql
+     REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM authenticated, anon;
+     ```
+   - Leave data intact for forensic auditing and offline data synchronization.
+4. **Stage 4 — Post-Rollback Verification**:
+   - Confirm application availability and functionality on the active backend.
+   - Verify inventory parity: `SUM(units.available_spaces) + COUNT(active_holds) = units.total_capacity`.
+   - Publish incident report detailing the trigger, telemetry, affected records, and resolution timeline.
+

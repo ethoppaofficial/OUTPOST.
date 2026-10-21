@@ -89,6 +89,18 @@ serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('account_status')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Insert canonical receipt record
     const { data: receiptRecord, error: insertError } = await adminClient
@@ -113,7 +125,7 @@ serve(async (req) => {
       .single();
 
     if (insertError) {
-      return new Response(JSON.stringify({ error: 'Failed to record receipt', details: insertError.message }), {
+      return new Response(JSON.stringify({ error: 'Failed to record payment receipt' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -152,7 +164,8 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[finalize-receipt-upload error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

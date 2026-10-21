@@ -175,12 +175,12 @@ export class SupabaseRepository {
         });
       }
 
-      // 2. Setup Realtime subscription on chat messages
+      // 2. Setup Realtime subscription on messages
       supabase
-        .channel('public:chat_messages')
+        .channel('public:messages')
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+          { event: 'INSERT', schema: 'public', table: 'messages' },
           (payload) => {
             const row: any = payload.new;
             if (!row || !row.conversation_id) return;
@@ -190,16 +190,16 @@ export class SupabaseRepository {
               senderId: row.sender_id,
               senderName: row.sender_name || 'User',
               senderRole: 'student',
-              text: row.content || '',
+              text: row.text || row.content || '',
               status: 'sent',
               createdAt: row.created_at,
-              ...(row.attachment_url
+              ...(row.attachment
                 ? {
                     attachment: {
-                      storagePath: row.attachment_url,
-                      fileName: row.attachment_name || 'attachment',
-                      contentType: row.attachment_type || 'application/octet-stream',
-                      fileSize: row.attachment_size || 0,
+                      storagePath: row.attachment.storage_path || row.attachment_url || '',
+                      fileName: row.attachment.file_name || row.attachment_name || 'attachment',
+                      contentType: row.attachment.content_type || row.attachment_type || 'application/octet-stream',
+                      fileSize: row.attachment.file_size || row.attachment_size || 0,
                       uploadedBy: row.sender_id,
                       uploadedAt: row.created_at,
                     },
@@ -268,7 +268,7 @@ export class SupabaseRepository {
         role: user.role,
         account_status: user.accountStatus,
         avatar_url: user.avatarUrl || null,
-        phone_number: user.phone || null,
+        phone: user.phone || null,
       })
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] createUser sync warning:', error.message);
@@ -285,7 +285,7 @@ export class SupabaseRepository {
       .update({
         full_name: user.fullName,
         avatar_url: user.avatarUrl,
-        phone_number: user.phone,
+        phone: user.phone,
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id)
@@ -451,15 +451,16 @@ export class SupabaseRepository {
     this.studentDocs.unshift(newDoc);
 
     supabase
-      .from('student_documents')
+      .from('student_verification_documents')
       .insert({
         id: newDoc.id,
         student_id: newDoc.studentId,
         document_type: newDoc.documentType,
-        document_url: newDoc.documentUrl,
+        storage_path: newDoc.documentUrl || `${newDoc.studentId}/${newDoc.id}/${newDoc.fileName}`,
         file_name: newDoc.fileName,
-        file_size_bytes: newDoc.fileSize,
-        verification_status: 'pending',
+        file_size: newDoc.fileSize || 1024,
+        content_type: 'application/pdf',
+        status: 'pending',
       })
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] addStudentDocument warning:', error.message);
@@ -483,10 +484,10 @@ export class SupabaseRepository {
     doc.rejectionReason = rejectionReason;
 
     supabase
-      .from('student_documents')
+      .from('student_verification_documents')
       .update({
-        verification_status: status,
-        reviewed_by: reviewerId,
+        status: status,
+        reviewer_id: reviewerId,
         reviewed_at: doc.reviewedAt,
         rejection_reason: rejectionReason || null,
       })
@@ -778,8 +779,9 @@ export class SupabaseRepository {
       .from('roommate_requests')
       .insert({
         id: req.id,
-        requester_id: senderId,
-        recipient_id: receiverId,
+        sender_id: senderId,
+        receiver_id: receiverId,
+        message: message || '',
         status: 'pending',
       })
       .then(({ error }) => {
@@ -872,7 +874,10 @@ export class SupabaseRepository {
       .insert({
         id: group.id,
         name: group.name,
-        creator_id: leaderId,
+        description: group.description,
+        leader_id: leaderId,
+        budget_per_member: 250000,
+        target_area: 'Dambare',
         target_property_id: targetPropertyId || null,
         max_members: group.maxCapacity,
       })
@@ -1507,16 +1512,13 @@ export class SupabaseRepository {
     }
 
     supabase
-      .from('chat_messages')
+      .from('messages')
       .insert({
         id: msg.id,
         conversation_id: conversationId,
         sender_id: senderId,
-        content: text,
-        attachment_url: options?.attachment?.storagePath || null,
-        attachment_name: options?.attachment?.fileName || null,
-        attachment_type: options?.attachment?.contentType || null,
-        attachment_size: options?.attachment?.fileSize || null,
+        text: text,
+        attachment: options?.attachment || null,
       })
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] sendMessage warning:', error.message);
@@ -1553,10 +1555,11 @@ export class SupabaseRepository {
     foundMsg.editedAt = new Date().toISOString();
 
     supabase
-      .from('chat_messages')
+      .from('messages')
       .update({
-        content: trimmed,
+        text: trimmed,
         is_edited: true,
+        edited_at: foundMsg.editedAt,
         updated_at: foundMsg.editedAt,
       })
       .eq('id', messageId)
@@ -1641,7 +1644,7 @@ export class SupabaseRepository {
       .from('conversations')
       .insert({
         id: conv.id,
-        conversation_type: 'direct',
+        type: 'direct',
         title: conv.title,
       })
       .then(async ({ error }) => {
@@ -1697,8 +1700,8 @@ export class SupabaseRepository {
         id: audit.id,
         actor_id: audit.actorId || null,
         action: audit.action,
-        resource: audit.targetEntity,
-        resource_id: audit.targetId || null,
+        entity_type: audit.targetEntity,
+        entity_id: audit.targetId || audit.id,
         details: entry.details || {},
       })
       .then(({ error }) => {

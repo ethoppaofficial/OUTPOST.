@@ -48,6 +48,19 @@ serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('account_status, role')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const { data: result, error: rpcError } = await adminClient.rpc('create_reservation_atomic', {
       p_student_id: user.id,
       p_property_id: propertyId,
@@ -67,7 +80,8 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[create-reservation error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

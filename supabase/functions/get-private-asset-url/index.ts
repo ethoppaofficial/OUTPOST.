@@ -51,12 +51,20 @@ serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check if caller is admin
+    // Check caller profile
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('role')
+      .select('role, account_status')
       .eq('id', user.id)
       .single();
+
+    if (profile?.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const isAdmin = profile?.role === 'admin';
 
     let bucketName = '';
@@ -175,7 +183,7 @@ serve(async (req) => {
       .createSignedUrl(storagePath, EXPIRY_SECONDS);
 
     if (signError || !signedData?.signedUrl) {
-      return new Response(JSON.stringify({ error: 'Failed to generate signed URL', details: signError?.message }), {
+      return new Response(JSON.stringify({ error: 'Failed to generate signed download URL' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -190,7 +198,8 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[get-private-asset-url error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

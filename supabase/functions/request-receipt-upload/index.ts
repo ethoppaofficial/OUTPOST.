@@ -96,14 +96,27 @@ serve(async (req) => {
     const receiptId = crypto.randomUUID();
     const storagePath = `${reservation.landlord_id}/${user.id}/${reservationId}/${receiptId}/${cleanFileName}`;
 
-    // Generate signed upload URL with admin/service client
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile } = await adminClient
+      .from('profiles')
+      .select('account_status')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Generate signed upload URL with admin/service client
     const { data: uploadData, error: uploadError } = await adminClient.storage
       .from('payment-receipts')
       .createSignedUploadUrl(storagePath);
 
     if (uploadError) {
-      return new Response(JSON.stringify({ error: 'Failed to create upload session', details: uploadError.message }), {
+      return new Response(JSON.stringify({ error: 'Failed to create upload session' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -120,7 +133,8 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[request-receipt-upload error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

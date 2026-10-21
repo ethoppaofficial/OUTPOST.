@@ -19,7 +19,7 @@ serve(async (req) => {
 
     // Verify caller has service role or bearer admin token
     const authHeader = req.headers.get('Authorization');
-    const isServiceKey = authHeader?.includes(supabaseServiceKey);
+    const isServiceKey = Boolean(supabaseServiceKey) && authHeader === `Bearer ${supabaseServiceKey}`;
 
     if (!isServiceKey) {
       // Check if bearer user is admin
@@ -38,12 +38,12 @@ serve(async (req) => {
       const adminClient = createClient(supabaseUrl, supabaseServiceKey);
       const { data: profile } = await adminClient
         .from('profiles')
-        .select('role')
+        .select('role, account_status')
         .eq('id', user.id)
         .single();
 
-      if (profile?.role !== 'admin') {
-        return new Response(JSON.stringify({ error: 'Forbidden: admin only' }), {
+      if (profile?.role !== 'admin' || profile?.account_status !== 'active') {
+        return new Response(JSON.stringify({ error: 'Forbidden: active administrator credentials required' }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -54,7 +54,7 @@ serve(async (req) => {
     const { data: expiredCount, error: rpcError } = await adminClient.rpc('expire_pending_reservations');
 
     if (rpcError) {
-      return new Response(JSON.stringify({ error: rpcError.message }), {
+      return new Response(JSON.stringify({ error: 'Failed to execute expiration procedure' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -69,7 +69,8 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'Internal error' }), {
+    console.error('[expire-reservations error]:', err?.message || err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 describe('Supabase Authenticated RLS & Storage Security Test Suite', () => {
 
+  const schemaSql = fs.readFileSync('supabase/migrations/20261020000001_initial_schema.sql', 'utf8');
   const rlsSql = fs.readFileSync('supabase/migrations/20261020000002_row_level_security.sql', 'utf8');
   const storageSql = fs.readFileSync('supabase/migrations/20261020000003_storage_buckets_and_policies.sql', 'utf8');
   const automationSql = fs.readFileSync('supabase/migrations/20261020000004_functions_triggers_and_automation.sql', 'utf8');
@@ -230,4 +231,68 @@ describe('Supabase Authenticated RLS & Storage Security Test Suite', () => {
       assert.match(automationSql, /UPDATE public\.invoices[\s\S]*?SET status = 'paid'/);
     });
   });
+
+  describe('6. Enhanced Security Closure & Runtime Invariant Verification', () => {
+    test('Audit log insertion prevents forging admin actions and revokes mutation privileges', () => {
+      assert.match(rlsSql, /action NOT LIKE 'admin_%'/);
+      assert.match(rlsSql, /REVOKE UPDATE, DELETE, TRUNCATE ON public\.audit_logs FROM PUBLIC/);
+      assert.match(rlsSql, /REVOKE UPDATE, DELETE, TRUNCATE ON public\.audit_logs FROM authenticated/);
+      assert.match(rlsSql, /REVOKE UPDATE, DELETE, TRUNCATE ON public\.audit_logs FROM anon/);
+    });
+
+    test('Triggers enforce immutable fields on profiles, student profiles, and landlord profiles', () => {
+      assert.match(automationSql, /protect_profile_immutable_fields/);
+      assert.match(automationSql, /User role cannot be changed directly/);
+      assert.match(automationSql, /protect_student_profile_immutable_fields/);
+      assert.match(automationSql, /Student verification status cannot be self-modified/);
+      assert.match(automationSql, /protect_landlord_profile_immutable_fields/);
+      assert.match(automationSql, /Landlord verification status cannot be self-modified/);
+    });
+
+    test('Stored procedures verify caller authorization and prevent racing on expired/cancelled reservations', () => {
+      assert.match(automationSql, /reservation student_id must match authenticated caller/);
+      assert.match(automationSql, /reviewer_id must match authenticated caller/);
+      assert.match(automationSql, /Cannot review receipt: reservation is in state/);
+    });
+
+    test('Stored procedures restrict EXECUTE grants from PUBLIC and unauthenticated callers', () => {
+      assert.match(automationSql, /REVOKE EXECUTE ON FUNCTION public\.create_reservation_atomic[\s\S]*?FROM PUBLIC/);
+      assert.match(automationSql, /REVOKE EXECUTE ON FUNCTION public\.review_payment_receipt_atomic[\s\S]*?FROM PUBLIC/);
+      assert.match(automationSql, /REVOKE EXECUTE ON FUNCTION public\.expire_pending_reservations[\s\S]*?FROM authenticated/);
+      assert.match(automationSql, /GRANT EXECUTE ON FUNCTION public\.expire_pending_reservations[\s\S]*?TO service_role/);
+    });
+
+    test('Platform settings table and RLS policies are defined', () => {
+      assert.match(schemaSql, /CREATE TABLE IF NOT EXISTS public\.platform_settings/);
+      assert.match(rlsSql, /ALTER TABLE public\.platform_settings ENABLE ROW LEVEL SECURITY;/);
+      assert.match(rlsSql, /CREATE POLICY "Platform settings readable by everyone"/);
+      assert.match(rlsSql, /CREATE POLICY "Admins manage platform settings"/);
+    });
+
+    test('All privileged Edge Functions verify account status is not suspended', () => {
+      const functionsToCheck = [
+        'create-reservation',
+        'request-receipt-upload',
+        'finalize-receipt-upload',
+        'review-payment-receipt',
+        'request-chat-attachment-upload',
+        'finalize-chat-attachment-upload',
+        'get-private-asset-url',
+      ];
+      for (const fn of functionsToCheck) {
+        const content = fs.readFileSync(`supabase/functions/${fn}/index.ts`, 'utf8');
+        assert.match(content, /account_status/, `${fn} must verify account_status`);
+        assert.match(content, /suspended/, `${fn} must reject suspended accounts`);
+      }
+    });
+
+    test('Documentation strictly prohibits destructive DROP SCHEMA public CASCADE and defines non-destructive rollback', () => {
+      const migrationDoc = fs.readFileSync('docs/backend-migration.md', 'utf8');
+      assert.match(migrationDoc, /DROP SCHEMA public CASCADE/);
+      assert.match(migrationDoc, /strictly prohibited/i);
+      assert.match(migrationDoc, /Pre-Migration Backup and Restoration Verification/);
+      assert.match(migrationDoc, /Classification of Reversible vs\. Irreversible Migrations/);
+    });
+  });
 });
+

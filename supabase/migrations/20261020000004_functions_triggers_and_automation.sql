@@ -96,6 +96,88 @@ BEFORE UPDATE OR DELETE ON public.group_members
 FOR EACH ROW EXECUTE FUNCTION public.prevent_removing_last_group_admin();
 
 -- ============================================================================
+-- 3b. Profile Immutable Fields Enforcement Triggers
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.protect_profile_immutable_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT public.is_admin() THEN
+    IF NEW.role IS DISTINCT FROM OLD.role THEN
+      RAISE EXCEPTION 'Unauthorized: User role cannot be changed directly.';
+    END IF;
+    IF NEW.account_status IS DISTINCT FROM OLD.account_status THEN
+      RAISE EXCEPTION 'Unauthorized: Account status cannot be modified directly.';
+    END IF;
+    IF NEW.is_verified IS DISTINCT FROM OLD.is_verified THEN
+      RAISE EXCEPTION 'Unauthorized: Verification state cannot be self-modified.';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id THEN
+      RAISE EXCEPTION 'Unauthorized: Profile ID is immutable.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_profiles_protect_fields ON public.profiles;
+CREATE TRIGGER tr_profiles_protect_fields
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.protect_profile_immutable_fields();
+
+CREATE OR REPLACE FUNCTION public.protect_student_profile_immutable_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT public.is_admin() THEN
+    IF NEW.is_profile_verified IS DISTINCT FROM OLD.is_profile_verified THEN
+      RAISE EXCEPTION 'Unauthorized: Student verification status cannot be self-modified.';
+    END IF;
+    IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+      RAISE EXCEPTION 'Unauthorized: Student user_id is immutable.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_student_profiles_protect_fields ON public.student_profiles;
+CREATE TRIGGER tr_student_profiles_protect_fields
+BEFORE UPDATE ON public.student_profiles
+FOR EACH ROW EXECUTE FUNCTION public.protect_student_profile_immutable_fields();
+
+CREATE OR REPLACE FUNCTION public.protect_landlord_profile_immutable_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT public.is_admin() THEN
+    IF NEW.verification_status IS DISTINCT FROM OLD.verification_status THEN
+      RAISE EXCEPTION 'Unauthorized: Landlord verification status cannot be self-modified.';
+    END IF;
+    IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+      RAISE EXCEPTION 'Unauthorized: Landlord user_id is immutable.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_landlord_profiles_protect_fields ON public.landlord_profiles;
+CREATE TRIGGER tr_landlord_profiles_protect_fields
+BEFORE UPDATE ON public.landlord_profiles
+FOR EACH ROW EXECUTE FUNCTION public.protect_landlord_profile_immutable_fields();
+
+-- ============================================================================
 -- 4. Atomic Stored Procedure: create_reservation_atomic
 -- ============================================================================
 
@@ -119,6 +201,11 @@ DECLARE
   v_hold_expires TIMESTAMPTZ;
   v_existing_res RECORD;
 BEGIN
+  -- Caller authorization check: caller must match p_student_id, or be admin, or called via service_role (auth.uid() IS NULL)
+  IF auth.uid() IS NOT NULL AND auth.uid() != p_student_id AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Unauthorized: reservation student_id must match authenticated caller.';
+  END IF;
+
   -- Idempotency check
   IF p_idempotency_key IS NOT NULL THEN
     SELECT * INTO v_existing_res FROM public.reservations WHERE idempotency_key = p_idempotency_key;
@@ -217,6 +304,10 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) TO authenticated, service_role;
+
 -- ============================================================================
 -- 5. Atomic Stored Procedure: review_payment_receipt_atomic
 -- ============================================================================
@@ -251,6 +342,16 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: only the property landlord or an administrator may review receipts.';
   END IF;
 
+  -- Caller authorization check: caller must match p_reviewer_id, or be admin, or called via service_role
+  IF auth.uid() IS NOT NULL AND auth.uid() != p_reviewer_id AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Unauthorized: reviewer_id must match authenticated caller.';
+  END IF;
+
+  -- Verify reviewer account status is not suspended
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = p_reviewer_id AND account_status = 'suspended') THEN
+    RAISE EXCEPTION 'Unauthorized: Reviewer account is suspended.';
+  END IF;
+
   IF v_receipt.status != 'pending_review' THEN
     RAISE EXCEPTION 'Receipt has already been reviewed with status: %', v_receipt.status;
   END IF;
@@ -260,6 +361,15 @@ BEGIN
   FROM public.reservations
   WHERE id = v_receipt.reservation_id
   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Reservation not found for receipt.';
+  END IF;
+
+  -- Concurrency & race protection: verify reservation is in pending_payment or payment_submitted state
+  IF v_res.status NOT IN ('pending_payment', 'payment_submitted') THEN
+    RAISE EXCEPTION 'Cannot review receipt: reservation is in state %', v_res.status;
+  END IF;
 
   IF p_decision = 'approved' THEN
     -- Update receipt
@@ -332,6 +442,10 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.review_payment_receipt_atomic(UUID, receipt_status, UUID, TEXT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.review_payment_receipt_atomic(UUID, receipt_status, UUID, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.review_payment_receipt_atomic(UUID, receipt_status, UUID, TEXT) TO authenticated, service_role;
+
 -- ============================================================================
 -- 6. Scheduled Function: expire_pending_reservations
 -- ============================================================================
@@ -389,6 +503,11 @@ BEGIN
   RETURN v_count;
 END;
 $$;
+
+REVOKE EXECUTE ON FUNCTION public.expire_pending_reservations() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.expire_pending_reservations() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.expire_pending_reservations() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.expire_pending_reservations() TO service_role;
 
 -- Attempt to schedule with pg_cron if extension exists
 DO $$ BEGIN

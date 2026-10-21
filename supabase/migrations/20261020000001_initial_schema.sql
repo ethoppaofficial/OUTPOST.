@@ -449,6 +449,17 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
+-- 3.23 Platform Settings
+CREATE TABLE IF NOT EXISTS public.platform_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  maintenance_mode BOOLEAN NOT NULL DEFAULT false,
+  reservation_hold_days INTEGER NOT NULL DEFAULT 7,
+  notifications_enabled BOOLEAN NOT NULL DEFAULT true,
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL
+);
+
 -- ============================================================================
 -- 4. Indexes for Performance and RLS Lookups
 -- ============================================================================

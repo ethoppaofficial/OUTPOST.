@@ -53,7 +53,7 @@ class AdminService {
     const [profiles, landlordProfiles, studentDocs, properties, reservations, receipts, audit] = await Promise.all([
       readSupabaseTable('profiles'),
       readSupabaseTable('landlord_profiles'),
-      readSupabaseTable('student_documents'),
+      readSupabaseTable('student_verification_documents'),
       readSupabaseTable('properties'),
       readSupabaseTable('reservations'),
       readSupabaseTable('payment_receipts'),
@@ -66,7 +66,7 @@ class AdminService {
         totalStudents: profiles.filter((item) => item.role === 'student').length,
         totalLandlords: profiles.filter((item) => item.role === 'landlord').length,
         pendingLandlordVerifications: landlordProfiles.filter((item) => item.verification_status === 'pending').length,
-        pendingStudentVerifications: studentDocs.filter((item) => item.verification_status === 'pending').length,
+        pendingStudentVerifications: studentDocs.filter((item) => item.status === 'pending' || item.verification_status === 'pending').length,
         pendingPropertyVerifications: properties.filter((item) => item.approval_status === 'pending').length,
         activeProperties: properties.filter((item) => item.approval_status === 'approved' && item.is_active === true).length,
         activeReservations: reservations.filter((item) => ['pending_payment', 'payment_submitted', 'confirmed'].includes(item.status)).length,
@@ -115,7 +115,7 @@ class AdminService {
 
   public async getVerificationQueues(): Promise<{ students: AdminRecord[]; landlords: AdminRecord[] }> {
     const [studentDocs, students, landlords, profiles] = await Promise.all([
-      readSupabaseTable('student_documents'),
+      readSupabaseTable('student_verification_documents'),
       readSupabaseTable('student_profiles'),
       readSupabaseTable('landlord_profiles'),
       readSupabaseTable('profiles'),
@@ -125,7 +125,7 @@ class AdminService {
     const userById = new Map<string, AdminRecord>(profiles.map((item) => [item.id, item]));
 
     return {
-      students: studentDocs.filter((item) => item.verification_status === 'pending').map((item) => {
+      students: studentDocs.filter((item) => item.status === 'pending' || item.verification_status === 'pending').map((item) => {
         const profile: AdminRecord = studentById.get(item.student_id) || { id: '' };
         const user: AdminRecord = userById.get(item.student_id) || { id: '' };
         return {
