@@ -1,0 +1,1816 @@
+OUTPOST — MVP Frontend Stability, Vulnerability, Bug-Fix, and Code-Documentation Mission
+
+Copy this entire prompt into Google AI Studio
+
+You are a senior frontend engineer, application-security engineer, React/TypeScript architect, accessibility specialist, and QA lead.
+
+Your task is to inspect and stabilize the existing OUTPOST frontend before any further Supabase backend design or migration work.
+
+This is an implementation task. Do not only produce an audit report. Inspect the actual repository, identify confirmed frontend bugs and security loopholes, fix them safely, add regression tests, improve error handling, and document non-obvious code decisions inside the codebase.
+
+The objective is to make the frontend stable, honest, predictable, maintainable, and correctly aligned with the approved OUTPOST MVP. Do not expand the product scope during this phase.
+
+Important limitation:
+
+
+A frontend fix cannot replace backend authorization, RLS, Storage policies, database constraints, or trusted server validation. This phase must make the frontend secure-by-default and ready for the backend phase, but it must not falsely claim that backend security has been completed.
+
+At the end, clearly separate:
+
+•
+Frontend issues fixed now.
+
+•
+Backend issues discovered but intentionally deferred.
+
+•
+Tests actually executed.
+
+•
+Production configuration still required.
+
+
+
+
+1. ACTUAL PROJECT AND MVP CONTEXT
+
+The uploaded repository is the source of truth. Confirm the actual project root before editing.
+
+Known project technology includes:
+
+•
+React 19
+
+•
+TypeScript
+
+•
+Vite
+
+•
+React Router
+
+•
+Tailwind CSS
+
+•
+Motion/animation utilities
+
+•
+Supabase client code
+
+•
+Legacy Firebase code still present in the repository
+
+•
+MapLibre/MapTiler components
+
+•
+Local repository/cache code
+
+The intended MVP has exactly three primary personas:
+
+Plain Text
+
+
+Student
+Landlord
+Administrator
+
+
+
+Caretaker accounts are out of scope for the MVP.
+
+The MVP case study is:
+
+Plain Text
+
+
+Bayero University Kano New Site off-campus housing
+Dambare
+Rimin Gata
+Kano State, Nigeria
+
+
+
+The MVP must support these core workflows:
+
+Student MVP
+
+•
+Register with an active email address.
+
+•
+Verify email.
+
+•
+Sign in and sign out.
+
+•
+Maintain a student profile.
+
+•
+Provide a registration/matriculation number.
+
+•
+Upload one acceptable student-verification document:
+
+•
+Student ID card
+
+•
+Admission letter containing the student name and institution name
+
+•
+Recent school-fees payment receipt
+
+
+
+•
+Browse approved accommodation listings.
+
+•
+Search and filter approved listings in Dambare and Rimin Gata.
+
+•
+View property details, address, directions, landmarks, amenities, room type, price, and availability.
+
+•
+Define roommate preferences.
+
+•
+Receive explainable rule-based compatibility suggestions.
+
+•
+Send and manage roommate requests.
+
+•
+Create or join shared accommodation groups.
+
+•
+View group members and permitted member profiles.
+
+•
+Use direct and group chat.
+
+•
+Reserve available accommodation.
+
+•
+View a generated invoice.
+
+•
+View verified landlord payment information.
+
+•
+Upload payment evidence.
+
+•
+Monitor reservation and payment-review status.
+
+•
+Receive relevant notifications.
+
+Landlord MVP
+
+•
+Register with an active email address.
+
+•
+Verify email.
+
+•
+Sign in and sign out.
+
+•
+Maintain a landlord profile.
+
+•
+Submit verification documents.
+
+•
+Create and manage accommodation drafts.
+
+•
+Select Dambare or Rimin Gata.
+
+•
+Provide address, street/road, nearest landmark, and directions.
+
+•
+Optionally provide a location pin or device GPS position only when explicitly requested.
+
+•
+Upload property images.
+
+•
+Submit listings for administrator review.
+
+•
+Manage rooms/units and availability.
+
+•
+View reservations related only to owned listings.
+
+•
+View payment evidence related only to owned listings.
+
+•
+Approve or reject submitted receipts through the trusted backend workflow once available.
+
+•
+Communicate with students through permitted chat workflows.
+
+Administrator MVP
+
+•
+Secure administrator login using trusted authorization.
+
+•
+Review and verify students and landlords.
+
+•
+Review and approve/reject property listings.
+
+•
+Review property-location submissions.
+
+•
+Monitor reservations and receipt-review status.
+
+•
+Manage reports and disputes.
+
+•
+Restrict accounts where supported.
+
+•
+View audit records where authorized.
+
+Explicit MVP exclusions
+
+Do not add or present these as completed MVP capabilities:
+
+•
+Integrated card/payment processing.
+
+•
+OUTPOST custody of user funds.
+
+•
+Card PAN storage.
+
+•
+Nationwide accommodation discovery.
+
+•
+University-managed hostel administration.
+
+•
+Caretaker accounts.
+
+•
+AI-based roommate prediction.
+
+•
+Advanced estate-management features.
+
+•
+Background device tracking.
+
+•
+Persistent student movement history.
+
+•
+Guaranteed exact building coordinates from an unverified geocoder.
+
+External bank transfer and receipt evidence are part of the MVP. Integrated payment processing is not.
+
+
+
+
+2. MVP CROSS-CHECK RULES
+
+Use these rules when deciding whether a feature is a bug, an out-of-scope feature, or a backend dependency.
+
+1.
+Dambare and Rimin Gata are the case-study locations.
+
+2.
+Listings must not appear publicly unless the frontend receives them as approved/visible records.
+
+3.
+Exact landlord/property coordinates must not be exposed before location verification.
+
+4.
+Student device coordinates are temporary by default and must not be stored as movement history.
+
+5.
+Student verification is not equivalent to email verification.
+
+6.
+Landlord verification is not equivalent to property approval.
+
+7.
+Property approval is not equivalent to location approval.
+
+8.
+A reservation hold is not a confirmed payment.
+
+9.
+Receipt upload is not receipt approval.
+
+10.
+UI route protection is not backend authorization.
+
+11.
+Client-side filtering is not database access control.
+
+12.
+Local cache data is not authoritative production data.
+
+13.
+A passing TypeScript build does not prove that the feature works against the real schema.
+
+14.
+A passing static security test does not prove that live RLS or Storage policies work.
+
+15.
+Map functionality must not block the textual address/directions discovery flow if the MVP documentation identifies map rendering as a later enhancement.
+
+16.
+No frontend fallback may invent a successful result after a backend failure.
+
+17.
+No frontend fallback may create fake financial, reservation, verification, or identity records.
+
+
+
+
+3. REQUIRED OPERATING SAFEGUARDS
+
+Before editing:
+
+1.
+Confirm the actual project root.
+
+2.
+Inspect Git status, branch, changed files, and untracked files.
+
+3.
+Preserve existing user changes.
+
+4.
+Check for a backup outside the project root.
+
+5.
+Do not overwrite an existing backup.
+
+6.
+Do not deploy, migrate, delete production data, rotate credentials, or change the real Supabase project.
+
+7.
+Do not install unnecessary dependencies.
+
+8.
+Do not rewrite the entire UI or redesign unrelated screens.
+
+9.
+Do not begin Supabase schema or RLS implementation in this phase.
+
+10.
+Do not silently remove functionality; if a feature is deferred or disabled, document the reason and preserve a clear path for the later backend phase.
+
+If the codebase contains both Firebase and Supabase, treat this as a frontend stability/security finding. Do not perform the full backend migration in this task. Isolate the active frontend adapter and make the current behavior explicit.
+
+
+
+
+4. PHASE A — FRONTEND INVENTORY AND TRACEABILITY
+
+Inspect the whole frontend before changing it.
+
+Inspect at minimum:
+
+Plain Text
+
+
+package.json
+package-lock.json
+bun.lock
+.env.example
+.gitignore
+README.md
+src/App.tsx
+src/main.tsx
+src/index.css
+src/domain/**
+src/application/context/**
+src/application/services/**
+src/components/**
+src/infrastructure/config/**
+src/infrastructure/events/**
+src/infrastructure/repositories/**
+src/infrastructure/supabase/**
+src/infrastructure/firebase/**
+src/pages/**
+test/**
+
+
+
+Search for:
+
+Plain Text
+
+
+firebase
+firestore
+firebase-admin
+httpsCallable
+getDownloadURL
+localStorage
+sessionStorage
+indexedDB
+.catch(() => {})
+catch {}
+dangerouslySetInnerHTML
+innerHTML
+window.location
+location.href
+redirect
+returnUrl
+service_role
+SUPABASE_SERVICE_ROLE_KEY
+VITE_
+TODO
+FIXME
+any
+as any
+setTimeout
+watchPosition
+getCurrentPosition
+mock
+demo
+fallback
+fake
+placeholder
+pending_submission
+
+
+
+Create a frontend issue register:
+
+Plain Text
+
+
+ID
+Severity
+Category
+File and line
+Observed behavior
+Expected behavior
+MVP relevance
+Security/privacy impact
+Root cause
+Fix
+Regression test
+Documentation added
+Status
+
+
+
+Do not classify a backend-only issue as fixed by frontend code.
+
+
+
+
+5. PHASE B — CRITICAL ARCHITECTURE FINDINGS TO VERIFY AND FIX
+
+The uploaded repository contains evidence of the following issues. Confirm each one against the current files and fix the frontend impact.
+
+5.1 Dual backend runtime and misleading compatibility names
+
+Observed indicators include:
+
+Plain Text
+
+
+src/application/context/FirebaseContext.tsx
+src/infrastructure/repositories/firebaseRepository.ts
+src/infrastructure/repositories/index.ts
+src/infrastructure/firebase/**
+src/infrastructure/supabase/**
+src/application/services/authService.ts
+
+
+
+The repository selector appears to expose Supabase as the active repository, but Firebase modules are still imported and Firebase-specific storage services are still used by pages/services.
+
+Fix requirements:
+
+•
+Identify the actual active adapter at runtime.
+
+•
+Ensure production frontend data operations use one explicit adapter.
+
+•
+Do not let Firebase modules initialize merely because a legacy class is imported.
+
+•
+Do not let pages call Firebase Storage when Supabase is the selected backend.
+
+•
+Replace misleading names gradually only where safe; compatibility aliases may remain temporarily, but comments must explain that they are migration aliases, not Firebase authority.
+
+•
+Add an explicit BackendAdapter or service boundary if the current structure allows it.
+
+•
+Make unsupported backend modes fail visibly instead of silently switching data sources.
+
+•
+Do not claim that Firebase has been removed if the repository still imports it.
+
+If complete Supabase migration is intentionally deferred, document the temporary frontend boundary and ensure no page mixes Firebase and Supabase within one workflow.
+
+5.2 LocalStorage is not an authoritative database
+
+The uploaded project contains localStorage-backed repository behavior and active-user identifiers.
+
+Fix requirements:
+
+•
+Do not use localStorage to prove authentication or authorization.
+
+•
+Do not treat a cached current-user ID as the active identity.
+
+•
+Do not display stale cached reservations, receipts, verification status, messages, or admin data as authoritative without a clear offline indicator.
+
+•
+In production mode, backend failures must produce an error state, not fake success or silent local persistence.
+
+•
+If an offline cache is retained, make it read-only/stale-aware until synchronized and clearly label it.
+
+•
+Clear user-specific cache on logout and account switch.
+
+•
+Namespace cache by authenticated user ID where safe.
+
+•
+Never cache sensitive documents, receipt contents, private messages, or signed URLs unnecessarily.
+
+•
+Keep mock/demo data behind an explicit test/development-only flag.
+
+5.3 Configuration fallback risk
+
+Inspect src/infrastructure/config/appConfig.ts and all environment handling.
+
+Fix:
+
+•
+Do not use a fake localhost Supabase URL and fake anonymous JWT as a silent runtime fallback outside tests.
+
+•
+Do not allow production to start with missing or invalid configuration.
+
+•
+Use one canonical public key variable and document compatibility aliases.
+
+•
+Do not include service-role keys in Vite variables.
+
+•
+Do not import private Firebase configuration into the frontend merely to populate a compatibility object.
+
+•
+Make the configuration error screen accurate and actionable.
+
+•
+Distinguish development, test, and production behavior.
+
+•
+Do not expose secret values in error messages or logs.
+
+5.4 Hardcoded financial details and fake receipt URL
+
+Inspect src/pages/student/ReservationDetailPage.tsx and related invoice/reservation services.
+
+The current frontend contains hardcoded bank information and a fallback receipt URL resembling:
+
+Plain Text
+
+
+https://outpost-storage.ng/receipts/...
+
+
+
+This is unsafe and functionally incorrect.
+
+Fix requirements:
+
+•
+Remove hardcoded bank details from the page.
+
+•
+Render only verified landlord payment information received from an authoritative reservation/invoice record.
+
+•
+If payment information is unavailable, show a clear “payment information unavailable” state.
+
+•
+Never create a fake receipt URL when no file was selected.
+
+•
+Require an actual file for receipt submission.
+
+•
+Validate file type, size, file name, and amount before submission.
+
+•
+Do not show success until the upload and record operation actually succeeds.
+
+•
+Prevent duplicate submission while uploading.
+
+•
+Disable upload for expired, cancelled, confirmed, or otherwise ineligible reservations.
+
+•
+Do not let a student submit a receipt for a reservation that is not theirs; the backend must enforce this later, and the frontend must not pretend its own check is sufficient.
+
+•
+Add a code comment explaining why financial details come from trusted reservation/invoice data and why fake fallback values are forbidden.
+
+5.5 Schema mismatch and false map fallback
+
+Inspect src/components/map/StudentVerifiedPropertiesMap.tsx against the actual local Supabase migrations.
+
+The current map code appears to query names such as:
+
+Plain Text
+
+
+approval_status
+is_published
+rental_fee_annual
+total_spaces
+
+
+
+while the repository/migrations use different names such as:
+
+Plain Text
+
+
+verification_status
+price_per_session
+available_spaces
+total_capacity
+
+
+
+Fix requirements:
+
+•
+Use one typed frontend query shape matching the actual current schema.
+
+•
+Do not silently replace a schema/query error with hardcoded Dambare coordinates or fabricated property data.
+
+•
+Do not map every returned property to Dambare by default.
+
+•
+Do not use fallback values such as 11.9842, 8.4187, or invented prices to hide missing data.
+
+•
+If the map query fails, display a truthful error state and preserve the textual listing flow.
+
+•
+If the map is deferred from MVP, make it an optional enhancement that cannot block browse/search.
+
+•
+Add a comment explaining the difference between an area center and an exact property location.
+
+•
+Do not expose private exact coordinates.
+
+5.6 Property creation invents a location when none is supplied
+
+Inspect src/application/services/propertyService.ts and landlord property creation components.
+
+The current logic appears to initialize a missing property location from an area center.
+
+Fix requirements:
+
+•
+Never treat a Dambare or Rimin Gata area center as the actual building location.
+
+•
+Require a written address, street/road, nearest landmark, and directions before a landlord can submit a listing.
+
+•
+If exact coordinates are optional in the current MVP, store no exact coordinate until the landlord provides one and it is approved.
+
+•
+Mark missing coordinates as not_submitted, not verified.
+
+•
+Never publish a listing as location-verified solely because it belongs to a supported area.
+
+•
+Keep the textual address/directions flow functional if maps/geocoding fail.
+
+•
+Add a comment explaining why area centers are discovery context only and cannot be used as building coordinates.
+
+5.7 Device geolocation privacy
+
+Inspect all getCurrentPosition and watchPosition calls.
+
+Fix requirements:
+
+•
+Request location only after an explicit user action.
+
+•
+Keep student device coordinates in memory for the current search only.
+
+•
+Do not save them to localStorage, profiles, analytics, chat, or database records.
+
+•
+Clear watch subscriptions on unmount, logout, navigation, and disable action.
+
+•
+Handle denied permission, timeout, unavailable position, and insecure context.
+
+•
+Do not claim background tracking.
+
+•
+Do not show the student’s live position to landlords or other students.
+
+•
+Add code comments describing the privacy boundary.
+
+5.8 Unsafe DOM construction
+
+Inspect all innerHTML usage, especially map markers/popups.
+
+Fix requirements:
+
+•
+Do not interpolate user-controlled property titles, addresses, prices, descriptions, names, or labels into raw HTML.
+
+•
+Prefer DOM APIs, React rendering, MapLibre popup setHTML only with a robust escaping function, or safe text nodes.
+
+•
+If an escaped HTML helper remains, test it with malicious strings such as:
+
+Plain Text
+
+
+<img src=x onerror=alert(1)>
+"><script>alert(1)</script>
+javascript:alert(1)
+
+
+
+•
+Never interpolate unsanitized user data into attributes or event handlers.
+
+•
+Add a code comment where raw HTML is unavoidable explaining the escaping guarantee.
+
+5.9 Error swallowing and false success
+
+Search for empty catches, ignored Supabase errors, ignored async promises, and functions that update local state before remote success.
+
+Fix requirements:
+
+•
+Every remote operation must handle { data, error } explicitly.
+
+•
+Do not treat a returned empty list as proof that no data exists when authorization/query failed.
+
+•
+Do not show success before backend confirmation.
+
+•
+Preserve error context without logging sensitive values.
+
+•
+Add retry actions where appropriate.
+
+•
+Add loading, empty, error, permission-denied, and offline states.
+
+•
+Ensure failed background synchronization is observable and does not silently corrupt UI state.
+
+•
+Use typed error helpers rather than repeated any error handling where practical.
+
+
+
+
+6. PHASE C — MVP FRONTEND WORKFLOW STABILIZATION
+
+Stabilize these workflows end to end using the current adapter, without designing new Supabase migrations.
+
+6.1 Authentication
+
+Verify:
+
+•
+Register requires active email and password.
+
+•
+Email/password validation is consistent.
+
+•
+Email verification state is displayed truthfully.
+
+•
+Login loading state prevents duplicate submission.
+
+•
+Logout clears private UI state and subscriptions.
+
+•
+Password reset gives safe generic messages.
+
+•
+Admin login does not use a separate hardcoded bypass.
+
+•
+Role comes from the current authenticated session/profile boundary, not a local role toggle.
+
+•
+Protected routes show a loading state while auth initializes.
+
+•
+Direct navigation to protected routes behaves consistently.
+
+•
+Redirect-after-login preserves only safe internal paths.
+
+6.2 Student verification
+
+Verify:
+
+•
+Exactly the supported document types are selectable.
+
+•
+File size and type are validated before upload.
+
+•
+Student name and document metadata are shown safely.
+
+•
+Submission status is clear.
+
+•
+Rejected documents show a safe reason.
+
+•
+Verification is not marked approved from the client.
+
+•
+Upload retries do not create confusing duplicate UI entries.
+
+•
+Private document URLs are not exposed publicly or stored unnecessarily.
+
+6.3 Housing discovery
+
+Verify:
+
+•
+Public/student results show approved active properties only.
+
+•
+Dambare and Rimin Gata filters are consistent.
+
+•
+Search, filter, sort, and URL query parameters do not conflict.
+
+•
+Invalid numeric query parameters do not produce NaN behavior.
+
+•
+Empty, loading, error, and permission states are distinct.
+
+•
+Map failure does not block list discovery.
+
+•
+Property cards do not expose private exact coordinates or private landlord data.
+
+•
+Property detail page does not promise an exact location if only an area/approximate location is approved.
+
+•
+Directions and address are displayed safely.
+
+•
+No hardcoded fake listing is presented as live data.
+
+6.4 Landlord listing creation
+
+Verify:
+
+•
+Required fields are validated.
+
+•
+Location area must be Dambare or Rimin Gata.
+
+•
+Address, street/road, landmark, and directions are captured.
+
+•
+Missing location does not fall back to a false exact coordinate.
+
+•
+Draft save and submit states are distinct.
+
+•
+Upload errors are visible.
+
+•
+Image previews use object URL cleanup.
+
+•
+A landlord cannot present an unapproved listing as live.
+
+•
+Form state is not lost unexpectedly on harmless re-render.
+
+•
+Double-submit is prevented.
+
+6.5 Roommate matching and requests
+
+Verify:
+
+•
+Rule-based matching is explainable and deterministic.
+
+•
+No unsupported AI prediction claim is shown.
+
+•
+A student cannot send a request to themselves.
+
+•
+Duplicate pending requests are handled.
+
+•
+Request sender/receiver labels are correct.
+
+•
+Private profile fields respect visibility.
+
+•
+Registration-number search does not reveal sensitive fields to unauthorized users.
+
+•
+Empty and not-found states are clear.
+
+6.6 Groups
+
+Verify:
+
+•
+A student can create a group.
+
+•
+First active member becomes admin.
+
+•
+Group name validation works.
+
+•
+Membership is not duplicated.
+
+•
+Capacity is enforced in UI without pretending that it replaces backend enforcement.
+
+•
+Admin actions are visible only to admins.
+
+•
+Last admin protection is communicated.
+
+•
+Removed members no longer see the group as active in frontend state.
+
+•
+Group member profile viewing respects privacy.
+
+•
+Group identity is visually distinct from individual profiles in chat.
+
+6.7 Chat
+
+Verify:
+
+•
+Direct and group conversations are visually distinct.
+
+•
+Participant list is rendered safely.
+
+•
+Message status labels are consistent: sent, delivered, read, failed.
+
+•
+Failed messages show retry.
+
+•
+Message editing is available only to the sender and only within 15 minutes.
+
+•
+Text is trimmed and empty messages are rejected.
+
+•
+Mention rendering cannot create XSS.
+
+•
+Attachment upload requires an actual file and shows progress/error states.
+
+•
+Private attachment URLs are not permanently rendered or logged.
+
+•
+Realtime/event subscriptions are cleaned up.
+
+•
+Typing indicators do not leak data outside the conversation.
+
+•
+Chat state resets correctly on conversation change and logout.
+
+6.8 Reservations and invoices
+
+Verify:
+
+•
+Only eligible approved/available properties can begin a reservation flow.
+
+•
+Reservation details load for the current student only.
+
+•
+Countdown handles expired timestamps correctly.
+
+•
+Expired/cancelled/confirmed reservations cannot accept a new receipt.
+
+•
+Cancel action has a clear pending state and truthful result.
+
+•
+Invoice data is not fabricated.
+
+•
+Landlord bank details are not hardcoded.
+
+•
+Amounts are validated and formatted consistently in NGN.
+
+•
+Receipt submission requires a real file and valid metadata.
+
+•
+Failed receipt uploads do not show success.
+
+•
+Refreshing the page does not lose authoritative status.
+
+•
+Seven-day expiration remains a backend responsibility and is not simulated as a frontend-only guarantee.
+
+6.9 Notifications
+
+Verify:
+
+•
+Notification list belongs to the active user.
+
+•
+Read state updates do not affect another user.
+
+•
+Unread count refreshes after relevant actions.
+
+•
+Subscriptions clean up.
+
+•
+Notification content does not expose sensitive receipt/document details.
+
+•
+Errors do not masquerade as zero notifications.
+
+6.10 Theme and responsive UI
+
+Verify:
+
+•
+Dark/light mode changes actual rendered colors, not only a toggle label.
+
+•
+Theme preference persists safely.
+
+•
+All major pages are readable in both themes.
+
+•
+Mobile navigation opens/closes and restores focus.
+
+•
+Escape closes drawers/modals.
+
+•
+Body scroll lock is restored after unmount.
+
+•
+No layout depends on desktop-only dimensions.
+
+•
+Animations respect prefers-reduced-motion.
+
+•
+Loading animations do not trap keyboard focus.
+
+
+
+
+7. PHASE D — FRONTEND SECURITY CONTROLS
+
+Implement or strengthen:
+
+7.1 Runtime validation
+
+Use small reusable validators for:
+
+•
+Email.
+
+•
+Password requirements.
+
+•
+Registration number.
+
+•
+Phone.
+
+•
+Price and amount.
+
+•
+File type and size.
+
+•
+File name.
+
+•
+Address/directions length.
+
+•
+Group name and capacity.
+
+•
+Message text.
+
+•
+Search/filter query parameters.
+
+Do not trust TypeScript types as runtime validation.
+
+7.2 Safe error handling
+
+Create or reuse a typed error-normalization utility that:
+
+•
+Returns user-safe messages.
+
+•
+Preserves a non-sensitive diagnostic code.
+
+•
+Does not expose tokens, SQL, stack traces, private URLs, or document contents.
+
+•
+Distinguishes unauthorized, forbidden, not found, validation, network, and unexpected errors.
+
+7.3 Authorization-aware UI
+
+Frontend checks are for usability only. Add comments near sensitive UI guards stating that backend/RLS enforcement is authoritative and still required.
+
+Never hide security assumptions in a comment instead of enforcing them through the backend later.
+
+7.4 Safe URL handling
+
+•
+Allow only internal application paths for post-login redirects.
+
+•
+Validate external directions/map URLs.
+
+•
+Do not interpolate untrusted values into href without validation.
+
+•
+Use rel="noopener noreferrer" for external new-tab links.
+
+•
+Do not store sensitive signed URLs in persistent state longer than necessary.
+
+7.5 Safe uploads
+
+Create a reusable client-side upload validation helper. It must:
+
+•
+Reject empty files.
+
+•
+Reject files above the MVP limit.
+
+•
+Reject unsupported MIME types.
+
+•
+Sanitize display names.
+
+•
+Avoid trusting extensions alone.
+
+•
+Avoid previewing untrusted HTML/SVG as active markup.
+
+•
+Revoke object URLs after use.
+
+Document that client validation is not a replacement for Storage policies and backend validation.
+
+
+
+
+8. CODE DOCUMENTATION REQUIREMENT
+
+Add concise, useful comments inside the code for every non-obvious security or stability decision made during this task.
+
+Required documentation areas:
+
+•
+Why the active backend adapter is selected.
+
+•
+Why localStorage is not authoritative.
+
+•
+Why fake financial/receipt fallback values are forbidden.
+
+•
+Why area centers are not exact property coordinates.
+
+•
+Why student device coordinates remain in memory only.
+
+•
+Why private documents require authorized access.
+
+•
+Why frontend role guards do not replace backend authorization.
+
+•
+Why message editing has a 15-minute boundary.
+
+•
+Why signed URLs must not be persisted as permanent public URLs.
+
+•
+Why map failure must not block textual housing discovery.
+
+•
+Why an error must not be converted into an empty successful result.
+
+•
+Why a compatibility alias still references legacy Firebase naming, if retained.
+
+Use JSDoc at the top of important services/components:
+
+Plain Text
+
+
+/**
+ * Responsibility:
+ * Security boundary:
+ * Authoritative data source:
+ * Failure behavior:
+ * MVP limitation:
+ */
+
+
+
+Do not flood obvious code with meaningless comments. Comments must explain reasoning, trust boundaries, invariants, privacy decisions, or non-obvious trade-offs.
+
+Update relevant documentation files only after the implementation is correct:
+
+Plain Text
+
+
+README.md
+docs/ARCHITECTURE.md
+docs/SECURITY.md
+docs/KNOWN_ISSUES.md
+docs/DEVELOPMENT.md
+
+
+
+Document the frontend/backend boundary and deferred Supabase work accurately.
+
+
+
+
+9. TESTS TO ADD OR UPDATE
+
+Use the existing test framework. Do not replace working tests with superficial string checks.
+
+Add frontend tests for:
+
+Configuration
+
+•
+Missing production configuration blocks startup.
+
+•
+Fake development defaults cannot activate in production.
+
+•
+Service-role variables are never imported by frontend modules.
+
+Authentication/UI
+
+•
+Loading state while session initializes.
+
+•
+Unauthenticated redirect.
+
+•
+Role mismatch redirect.
+
+•
+Suspended/maintenance behavior.
+
+•
+Logout cleanup.
+
+Housing discovery
+
+•
+Approved-only display.
+
+•
+Dambare/Rimin Gata filtering.
+
+•
+Invalid query values.
+
+•
+Empty versus error states.
+
+•
+Map failure preserving list discovery.
+
+•
+No fabricated property coordinate fallback.
+
+Listing creation
+
+•
+Required fields.
+
+•
+Address/directions required.
+
+•
+No area-center substitution for exact building location.
+
+•
+Upload validation.
+
+•
+Double-submit prevention.
+
+Receipt flow
+
+•
+Real file required.
+
+•
+Invalid MIME type rejected.
+
+•
+Oversized file rejected.
+
+•
+Fake fallback URL never created.
+
+•
+Hardcoded bank data absent.
+
+•
+Success shown only after actual operation success.
+
+•
+Ineligible reservation cannot open/submit receipt flow.
+
+Chat
+
+•
+Participant UI states.
+
+•
+Group/profile distinction.
+
+•
+Empty message rejection.
+
+•
+Edit-window UI.
+
+•
+Attachment validation.
+
+•
+Error and retry states.
+
+•
+No unsafe HTML interpolation.
+
+Privacy
+
+•
+Device coordinates are not persisted.
+
+•
+Signed URLs are not stored in localStorage.
+
+•
+Private fields are hidden according to visibility settings.
+
+•
+Logout clears user-specific state.
+
+Static checks
+
+Add tests or scripts that detect:
+
+•
+Hardcoded financial account numbers.
+
+•
+Fake receipt URLs.
+
+•
+catch(() => {}) in application code.
+
+•
+innerHTML interpolation of unsanitized user values.
+
+•
+Service-role secrets in src or dist.
+
+•
+New uses of pending_submission.
+
+•
+Frontend imports of Firebase in active production workflow.
+
+•
+Unapproved fallback to localStorage/mock data.
+
+Static checks must not be the only security verification.
+
+
+
+
+10. REQUIRED VALIDATION COMMANDS
+
+Run the real project commands:
+
+Bash
+
+
+npm run lint
+npm run build
+npm test
+
+
+
+Also run where available:
+
+Bash
+
+
+npm audit --audit-level=high
+
+
+
+Inspect the production bundle for:
+
+•
+Service-role keys.
+
+•
+Database passwords.
+
+•
+Private tokens.
+
+•
+Hardcoded credentials.
+
+•
+Fake backend URLs.
+
+•
+Unintended Firebase/Supabase secret configuration.
+
+Report the Vite chunk-size warning honestly. If code splitting is not part of the immediate stabilization scope, record it as a performance follow-up rather than hiding it.
+
+If a test cannot run because the Supabase CLI/backend is unavailable, report it as BLOCKED, not PASS.
+
+
+
+
+11. FRONTEND-ONLY SCOPE BOUNDARY
+
+Do not do these things in this phase:
+
+•
+Do not create new Supabase migrations.
+
+•
+Do not modify production RLS.
+
+•
+Do not deploy Edge Functions.
+
+•
+Do not change production Storage policies.
+
+•
+Do not migrate production data.
+
+•
+Do not claim reservation concurrency is fixed by React code.
+
+•
+Do not claim private-document access is secure without backend enforcement.
+
+•
+Do not remove all Firebase code if it is still needed by the current tested runtime unless you first replace the affected frontend workflow safely.
+
+•
+Do not add integrated payment processing.
+
+•
+Do not add nationwide listing search.
+
+•
+Do not add caretaker accounts.
+
+•
+Do not add background location tracking.
+
+•
+Do not replace the MVP with a map-only experience.
+
+Prepare a clear backend handoff list after frontend stabilization:
+
+Plain Text
+
+
+Supabase migration needed
+RLS policy needed
+Storage policy needed
+Edge Function needed
+Database transaction needed
+Realtime configuration needed
+Production secret/configuration needed
+
+
+
+
+
+
+12. REQUIRED FINAL REPORT
+
+Return a structured report containing:
+
+A. Baseline
+
+•
+Project root.
+
+•
+Git status.
+
+•
+Existing backup status.
+
+•
+Files inspected.
+
+•
+Commands executed.
+
+B. MVP cross-check
+
+•
+MVP requirements confirmed.
+
+•
+Features currently outside MVP or deferred.
+
+•
+Any scope contradictions found.
+
+•
+Any hardcoded institution/location assumptions that are intentional case-study scope.
+
+C. Confirmed frontend vulnerabilities
+
+For each:
+
+Plain Text
+
+
+ID
+Severity
+File/line
+Evidence
+Impact
+Fix applied
+Test
+Remaining backend dependency
+
+
+
+D. Confirmed frontend bugs
+
+For each:
+
+Plain Text
+
+
+ID
+User-visible behavior
+Root cause
+Fix
+Regression test
+
+
+
+E. Files changed
+
+List each changed file and the reason.
+
+F. Code documentation added
+
+List the security boundaries and non-obvious decisions documented in code.
+
+G. Verification results
+
+Report exactly:
+
+Plain Text
+
+
+PASS — executed and passed
+FAIL — executed and failed
+BLOCKED — could not execute, with reason
+NOT RUN — not attempted
+
+
+
+Include:
+
+•
+Typecheck.
+
+•
+Production build.
+
+•
+Tests.
+
+•
+Dependency audit.
+
+•
+Secret scan.
+
+•
+Bundle inspection.
+
+•
+Static security checks.
+
+H. Backend handoff
+
+List all remaining Supabase tasks without claiming they are complete.
+
+I. Final frontend status
+
+Use exactly one:
+
+Plain Text
+
+
+FRONTEND STABILIZED — MVP FLOWS VERIFIED; SUPABASE BACKEND HANDOFF READY
+
+
+
+Only use this when the frontend implementation, tests, and MVP flows are actually complete, even if backend tasks are explicitly listed as the next phase.
+
+Plain Text
+
+
+FRONTEND PARTIALLY STABILIZED — BUGS OR BLOCKERS REMAIN
+
+
+
+Use this if any important frontend bug, security issue, failed test, or blocked verification remains.
+
+Plain Text
+
+
+FRONTEND STABILIZATION BLOCKED — SAFETY OR BASELINE FAILURE
+
+
+
+Use this if it was unsafe to begin.
+
+Do not use a backend-security completion label for this frontend-only phase.
+
+
+
+
+13. BEGIN NOW
+
+Start by inspecting the actual uploaded repository and running the existing typecheck, build, and test commands.
+
+Then:
+
+1.
+Cross-check the code against the MVP above.
+
+2.
+Confirm every suspected vulnerability and bug from actual source code.
+
+3.
+Stabilize the frontend without starting the Supabase backend implementation.
+
+4.
+Remove fake data and unsafe financial/location fallbacks.
+
+5.
+Make backend boundaries explicit.
+
+6.
+Add concise code comments and JSDoc for non-obvious security decisions.
+
+7.
+Add meaningful regression tests.
+
+8.
+Run all available checks.
+
+9.
+Review the complete diff.
+
+10.
+Produce the final report with the honest frontend status and backend handoff list.
+
+Do not stop after the audit. Do not over-expand the MVP. Do not claim backend security has been completed by passing frontend tests.
+
+End of prompt
+
