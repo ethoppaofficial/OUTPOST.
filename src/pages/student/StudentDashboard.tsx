@@ -1,3 +1,14 @@
+/**
+ * @file StudentDashboard.tsx
+ * @description Central operational dashboard for Bayero University Kano (BUK) students.
+ * 
+ * Aggregates high-priority tasks and status indicators for the student:
+ * - Verification status (verified badge, pending document review, or action required alert).
+ * - Active property reservation holds (with 7-day payment countdown indicators).
+ * - Pending roommate requests and incoming coordination notifications.
+ * - Quick navigational shortcuts to discovery, preferences, groups, and messaging.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -19,6 +30,12 @@ import { verificationService } from '../../application/services/verificationServ
 import { VerificationBadge, ReservationStatusBadge } from '../../components/ui/Badge';
 import { useFirebase } from '../../application/context/FirebaseContext';
 
+/**
+ * StudentDashboard Component
+ * 
+ * Renders the personalized student landing page, displaying metric cards,
+ * active reservation holds, verification notices, and navigation to student actions.
+ */
 export const StudentDashboard: React.FC = () => {
   const { currentUser } = useFirebase();
   const session = authService.getSession();

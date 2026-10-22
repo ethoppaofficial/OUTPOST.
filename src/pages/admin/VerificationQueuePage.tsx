@@ -1,3 +1,15 @@
+/**
+ * @file VerificationQueuePage.tsx
+ * @description Administrative moderation queue for BUK student credentials and landlord KYC vetting.
+ * 
+ * Features & Security Controls:
+ * - Tabbed queues: Student verification requests and Landlord accreditation submissions.
+ * - PII Masking: Uses `maskIdentifier()` to conceal sensitive national ID numbers / BUK matriculation digits.
+ * - Private Asset Access: Employs `storageService.getPrivateAssetDownloadUrl()` to generate 15-minute
+ *   expiring signed URLs on demand, preventing public exposure of identification proofs.
+ * - Action modal: Allows administrators to approve or reject submissions with mandatory rejection rationale.
+ */
+
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle, Loader2 } from 'lucide-react';
 import { adminService, AdminRecord } from '../../application/services/adminService';
@@ -7,6 +19,7 @@ import { Modal } from '../../components/ui/Modal';
 type Kind = 'student' | 'landlord';
 type Target = { kind: Kind; id: string; name: string };
 
+/** Masks sensitive identity strings, showing only the final 4 characters */
 function maskIdentifier(value: unknown): string {
   const identifier = String(value || '').trim();
   if (!identifier) return 'Not supplied';
@@ -14,6 +27,11 @@ function maskIdentifier(value: unknown): string {
   return `${'•'.repeat(Math.min(8, Math.max(4, identifier.length - 4)))}${identifier.slice(-4)}`;
 }
 
+/**
+ * VerificationQueuePage Component
+ * 
+ * Renders pending verification queues, evidence viewing links, and approval/rejection dialogs.
+ */
 export const VerificationQueuePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Kind>('student');
   const [students, setStudents] = useState<AdminRecord[]>([]);

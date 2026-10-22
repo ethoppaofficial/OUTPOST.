@@ -1,3 +1,15 @@
+/**
+ * @file appConfig.ts
+ * @module infrastructure/config/appConfig
+ * @description Centralized runtime environment configuration and backend mode resolver.
+ *
+ * Architecture Notes:
+ * - Authoritative Backend: `backendMode` resolves to 'supabase' as the exclusive production backend.
+ * - Validation: Validates presence of `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+ * - In production (`isProduction: true`), missing Supabase configuration surfaces a blocking error screen
+ *   (`ConfigErrorScreen`) to prevent silent data leakage or unauthorized mock fallbacks.
+ */
+
 import firebaseConfig from '../../../firebase-applet-config.json';
 
 export type BackendMode = 'supabase' | 'mock';

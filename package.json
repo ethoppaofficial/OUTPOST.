@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "npx tsx --test functions/test/geometry.test.mjs functions/test/storageSecurity.test.mjs test/security-regression.test.mjs test/supabase-security.test.mjs"
+    "test": "npx tsx --test functions/test/geometry.test.mjs functions/test/storageSecurity.test.mjs test/security-regression.test.mjs test/supabase-security.test.mjs test/database-runtime.test.mjs test/edge-functions-execution.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -39,6 +39,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "pg-mem": "^3.0.14",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2"

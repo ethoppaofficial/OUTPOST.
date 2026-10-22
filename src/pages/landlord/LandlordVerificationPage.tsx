@@ -1,9 +1,25 @@
+/**
+ * @file LandlordVerificationPage.tsx
+ * @description Landlord KYC and property ownership credential submission interface.
+ * 
+ * Flow & Requirements:
+ * - Collects landlord legal name, registered business entity name (optional), and national ID (NIN, Driver's License, International Passport, or Voter's Card).
+ * - Collects proof of property ownership (Certificate of Occupancy, Deed of Conveyance, Local Government Allocation, or Electricity Utility Bill).
+ * - Submits verification package to `verificationService.submitLandlordVerification()`.
+ * - Status displays: `pending` (under review), `approved` (grants gold shield badge on listings), or `rejected`.
+ */
+
 import React, { useState } from 'react';
 import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge } from '../../components/ui/Badge';
 
+/**
+ * LandlordVerificationPage Component
+ * 
+ * Renders the KYC submission form and current vetting accreditation status.
+ */
 export const LandlordVerificationPage: React.FC = () => {
   const session = authService.getSession();
   const profile = authService.getCurrentLandlordProfile();

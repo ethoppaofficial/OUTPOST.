@@ -1,3 +1,15 @@
+/**
+ * @file Badge.tsx
+ * @module components/ui/Badge
+ * @description Standardized semantic status badge components for persona verification, reservations, and receipts.
+ *
+ * Component Variations:
+ * - `Badge`: Base pill tag with color variants (`success`, `warning`, `danger`, `neutral`, `info`).
+ * - `VerificationBadge`: Renders academic, landlord, or property verification tags with shield icons.
+ * - `ReservationStatusBadge`: Visualizes 7-day hold states (`pending_payment`, `payment_submitted`, `confirmed`, `expired`, `cancelled`).
+ * - `ReceiptStatusBadge`: Maps bank transfer review states (`pending_review`, `approved`, `rejected`).
+ */
+
 import React from 'react';
 import { ShieldCheck, CheckCircle2, Clock, AlertTriangle, XCircle } from 'lucide-react';
 import { ReservationStatus, ReceiptStatus, PropertyVerificationStatus, LandlordVerificationStatus } from '../../domain/types';
@@ -10,6 +22,9 @@ interface BadgeProps {
   className?: string;
 }
 
+/**
+ * Primitive pill badge with semantic color schemes.
+ */
 export const Badge: React.FC<BadgeProps> = ({
   children,
   variant = 'default',

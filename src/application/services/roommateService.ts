@@ -1,3 +1,15 @@
+/**
+ * @file roommateService.ts
+ * @module application/services/roommateService
+ * @description Application service managing student roommate preferences, matching requests, and shared accommodation groups.
+ *
+ * Capabilities & Rules:
+ * - Roommate Preferences: Captures budget, cleanliness, study habits, chronotype (sleep), noise tolerance, smoking, and guest policy.
+ * - Compatibility Matching: Evaluates candidate profiles using the deterministic weighted scoring engine in `calculateCompatibility()`.
+ * - Direct Requests: Enables verified students to send, accept, reject, or cancel roommate connection requests with custom introductory messages.
+ * - Accommodation Groups: Supports collaborative student groups pooling funds to reserve shared multi-room units, enforcing group leader ownership and last-admin protections.
+ */
+
 import { RoommatePreference, RoommateRequest, AccommodationGroup } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 

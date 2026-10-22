@@ -1,3 +1,16 @@
+/**
+ * @file RoommatePreferencesPage.tsx
+ * @description Roommate preference profiling questionnaire for BUK students.
+ * 
+ * Allows students to configure their living style parameters:
+ * - Financial: Minimum and maximum rental budget (NGN).
+ * - Locations: Dambare, Rimin Gata neighborhood preferences.
+ * - Lifestyle & Habits: Study rhythm (Early Bird / Night Owl), sleep schedule, cleanliness standard,
+ *   smoking tolerance, visitor policies, noise threshold, room-sharing openness, and gender preferences.
+ * 
+ * Stored via `roommateService.saveStudentPreferences()` and indexed for cosine/Euclidean compatibility calculations.
+ */
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, Save, ArrowLeft } from 'lucide-react';
@@ -5,6 +18,11 @@ import { authService } from '../../application/services/authService';
 import { roommateService } from '../../application/services/roommateService';
 import { RoommatePreference } from '../../domain/types';
 
+/**
+ * RoommatePreferencesPage Component
+ * 
+ * Form interface for editing lifestyle and cohabitation preferences.
+ */
 export const RoommatePreferencesPage: React.FC = () => {
   const session = authService.getSession();
   const navigate = useNavigate();

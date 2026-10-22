@@ -1,3 +1,17 @@
+/**
+ * @file LoginPage.tsx
+ * @module pages/public/LoginPage
+ * @description Authentication page for students, landlords, and staff logging into OUTPOST.
+ *
+ * Authentication & Redirect Flow:
+ * - Supports email/password authentication via Supabase Auth.
+ * - Inspects authenticated profile role and automatically routes to the appropriate portal:
+ *   - `student` -> `/student/dashboard`
+ *   - `landlord` -> `/landlord/dashboard`
+ *   - `admin` -> `/admin/dashboard`
+ * - Displays error messaging for invalid credentials, unverified accounts, or network timeouts.
+ */
+
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { LogIn, AlertCircle } from 'lucide-react';

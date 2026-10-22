@@ -1,3 +1,17 @@
+/**
+ * @file AppShell.tsx
+ * @module components/layout/AppShell
+ * @description Master responsive application frame providing persona-specific navigation, headers, and quick actions.
+ *
+ * Architecture Role:
+ * - Shell Frame: Wraps all pages with responsive top navbar, collateral sidebar, mobile drawer, and footer.
+ * - Dynamic Persona Navigation: Tailors navigation menu items based on active `currentUser.role`:
+ *   - Students: Accommodation Search, Verification, Roommates, Groups, Reservations, Invoices, Chat.
+ *   - Landlords: Dashboard, Properties, New Listing, Availability, Payment Receipts, Verification.
+ *   - Admins: Verification Queue, Property Approvals, User Directory, Disputes, Audit Logs, Settings.
+ * - Reactive Badges: Polls and listens to `notificationService` and `chatService` for live unread counters.
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {

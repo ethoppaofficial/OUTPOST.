@@ -1,3 +1,17 @@
+/**
+ * @file PropertyCard.tsx
+ * @module components/ui/PropertyCard
+ * @description Standard accommodation listing presentation card used in search feeds, map sidebars, and home catalog.
+ *
+ * Visual Indicators & Data Presentation:
+ * - Cover Photo with lazy fallback placeholder.
+ * - Verification status badge (`approved`, `pending`) and landlord verified shield.
+ * - Annual session rental pricing in Nigerian Naira (₦).
+ * - Corridor badge (Dambare vs Rimin Gata) with walking distance estimates to BUK New Campus.
+ * - Real-time space availability indicator (`availableSpaces / totalCapacity`).
+ * - Optional relative proximity indicator with distance (km) and 8-point compass sector.
+ */
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { MapPin, Navigation, Bed, CheckCircle2, Compass } from 'lucide-react';
@@ -5,17 +19,25 @@ import { Property } from '../../domain/types';
 import { VerificationBadge, Badge } from './Badge';
 
 interface PropertyCardProps {
+  /** Accommodation listing entity to render */
   property: Property;
+  /** Whether the card is actively highlighted (e.g. from map pin hover) */
   isSelected?: boolean;
+  /** Callback when card is clicked */
   onSelect?: (propertyId: string) => void;
+  /** Hover callbacks for synchronizing with map markers */
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
+  /** Optional approximate straight-line proximity to search origin */
   proximity?: {
     distanceKm: number;
     compassDirection: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | null;
   };
 }
 
+/**
+ * Accommodation listing preview card component.
+ */
 export const PropertyCard: React.FC<PropertyCardProps> = ({
   property,
   isSelected = false,

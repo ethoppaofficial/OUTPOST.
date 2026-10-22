@@ -1,4 +1,15 @@
-// Supabase Edge Function: review-payment-receipt
+/**
+ * @file supabase/functions/review-payment-receipt/index.ts
+ * @description Supabase Edge Function: review-payment-receipt
+ * 
+ * Verifies or rejects offline bank transfer receipts submitted by students:
+ * 1. Verifies caller authentication and enforces role checks (must be landlord owning the property or an administrator).
+ * 2. Validates inputs: receiptId, decision (`approved` | `rejected`), and mandatory rejectionReason on rejection.
+ * 3. Executes atomic database stored procedure `review_payment_receipt_atomic(p_receipt_id, p_reviewer_id, p_decision, p_rejection_reason)`.
+ * 4. Stored procedure updates receipt state, confirms reservation to `confirmed` (on approval) or resets to `pending_payment` (on rejection),
+ *    records verified timestamp and reviewer ID, and creates an immutable audit trail entry.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

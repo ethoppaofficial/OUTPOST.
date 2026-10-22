@@ -1,3 +1,14 @@
+/**
+ * @file locations.ts
+ * @module domain/locations
+ * @description Master geographic reference nodes for OUTPOST around Bayero University Kano (BUK) New Site.
+ *
+ * Geographical Scope:
+ * - Dambare: Primary private student off-campus residential hub situated directly opposite BUK New Campus along Gwarzo Road.
+ * - Rimin Gata: Quiet residential community west of BUK New Campus featuring modern student lodges and flats.
+ * - Both nodes serve off-campus students of Bayero University Kano.
+ */
+
 import { HousingLocation } from './types';
 
 export const CASE_STUDY_DISCLAIMER =

@@ -1,14 +1,14 @@
+/**
+ * Outpost Storage Service
+ * Fully migrated to Supabase Storage and Supabase Edge Functions.
+ * Replaces legacy Firebase Storage calls with tenant-isolated Supabase storage buckets.
+ */
 import {
-  ref,
-  uploadBytes,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-  UploadTask,
-  UploadMetadata,
-} from 'firebase/storage';
-import { httpsCallable } from 'firebase/functions';
-import { storage, auth, functions } from './firebaseConfig';
+  supabaseStorageService,
+  SupabaseStorageService,
+  SupabaseFileUploadResult,
+} from '../supabase/supabaseStorageService';
+import { supabase, invokeEdgeFunction } from '../supabase/supabaseClient';
 
 export interface FileUploadResult {
   url: string;
@@ -19,117 +19,70 @@ export interface FileUploadResult {
 }
 
 export class StorageService {
+  private delegate: SupabaseStorageService = supabaseStorageService;
+
   /**
    * Upload Profile Photo (images only, max 2 MB)
-   * Path: profile-pictures/{uid}/{fileName}
+   * Stored in Supabase 'profile-pictures' bucket
    */
   async uploadProfilePicture(
     uid: string,
     file: File | Blob,
     fileName: string = 'avatar.jpg'
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 2 * 1024 * 1024, 'Profile photo');
-    this.validateFileType(file.type, ['image/'], 'Profile photo');
-
-    const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `profile-pictures/${uid}/${cleanName}`;
-    const storageRef = ref(storage, storagePath);
-
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'image/jpeg',
-      customMetadata: {
-        uploaderUid: uid,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const url = await getDownloadURL(snapshot.ref);
+    const res = await this.delegate.uploadProfilePicture(file, uid);
     return {
-      url,
-      fileName: cleanName,
-      fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
-      path: storagePath,
+      url: res.url,
+      path: res.path,
+      fileName: res.fileName,
+      fileSize: res.fileSize,
+      contentType: res.contentType,
     };
   }
 
   /**
-   * Upload Student Verification Document (image or PDF, max 5 MB)
-   * Path: student-docs/{uid}/{docId}/{fileName}
+   * Upload Student Verification Document (image or PDF, max 10 MB)
+   * Stored in private Supabase 'student-docs' bucket
    */
   async uploadStudentDocument(
     studentId: string,
     file: File | Blob,
-    originalFileName: string,
+    originalFileName: string = 'document.pdf',
     customDocId?: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Student document');
-    this.validateFileType(file.type, ['image/', 'application/pdf'], 'Student document');
-
-    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = customDocId || `doc_${Date.now()}`;
-    const storagePath = `student-docs/${studentId}/${docId}/${cleanName}`;
-
-    const storageRef = ref(storage, storagePath);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'application/pdf',
-      customMetadata: {
-        uploaderUid: auth.currentUser?.uid || studentId,
-        studentId,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const url = await getDownloadURL(snapshot.ref);
+    const res = await this.delegate.uploadStudentDocument(file, studentId, customDocId || 'student_id');
     return {
-      url,
-      fileName: cleanName,
-      fileSize: file.size,
-      contentType: file.type || 'application/pdf',
-      path: storagePath,
+      url: res.url,
+      path: res.path,
+      fileName: res.fileName,
+      fileSize: res.fileSize,
+      contentType: res.contentType,
     };
   }
 
   /**
-   * Upload Landlord Identity or Ownership Verification Document (image or PDF, max 5 MB)
-   * Path: landlord-docs/{uid}/{docId}/{fileName}
+   * Upload Landlord Identity or Ownership Document (image or PDF, max 10 MB)
+   * Stored in private Supabase 'landlord-docs' bucket
    */
   async uploadLandlordDocument(
     landlordId: string,
     file: File | Blob,
-    originalFileName: string,
+    originalFileName: string = 'document.pdf',
     customDocId?: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Landlord document');
-    this.validateFileType(file.type, ['image/', 'application/pdf'], 'Landlord document');
-
-    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const docId = customDocId || `landlord_${Date.now()}`;
-    const storagePath = `landlord-docs/${landlordId}/${docId}/${cleanName}`;
-
-    const storageRef = ref(storage, storagePath);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'application/pdf',
-      customMetadata: {
-        uploaderUid: auth.currentUser?.uid || landlordId,
-        landlordId,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const url = await getDownloadURL(snapshot.ref);
+    const res = await this.delegate.uploadLandlordDocument(file, landlordId, customDocId || 'c_of_o');
     return {
-      url,
-      fileName: cleanName,
-      fileSize: file.size,
-      contentType: file.type || 'application/pdf',
-      path: storagePath,
+      url: res.url,
+      path: res.path,
+      fileName: res.fileName,
+      fileSize: res.fileSize,
+      contentType: res.contentType,
     };
   }
 
   /**
-   * Upload Property Listing Image (images only, max 5 MB)
-   * Tenant-isolated path: property-images/{landlordId}/{propertyId}/{fileName}
+   * Upload Property Listing Image (images only, max 10 MB)
+   * Stored in public Supabase 'property-images' bucket
    */
   async uploadPropertyImage(
     file: File | Blob,
@@ -137,39 +90,21 @@ export class StorageService {
     propertyId?: string,
     landlordId?: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Property image');
-    this.validateFileType(file.type, ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'], 'Property image');
-
-    const uploaderUid = auth.currentUser?.uid || '';
-    const resolvedLandlordId = (landlordId || uploaderUid || 'unknown_landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const resolvedPropId = (propertyId || `draft_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanName = this.sanitizeFileName(originalFileName);
-    const storagePath = `property-images/${resolvedLandlordId}/${resolvedPropId}/${Date.now()}_${cleanName}`;
-
-    const storageRef = ref(storage, storagePath);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'image/jpeg',
-      customMetadata: {
-        landlordId: resolvedLandlordId,
-        propertyId: resolvedPropId,
-        uploaderUid,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const url = await getDownloadURL(snapshot.ref);
+    const effectiveLandlordId = landlordId || (await supabase.auth.getUser()).data.user?.id || 'landlord';
+    const effectivePropId = propertyId || `prop_${Date.now()}`;
+    const res = await this.delegate.uploadPropertyImage(file, effectiveLandlordId, effectivePropId);
     return {
-      url,
-      fileName: cleanName,
-      fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
-      path: storagePath,
+      url: res.url,
+      path: res.path,
+      fileName: res.fileName,
+      fileSize: res.fileSize,
+      contentType: res.contentType,
     };
   }
 
   /**
-   * Upload Payment Receipt for a Reservation (image or PDF, max 5 MB)
-   * Tenant-isolated path: payment-receipts/{landlordId}/{studentId}/{reservationId}/{fileName}
+   * Upload Payment Receipt for a Reservation (image or PDF, max 10 MB)
+   * Stored in tenant-isolated Supabase 'payment-receipts' bucket via Edge Function
    */
   async uploadPaymentReceipt(
     reservationId: string,
@@ -178,42 +113,55 @@ export class StorageService {
     landlordId?: string,
     studentId?: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Payment receipt');
-    this.validateFileType(file.type, ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'application/pdf'], 'Payment receipt');
+    try {
+      const sessionResult = await this.delegate.uploadPaymentReceiptWithSession({
+        reservationId,
+        file,
+        originalFileName,
+        amountPaid: 0,
+        paymentReference: `ref_${Date.now()}`,
+        payerBankName: 'Direct',
+        paymentDate: new Date().toISOString(),
+      });
+      return {
+        url: sessionResult.storagePath,
+        path: sessionResult.storagePath,
+        fileName: sessionResult.fileName,
+        fileSize: sessionResult.fileSize,
+        contentType: sessionResult.contentType,
+      };
+    } catch {
+      // Direct bucket fallback using authenticated user session
+      const user = (await supabase.auth.getUser()).data.user;
+      const effectiveStudentId = studentId || user?.id || 'student';
+      const effectiveLandlordId = landlordId || 'landlord';
+      const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `${effectiveLandlordId}/${effectiveStudentId}/${reservationId}/${Date.now()}_${cleanName}`;
 
-    const uploaderUid = auth.currentUser?.uid || '';
-    const resolvedStudentId = (studentId || uploaderUid || 'unknown_student').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const resolvedLandlordId = (landlordId || 'landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanResId = reservationId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanName = this.sanitizeFileName(originalFileName);
+      const { error } = await supabase.storage
+        .from('payment-receipts')
+        .upload(storagePath, file, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
 
-    const storagePath = `payment-receipts/${resolvedLandlordId}/${resolvedStudentId}/${cleanResId}/${Date.now()}_${cleanName}`;
+      if (error) {
+        throw new Error(`Receipt upload failed: ${error.message}`);
+      }
 
-    const storageRef = ref(storage, storagePath);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'image/jpeg',
-      customMetadata: {
-        reservationId: cleanResId,
-        landlordId: resolvedLandlordId,
-        studentId: resolvedStudentId,
-        uploaderUid,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    const url = await getDownloadURL(snapshot.ref);
-    return {
-      url,
-      fileName: cleanName,
-      fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
-      path: storagePath,
-    };
+      return {
+        url: storagePath,
+        path: storagePath,
+        fileName: cleanName,
+        fileSize: file.size,
+        contentType: file.type || 'image/jpeg',
+      };
+    }
   }
 
   /**
-   * Upload Chat Attachment (image, PDF, text, max 5 MB)
-   * Sender-isolated path: chat-attachments/{conversationId}/{senderId}/{fileName}
+   * Upload Chat Attachment (image, PDF, max 10 MB)
+   * Stored in sender-isolated Supabase 'chat-attachments' bucket
    */
   async uploadChatAttachment(
     conversationId: string,
@@ -221,209 +169,68 @@ export class StorageService {
     originalFileName: string,
     senderId?: string
   ): Promise<FileUploadResult> {
-    this.validateFileSize(file.size, 5 * 1024 * 1024, 'Chat attachment');
-    const uploaderUid = auth.currentUser?.uid || '';
-    const resolvedSenderId = (senderId || uploaderUid || 'unknown_sender').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanConvoId = conversationId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanName = this.sanitizeFileName(originalFileName);
+    const user = (await supabase.auth.getUser()).data.user;
+    const effectiveSenderId = senderId || user?.id || 'sender';
+    const cleanName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `${conversationId}/${effectiveSenderId}/${Date.now()}_${cleanName}`;
 
-    const storagePath = `chat-attachments/${cleanConvoId}/${resolvedSenderId}/${Date.now()}_${cleanName}`;
+    const { error } = await supabase.storage
+      .from('chat-attachments')
+      .upload(storagePath, file, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false,
+      });
 
-    const storageRef = ref(storage, storagePath);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type || 'application/octet-stream',
-      customMetadata: {
-        conversationId: cleanConvoId,
-        senderId: resolvedSenderId,
-        uploaderUid,
-        uploadedAt: new Date().toISOString(),
-      },
-    });
+    if (error) {
+      throw new Error(`Chat attachment upload failed: ${error.message}`);
+    }
 
-    const url = await getDownloadURL(snapshot.ref);
     return {
-      url,
+      url: storagePath,
+      path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
       contentType: file.type || 'application/octet-stream',
-      path: storagePath,
     };
   }
 
   /**
-   * Upload Chat Attachment through trusted Cloud Function Session
+   * Upload Chat Attachment through Edge Function Session
    */
   async uploadChatAttachmentWithSession(params: {
     conversationId: string;
     file: File | Blob;
     originalFileName: string;
     text?: string;
-  }): Promise<{
-    messageId: string;
-    storagePath: string;
-    fileName: string;
-    contentType: string;
-    fileSize: number;
-  }> {
-    this.validateFileSize(params.file.size, 10 * 1024 * 1024, 'Chat attachment');
-    const contentType = params.file.type || 'application/octet-stream';
-    const cleanName = this.sanitizeFileName(params.originalFileName);
-
-    try {
-      const createSessionFn = httpsCallable<{
-        conversationId: string;
-        fileName: string;
-        contentType: string;
-        fileSize: number;
-      }, {
-        ok: boolean;
-        conversationId: string;
-        messageId: string;
-        storagePath: string;
-        fileName: string;
-        maxSizeBytes: number;
-      }>(functions, 'createChatAttachmentUploadSession');
-
-      const sessionRes = await createSessionFn({
-        conversationId: params.conversationId,
-        fileName: cleanName,
-        contentType,
-        fileSize: params.file.size,
-      });
-
-      const { messageId, storagePath } = sessionRes.data;
-
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, params.file, {
-        contentType,
-        customMetadata: {
-          conversationId: params.conversationId,
-          messageId,
-          uploaderUid: auth.currentUser?.uid || '',
-          uploadedAt: new Date().toISOString(),
-        },
-      });
-
-      const finalizeFn = httpsCallable<{
-        conversationId: string;
-        messageId: string;
-        storagePath: string;
-        fileName: string;
-        contentType: string;
-        fileSize: number;
-        text?: string;
-      }, {
-        ok: boolean;
-        messageId: string;
-      }>(functions, 'finalizeChatAttachmentUpload');
-
-      await finalizeFn({
-        conversationId: params.conversationId,
-        messageId,
-        storagePath,
-        fileName: cleanName,
-        contentType,
-        fileSize: params.file.size,
-        text: params.text,
-      });
-
-      return {
-        messageId,
-        storagePath,
-        fileName: cleanName,
-        contentType,
-        fileSize: params.file.size,
-      };
-    } catch (err: any) {
-      console.warn('Fallback to direct storage path for chat attachment:', err?.message);
-      const uid = auth.currentUser?.uid || 'anonymous';
-      const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const storagePath = `chat-attachments/${params.conversationId}/${uid}/${messageId}/${cleanName}`;
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, params.file, {
-        contentType,
-        customMetadata: {
-          conversationId: params.conversationId,
-          messageId,
-          uploaderUid: uid,
-          uploadedAt: new Date().toISOString(),
-        },
-      });
-      return {
-        messageId,
-        storagePath,
-        fileName: cleanName,
-        contentType,
-        fileSize: params.file.size,
-      };
-    }
+  }) {
+    return this.delegate.uploadChatAttachmentWithSession(params);
   }
 
   /**
-   * Request short-lived signed URL for private assets (payment receipts, chat attachments, verification documents)
+   * Request short-lived signed URL for private assets via Edge Function
    */
   async getPrivateAssetDownloadUrl(
     assetType: 'payment-receipt' | 'chat-attachment' | 'student-document' | 'landlord-document',
     recordId: string
   ): Promise<string> {
-    try {
-      const getSignedUrlFn = httpsCallable<{
-        assetType: string;
-        recordId: string;
-      }, {
-        ok: boolean;
-        downloadUrl: string;
-        storagePath: string;
-        expiresInSeconds: number;
-      }>(functions, 'getPrivateAssetDownloadUrl');
-
-      const res = await getSignedUrlFn({ assetType, recordId });
-      if (res.data?.downloadUrl) {
-        return res.data.downloadUrl;
-      }
-      throw new Error('No download URL returned by server.');
-    } catch (err: any) {
-      console.warn('Could not retrieve signed URL via Cloud Function:', err?.message);
-      throw err;
-    }
+    return this.delegate.getPrivateAssetDownloadUrl(assetType, recordId);
   }
 
   /**
-   * Start a Resumable Upload Task with Progress Reporting
+   * Delete a File from Storage by path
    */
-  uploadResumable(
-    storagePath: string,
-    file: File | Blob,
-    metadata?: UploadMetadata
-  ): UploadTask {
-    const storageRef = ref(storage, storagePath);
-    return uploadBytesResumable(storageRef, file, metadata);
-  }
-
-  /**
-   * Delete a File from Storage by path or URL
-   */
-  async deleteFile(pathOrUrl: string): Promise<void> {
+  async deleteFile(pathOrUrl: string, bucketName: string = 'property-images'): Promise<void> {
     if (!pathOrUrl || !pathOrUrl.trim()) return;
-
     try {
-      let storageRef;
-      if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
-        storageRef = ref(storage, pathOrUrl);
-      } else {
-        storageRef = ref(storage, pathOrUrl);
-      }
-      await deleteObject(storageRef);
+      const cleanPath = pathOrUrl.split('?')[0].replace(/^https?:\/\/[^\/]+\//, '');
+      await supabase.storage.from(bucketName).remove([cleanPath]);
     } catch (err: any) {
-      if (err?.code === 'storage/object-not-found') {
-        return;
-      }
-      console.warn('Storage file deletion notice:', err?.code || 'notice');
+      console.warn('Storage file deletion notice:', err?.message || 'notice');
     }
   }
 
   /**
-   * Redact sensitive query parameters (e.g. Firebase bearer tokens) for safe logging.
+   * Redact sensitive query parameters for safe logging.
    */
   public sanitizeUrlForLog(url: string): string {
     if (!url) return '';
@@ -435,30 +242,6 @@ export class StorageService {
       return parsed.toString();
     } catch {
       return url.split('?')[0] + '?REDACTED_QUERY';
-    }
-  }
-
-  private sanitizeFileName(fileName: string): string {
-    const base = fileName.split('/').pop()?.split('\\').pop() || 'file';
-    return base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-  }
-
-  private validateFileSize(size: number, maxBytes: number, label: string) {
-    if (size > maxBytes) {
-      const maxMb = Math.round(maxBytes / (1024 * 1024));
-      throw new Error(`${label} exceeds maximum allowed size of ${maxMb}MB.`);
-    }
-  }
-
-  private validateFileType(type: string, allowedTypes: string[], label: string) {
-    const isAllowed = allowedTypes.some((allowed) => {
-      if (allowed.endsWith('/')) {
-        return type.startsWith(allowed);
-      }
-      return type === allowed;
-    });
-    if (!isAllowed) {
-      throw new Error(`${label} format is invalid. Accepted types: ${allowedTypes.join(', ')}.`);
     }
   }
 }

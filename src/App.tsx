@@ -1,3 +1,20 @@
+/**
+ * @file App.tsx
+ * @module App
+ * @description Master application component defining client-side routing, persona route guards, and application context hierarchy.
+ *
+ * Routing Architecture:
+ * - Public routes: Home, Listings, Listing Detail, Login, Admin Login, Register, Forgot Password, Case-Study Map.
+ * - Student routes: Dashboard, Document Verification, Roommates, Preferences, Requests, User Search, Groups, Reservations, Invoices, Chat.
+ * - Landlord routes: Dashboard, Properties, New Listing, Availability Management, Payment Receipts, Verification Submission.
+ * - Admin routes: Dashboard, Verification Queue, Property Approvals, User Directory, Disputes, Reports, Audit Logs, Settings, Account.
+ *
+ * Access Control & Route Protection:
+ * - `ProtectedRoute`: Inspects active session, enforces authenticated login, role validation (`student` | `landlord` | `admin`),
+ *   and redirects unauthorized visitors to `/unauthorized` or `/login`.
+ * - Context Providers: Wrapped with `ThemeProvider` (dark/light mode) and `FirebaseProvider` (Supabase Auth & state bridge).
+ */
+
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';

@@ -1,4 +1,17 @@
-// Supabase Edge Function: get-private-asset-url
+/**
+ * @file supabase/functions/get-private-asset-url/index.ts
+ * @description Supabase Edge Function: get-private-asset-url
+ * 
+ * Central authorization gatekeeper for accessing private storage objects:
+ * - Generates 15-minute expiring signed download URLs for private assets.
+ * - Supported asset types:
+ *   1. `student-document`: Verifiable only by owning student or an active administrator.
+ *   2. `landlord-document`: Verifiable only by owning landlord or an active administrator.
+ *   3. `payment-receipt`: Verifiable by owning student, property landlord, or administrator.
+ *   4. `chat-attachment`: Verifiable only by active participants of the corresponding conversation.
+ * - Prevents raw storage path leakage, URL forging, or unauthorized object traversal.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

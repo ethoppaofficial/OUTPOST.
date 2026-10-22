@@ -1,3 +1,14 @@
+/**
+ * @file AdminLoginPage.tsx
+ * @module pages/public/AdminLoginPage
+ * @description Dedicated authentication portal for OUTPOST platform administrators.
+ *
+ * Security & Access Control:
+ * - Separate Portal: Provides an administrative entry point separated from student/landlord logins.
+ * - Strict Role Validation: After password verification, asserts that `user.role === 'admin'`. Non-admin accounts are rejected with an access-denied error.
+ * - Auto-Redirection: If an already authenticated administrator accesses this page, they are immediately redirected to `/admin/dashboard`.
+ */
+
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldCheck } from 'lucide-react';

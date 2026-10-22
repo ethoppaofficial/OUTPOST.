@@ -1,4 +1,15 @@
-// Supabase Edge Function: finalize-chat-attachment-upload
+/**
+ * @file supabase/functions/finalize-chat-attachment-upload/index.ts
+ * @description Supabase Edge Function: finalize-chat-attachment-upload
+ * 
+ * Finalizes an attachment upload and broadcasts a new chat message with the attachment:
+ * 1. Authenticates user and checks active participant membership in `conversationId`.
+ * 2. Confirms file existence in `chat-attachments` storage bucket.
+ * 3. Inserts a new record into `messages` table with attachment metadata (name, MIME, size, storage path).
+ * 4. Updates `conversations.last_message_at` timestamp.
+ * 5. Returns `{ success: true, message: {...} }`.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

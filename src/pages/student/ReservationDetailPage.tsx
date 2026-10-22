@@ -1,3 +1,17 @@
+/**
+ * @file ReservationDetailPage.tsx
+ * @module pages/student/ReservationDetailPage
+ * @description Detailed view of a specific student accommodation reservation hold.
+ *
+ * Capabilities & Security Workflow:
+ * - 7-Day Countdown Timer: Calculates remaining days/hours until hold expiration based on `holdExpiresAt`.
+ * - Landlord Direct Bank Details: Displays verified account number and bank for external transfer.
+ * - Receipt Upload Modal: Accepts JPEG, PNG, or PDF bank transfer slips (max 10MB).
+ *   - Uploads file through `storageService` into tenant-isolated path `payment-receipts/{landlordId}/{studentId}/{resId}/...`.
+ *   - Updates reservation status to `payment_submitted` pending landlord review.
+ * - Voluntary Cancellation: Allows student to release the held space immediately if they choose another option.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {

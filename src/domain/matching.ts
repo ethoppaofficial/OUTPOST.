@@ -1,21 +1,52 @@
+/**
+ * @file matching.ts
+ * @module domain/matching
+ * @description Explainable, deterministic, rule-based roommate compatibility scoring engine.
+ *
+ * Architecture Role:
+ * - Domain layer utility. Pure function with zero side-effects and zero external I/O.
+ * - Compares two student `RoommatePreference` records and computes a normalized 0-100 score,
+ *   a qualitative compatibility band, and plain-language lists of matching vs diverging factors.
+ * - Designed to be fully explainable and auditable: students can understand why two profiles matched.
+ * - Note: This is an explicit, rule-based multi-attribute weighting algorithm, not an AI/ML black-box.
+ *
+ * Weight Distribution (Total: 100 points):
+ * 1. Budget Range Overlap: 25% (financial viability is critical to avoid shared default)
+ * 2. Preferred Corridor Overlap: 20% (Danbare vs Rimin Gata around BUK New Site)
+ * 3. Move-in Timing Alignment: 15% (semester readiness)
+ * 4. Domestic Cleanliness & Study Lifestyle: 15% (neatness routine 10% + study habit 5%)
+ * 5. Sleep Schedule & Acoustic Noise Tolerance: 15% (chronotype 8% + ambient noise 7%)
+ * 6. Household Boundaries: 10% (smoking 5% + guest policy 5%)
+ */
+
 import { RoommatePreference } from './types';
 
 export interface CompatibilityResult {
-  score: number; // 0 - 100
+  /** Normalized compatibility rating between 0 and 100 */
+  score: number;
+  /** Qualitative rating band for user presentation */
   matchBand: 'Excellent Match' | 'Great Match' | 'Moderate Match' | 'Low Match';
+  /** Positive alignment points explained in natural language */
   matchingFactors: string[];
+  /** Friction points or misalignments identified for student review */
   divergingFactors: string[];
 }
 
 /**
- * Calculates an explainable, weighted compatibility score between two students' preferences.
- * Weights:
- * - Budget overlap: 25%
- * - Location overlap: 20%
- * - Move-in timing: 15%
- * - Cleanliness & Habits: 15%
- * - Sleep schedule & Noise tolerance: 15%
- * - Guest & Smoking preferences: 10%
+ * Computes an explainable, deterministic compatibility score between two students' preferences.
+ *
+ * Preconditions:
+ * - `prefA` and `prefB` may be partial or contain missing optional properties; defensive
+ *   null-coalescing ensures calculations never throw.
+ *
+ * Postconditions:
+ * - Score is strictly clamped to [0, 100].
+ * - `matchingFactors` and `divergingFactors` contain user-facing explanations.
+ * - Pure function: does not mutate either input object.
+ *
+ * @param prefA - Profile preferences of the evaluating student.
+ * @param prefB - Profile preferences of the candidate student.
+ * @returns {CompatibilityResult} Calculated score, match band, and explanatory factors.
  */
 export function calculateCompatibility(
   prefA: RoommatePreference,

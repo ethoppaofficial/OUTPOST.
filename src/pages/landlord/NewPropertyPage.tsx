@@ -1,3 +1,16 @@
+/**
+ * @file NewPropertyPage.tsx
+ * @module pages/landlord/NewPropertyPage
+ * @description Comprehensive property listing submission form for landlords.
+ *
+ * Capabilities & Security Controls:
+ * - Basic Accommodation Details: Title, corridor selection (Dambare / Rimin Gata), street address, landmarks.
+ * - Units & Pricing: Defines room configurations, total bed-space capacity, and annual session rates.
+ * - Photo Verification: Multi-photo uploader (`PropertyImageCaptureUpload`) requiring entrance, bedroom, study, and washroom shots.
+ * - Private GPS Capture: Allows landlord to capture device coordinates, saved privately in `property_locations` with coordinate jitter.
+ * - Moderation Gate: Newly posted properties are saved in `pending` status and remain hidden from public search until reviewed by an administrator.
+ */
+
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Search, Navigation, AlertTriangle, MapPin, Loader2, X, Compass, Shield } from 'lucide-react';

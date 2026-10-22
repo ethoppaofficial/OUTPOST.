@@ -1,5 +1,16 @@
-// Supabase Edge Function: expire-reservations
-// Can be invoked by scheduled cron triggers or administrators
+/**
+ * @file supabase/functions/expire-reservations/index.ts
+ * @description Supabase Edge Function: expire-reservations
+ * 
+ * Scheduled sweep or administrative manual trigger to reclaim abandoned bedspaces:
+ * 1. Authorization: Only executable by Supabase service_role key (e.g. pg_cron or GitHub Action) OR an active administrator.
+ * 2. Invokes database stored procedure `expire_pending_reservations()`.
+ * 3. Identifies all reservations in `pending_payment` status where `expires_at < NOW()`.
+ * 4. Atomically transitions their status to `expired`, marks invoices as `cancelled`, increments room `available_spaces`,
+ *    and writes an audit log entry for each reclaimed space.
+ * 5. Returns `{ success: true, expiredCount: n }`.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

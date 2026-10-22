@@ -1,4 +1,15 @@
-// Supabase Edge Function: request-receipt-upload
+/**
+ * @file supabase/functions/request-receipt-upload/index.ts
+ * @description Supabase Edge Function: request-receipt-upload
+ * 
+ * Generates an isolated signed upload URL for payment receipt submission:
+ * 1. Verifies caller JWT authentication and checks caller owns the specified `reservationId`.
+ * 2. Enforces MIME constraints (`image/jpeg`, `image/png`, `image/webp`, `application/pdf`) and 10MB file limit.
+ * 3. Enforces reservation state is `pending_payment` or `receipt_submitted`.
+ * 4. Prepares a isolated deterministic storage path: `payment-receipts/{studentId}/{reservationId}/{timestamp}_{cleanFileName}`.
+ * 5. Issues a 15-minute signed upload URL via Supabase Storage admin client.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

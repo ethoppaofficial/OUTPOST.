@@ -1,3 +1,16 @@
+/**
+ * @file PropertiesPage.tsx
+ * @module pages/public/PropertiesPage
+ * @description Primary public and student accommodation discovery catalog.
+ *
+ * Capabilities & Filters:
+ * - Corridor Filtering: Scoped to BUK New Site off-campus residential settlements: Dambare and Rimin Gata.
+ * - Price & Type Filters: Annual rental pricing range, property type (self-contained, single room, flat), gender policy.
+ * - Verified Listings Only: By default, displays only properties approved by platform administrators (`verificationStatus === 'approved'`).
+ * - Opt-in Location Proximity: Students can voluntarily trigger "Near Me" device geolocation; calculates straight-line
+ *   distance and 8-point compass sector without storing coordinates.
+ */
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {

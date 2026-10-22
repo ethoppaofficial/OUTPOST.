@@ -1,3 +1,17 @@
+/**
+ * @file verificationService.ts
+ * @module application/services/verificationService
+ * @description Application service for student academic status verification and landlord ownership vetting.
+ *
+ * Verification Lifecycle & Rules:
+ * - Student Verification: Students upload official proof of student status at Bayero University Kano.
+ *   - Permitted document types: `student_id` (ID Card), `admission_letter` (JAMB/BUK admission slip), `school_fees_receipt` (e-payment receipt).
+ *   - File constraints: JPEG, PNG, or PDF; strictly limited to 5 MB per document.
+ *   - Review states: `pending` -> `approved` | `rejected` | `resubmission_required`.
+ * - Landlord Verification: Landlords upload legal property proof (Certificate of Occupancy, Governor's Consent, Tax Clearance, or Deed of Conveyance).
+ * - Trust Boundary: Verification grants trusted status; immutable database triggers forbid users from self-approving their verification state.
+ */
+
 import {
   StudentDocumentType,
   StudentVerificationDocument,

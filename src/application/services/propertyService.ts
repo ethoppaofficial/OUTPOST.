@@ -1,3 +1,16 @@
+/**
+ * @file propertyService.ts
+ * @module application/services/propertyService
+ * @description Application service managing property listings, room/unit inventory, approval states, and corridor search around BUK New Site.
+ *
+ * Core Business & Security Rules:
+ * - Public Visibility: Only properties with `verificationStatus === 'approved'` are visible to students and unauthenticated public visitors.
+ * - Landlord Drafts: Properties created by landlords start in `draft` or `pending` status until reviewed by administrators.
+ * - Geographic Corridors: Hard boundaries around Bayero University Kano: Dambare (opposite new campus on Gwarzo Rd) and Rimin Gata.
+ * - Coordinate Obfuscation: Uses `computePublicCoordinates` to shield exact landlord GPS coordinates while enabling approximate proximity sorting.
+ * - Inventory Management: Aggregates total spaces and calculates `availableSpaces` from linked `UnitOrRoom` entities.
+ */
+
 import {
   Property,
   PropertyType,

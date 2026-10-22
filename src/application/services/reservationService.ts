@@ -1,3 +1,18 @@
+/**
+ * @file reservationService.ts
+ * @module application/services/reservationService
+ * @description Application service managing student accommodation reservations, invoices, bank transfer receipts, and 7-day hold lifecycle.
+ *
+ * Core Business & Security Rules:
+ * - 7-Day Hold Policy: A student reservation places an atomic hold on a room space for exactly 7 days (`holdExpiresAt`).
+ * - External Bank Payment: Students make direct bank transfers to verified landlord accounts (MVP safety model avoiding merchant card custody).
+ * - Receipt Review Workflow: Students upload bank transfer receipts with transaction references. The property landlord reviews the receipt.
+ *   - 'approved': Reservation transitions to `confirmed`; invoice marked `paid`.
+ *   - 'rejected': Requires mandatory rejection reason; releases inventory and returns to `pending_payment`.
+ * - Expiration Engine: Idempotent job checks database timestamps against current time and releases held capacity on expired reservations.
+ * - Concurrency & Invariants: All inventory modifications delegate to database stored procedures (`create_reservation_atomic`, `review_payment_receipt_atomic`) to prevent double-booking.
+ */
+
 import { Reservation, Invoice, PaymentReceipt, ReservationStatus } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';

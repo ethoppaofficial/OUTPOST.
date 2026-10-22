@@ -1,14 +1,34 @@
+/**
+ * @file Modal.tsx
+ * @module components/ui/Modal
+ * @description Accessible dialog modal component with backdrop blur, keyboard dismissal, and body scroll locking.
+ *
+ * Accessibility & Behavior:
+ * - Traps focus with `role="dialog"` and `aria-modal="true"`.
+ * - Automatically attaches an `Escape` key listener when open to allow keyboard dismissal.
+ * - Locks `document.body.style.overflow = 'hidden'` to prevent background scroll leaks.
+ * - Used across receipt upload, landlord decision reviews, and document previews.
+ */
+
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
+  /** Visibility state of the modal */
   isOpen: boolean;
+  /** Callback fired when user closes the modal (via X button, backdrop click, or Escape key) */
   onClose: () => void;
+  /** Modal header text */
   title: string;
+  /** Dialog content body */
   children: React.ReactNode;
+  /** Maximum width constraint */
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 }
 
+/**
+ * Centered dialog modal component.
+ */
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,

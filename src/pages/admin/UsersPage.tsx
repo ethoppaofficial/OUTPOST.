@@ -1,3 +1,15 @@
+/**
+ * @file UsersPage.tsx
+ * @module pages/admin/UsersPage
+ * @description Administrative user directory for inspecting profiles and enforcing account suspensions.
+ *
+ * Governance Features:
+ * - User Directory: Lists all registered students, landlords, and administrators.
+ * - Profile Linkage: Displays university registration numbers for students and business names for landlords.
+ * - Account Suspension: Enables administrators to suspend abusive or fraudulent accounts (`account_status = 'suspended'`).
+ *   - Suspended accounts are immediately locked out of Edge Functions and database mutations.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { Ban, Search, ShieldCheck, UserCheck } from 'lucide-react';
 import { adminService, AdminUser } from '../../application/services/adminService';

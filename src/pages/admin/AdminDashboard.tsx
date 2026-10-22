@@ -1,3 +1,14 @@
+/**
+ * @file AdminDashboard.tsx
+ * @module pages/admin/AdminDashboard
+ * @description Master operational overview dashboard for OUTPOST platform administrators.
+ *
+ * Metrics & Governance:
+ * - Aggregates counts across students, landlords, active properties, and active holds.
+ * - Displays pending action queues: student verification documents, landlord legal deeds, and property approvals.
+ * - Summarizes expired reservation counts and recent audit log events.
+ */
+
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Building2, CheckCircle2, Clock3, FileCheck2, Receipt, ShieldCheck, Users } from 'lucide-react';

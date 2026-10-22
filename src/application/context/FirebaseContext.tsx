@@ -1,3 +1,18 @@
+/**
+ * @file FirebaseContext.tsx
+ * @module application/context/FirebaseContext
+ * @description Central React Authentication Context and session state provider for OUTPOST.
+ *
+ * Architecture & Transition Notes:
+ * - Interface Compatibility: The identifier `FirebaseContext` and hook `useFirebase()` are preserved
+ *   as stable compatibility facades for React components across the application.
+ * - Authoritative Backend: The underlying authentication state is driven exclusively by Supabase Auth:
+ *   - `supabase.auth.onAuthStateChange()` listens for session changes.
+ *   - User profile data is fetched from the Supabase `profiles` PostgreSQL table.
+ *   - Account suspension (`account_status === 'suspended'`) and maintenance mode (`platform_settings`)
+ *     are actively evaluated during authentication lifecycle.
+ */
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured, invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
 import { authService } from '../services/authService';

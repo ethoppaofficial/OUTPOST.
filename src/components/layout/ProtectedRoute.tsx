@@ -1,3 +1,17 @@
+/**
+ * @file ProtectedRoute.tsx
+ * @module components/layout/ProtectedRoute
+ * @description Authentication and Role-Based Access Control (RBAC) route wrapper for React Router v7.
+ *
+ * Security & Access Control Flow:
+ * 1. Session Verification: Displays a loading spinner while Supabase authentication initializes.
+ * 2. Unauthenticated Guard: Redirects anonymous visitors to `/login`, preserving target path in state.
+ * 3. Role Authorization: Compares active `currentUser.role` against `allowedRoles` (`student` | `landlord` | `admin`).
+ *    Unauthorized roles are redirected to `/unauthorized`.
+ * 4. Maintenance Mode Guard: If `maintenanceMode` is active in `platform_settings`, non-admin users are
+ *    presented with a friendly maintenance screen, while platform administrators retain uninterrupted access.
+ */
+
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useFirebase } from '../../application/context/FirebaseContext';
@@ -5,10 +19,15 @@ import { UserRole } from '../../domain/types';
 import { Loader2, Wrench } from 'lucide-react';
 
 interface ProtectedRouteProps {
+  /** Permitted roles for this route. If omitted, any authenticated user may enter. */
   allowedRoles?: UserRole[];
+  /** Child component or page element to render upon successful authorization */
   children: React.ReactElement;
 }
 
+/**
+ * Route protection higher-order component checking authentication, role permissions, and maintenance status.
+ */
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children }) => {
   const { loading, currentUser, maintenanceMode, maintenanceLoaded } = useFirebase();
   const location = useLocation();

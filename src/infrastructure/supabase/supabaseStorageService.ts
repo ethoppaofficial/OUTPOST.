@@ -1,3 +1,22 @@
+/**
+ * @file supabaseStorageService.ts
+ * @module infrastructure/supabase/supabaseStorageService
+ * @description Storage service managing file uploads and downloads across Supabase Storage buckets.
+ *
+ * Bucket Segmentation & Security:
+ * - `student-docs` (Private): Stores academic verification files; access restricted to owner student and admin.
+ * - `landlord-docs` (Private): Stores legal property ownership documents; restricted to landlord and admin.
+ * - `payment-receipts` (Private): Tenant-isolated path `{landlordId}/{studentId}/{reservationId}/{file}`;
+ *   accessible only to student owner, property landlord, or admin via short-lived signed URLs.
+ * - `chat-attachments` (Private): Sender-isolated path `{conversationId}/{senderId}/{file}`; restricted to conversation participants.
+ * - `property-images` (Public): Publicly viewable listing photos; uploads restricted to owning landlord.
+ * - `profile-pictures` (Public): Public avatars; uploads restricted to owning user.
+ *
+ * Edge Function Sessions:
+ * - Sensitive uploads (`payment-receipts`, `chat-attachments`) use server-authoritative upload sessions
+ *   (`request-receipt-upload`, `finalize-receipt-upload`) ensuring validation before database registration.
+ */
+
 import { supabase, invokeEdgeFunction } from './supabaseClient';
 
 export interface SupabaseFileUploadResult {

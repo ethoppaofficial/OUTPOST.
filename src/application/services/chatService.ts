@@ -1,3 +1,15 @@
+/**
+ * @file chatService.ts
+ * @module application/services/chatService
+ * @description Application service powering real-time chat, conversation threads, message replies, and secure attachment exchanges.
+ *
+ * Rules & Trust Boundaries:
+ * - Conversation Scoping: Messages belong to a `conversationId` and are restricted to explicit participants via database RLS.
+ * - 15-Minute Edit Restriction: Messages may only be edited within 15 minutes of sending; enforced both in UI and by PostgreSQL database trigger `enforce_message_edit_window`.
+ * - Attachments: File uploads delegate to `supabaseStorageService` into the private `chat-attachments` bucket; non-participants are blocked from downloading attachments.
+ * - Realtime Dispatch: Updates dispatch through `appEventBus` and Supabase Realtime channels for instant UI reflection.
+ */
+
 import {
   Conversation,
   ChatMessage,

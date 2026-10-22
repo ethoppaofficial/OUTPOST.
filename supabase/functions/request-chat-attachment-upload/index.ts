@@ -1,4 +1,14 @@
-// Supabase Edge Function: request-chat-attachment-upload
+/**
+ * @file supabase/functions/request-chat-attachment-upload/index.ts
+ * @description Supabase Edge Function: request-chat-attachment-upload
+ * 
+ * Issues a signed upload URL for sharing media or documents in peer/group chats:
+ * 1. Verifies caller JWT authentication and checks caller is an active participant in `conversationId`.
+ * 2. Enforces allowed MIME types (`image/*`, `application/pdf`, `text/plain`) and 10MB file limit.
+ * 3. Prepares an isolated storage destination: `chat-attachments/{conversationId}/{userId}/{timestamp}_{cleanFileName}`.
+ * 4. Generates a 15-minute expiring signed upload URL.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

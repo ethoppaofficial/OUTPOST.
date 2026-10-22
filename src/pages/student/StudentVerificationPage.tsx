@@ -1,3 +1,18 @@
+/**
+ * @file StudentVerificationPage.tsx
+ * @description Academic credential verification page for Bayero University Kano (BUK) students.
+ * 
+ * Provides an interface for students to upload academic credentials (BUK Student ID card,
+ * Official Admission Letter, or current Semester Course Registration Form) to verify their
+ * student status before renting or joining verified roommate groups.
+ * 
+ * Security & Validation:
+ * - Client-side validation: MIME type check (JPEG, PNG, PDF) and max size limit (5MB).
+ * - Documents are stored in isolated private storage paths (`student-documents/{userId}/*`).
+ * - Uploaded documents enter a `pending` state awaiting administrator review in VerificationQueuePage.
+ * - Prevents arbitrary file uploads and displays verification badge according to approval status.
+ */
+
 import React, { useState } from 'react';
 import { ShieldCheck, Upload, FileText, CheckCircle2, Clock, XCircle, AlertTriangle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
@@ -6,6 +21,12 @@ import { storageService } from '../../infrastructure/firebase/storageService';
 import { StudentDocumentType } from '../../domain/types';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 
+/**
+ * StudentVerificationPage Component
+ * 
+ * Renders the verification status banner, file upload form for new credential proofs,
+ * and an audit list of previously submitted verification documents with reviewer notes.
+ */
 export const StudentVerificationPage: React.FC = () => {
   const session = authService.getSession();
   const student = authService.getCurrentStudentProfile();

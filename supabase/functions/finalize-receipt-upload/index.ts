@@ -1,4 +1,15 @@
-// Supabase Edge Function: finalize-receipt-upload
+/**
+ * @file supabase/functions/finalize-receipt-upload/index.ts
+ * @description Supabase Edge Function: finalize-receipt-upload
+ * 
+ * Finalizes and registers an uploaded payment receipt after file transmission to Storage:
+ * 1. Authenticates caller and verifies reservation ownership.
+ * 2. Validates that the uploaded object exists in the storage bucket at `storagePath`.
+ * 3. Records the receipt metadata into `payment_receipts` table with status `pending_review`.
+ * 4. Advances reservation state from `pending_payment` to `receipt_submitted`.
+ * 5. Generates an immutable audit trail entry and returns the finalized receipt record.
+ */
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 

@@ -1,3 +1,16 @@
+/**
+ * @file ChatPage.tsx
+ * @module pages/student/ChatPage
+ * @description Full-featured real-time chat interface for peer-to-peer and accommodation group conversations.
+ *
+ * Capabilities & Boundaries:
+ * - Conversation Scoping: Direct 1-on-1 messages between students/landlords and group channels for accommodation groups.
+ * - Real-Time Push: Subscribes to Supabase Realtime broadcast channels for incoming messages and read receipts.
+ * - Message Replies & Mentions: Inline citation bubbles for targeted replies and `@mention` notifications.
+ * - 15-Minute Edit Enforcement: Allows message editing within 15 minutes of sending; blocked thereafter by UI and PostgreSQL trigger.
+ * - Private Attachments: Sends images and documents via Supabase Storage private bucket `chat-attachments`.
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {

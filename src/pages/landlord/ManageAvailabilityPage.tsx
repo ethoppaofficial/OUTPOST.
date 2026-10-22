@@ -1,3 +1,13 @@
+/**
+ * @file ManageAvailabilityPage.tsx
+ * @description Room-level bedspace inventory management for landlords.
+ * 
+ * Allows landlords to adjust room-level capacity and vacant bedspaces for their listings:
+ * - Increments/decrements available inventory per room (e.g., self-contained single vs. shared 2-bed).
+ * - Enforces invariant `availableSpaces >= 0` and maintains total property capacity totals.
+ * - Displays active reservations associated with the property to prevent double-booking or over-commitment.
+ */
+
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Bed, ArrowLeft, Plus, Minus, ShieldCheck, Clock, CheckCircle2 } from 'lucide-react';
@@ -5,6 +15,11 @@ import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
 import { Reservation } from '../../domain/types';
 
+/**
+ * ManageAvailabilityPage Component
+ * 
+ * Interface for live inventory adjustment and viewing current room hold statuses.
+ */
 export const ManageAvailabilityPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
   const [property, setProperty] = useState(() => propertyService.getPropertyById(propertyId || ''));

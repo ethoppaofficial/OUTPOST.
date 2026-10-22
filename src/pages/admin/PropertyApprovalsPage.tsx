@@ -1,3 +1,14 @@
+/**
+ * @file PropertyApprovalsPage.tsx
+ * @module pages/admin/PropertyApprovalsPage
+ * @description Administrative moderation page for vetting submitted accommodation listings.
+ *
+ * Moderation Workflows:
+ * - Listing Approval: Inspects landlord submissions (`pending`), verifies room photos and capacity, and approves listings.
+ * - Public Indexing: Approving transitions `verification_status` to `'approved'`, allowing the property to appear in public search.
+ * - Suspension & Rejection: Enables administrators to reject substandard listings or suspend non-compliant hostels.
+ */
+
 import React, { useEffect, useState } from 'react';
 import { Building2, CheckCircle2, ExternalLink, MapPin, ShieldCheck, XCircle } from 'lucide-react';
 import { adminService, AdminRecord } from '../../application/services/adminService';

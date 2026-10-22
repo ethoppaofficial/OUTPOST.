@@ -1,3 +1,14 @@
+/**
+ * @file LandlordPropertiesPage.tsx
+ * @module pages/landlord/LandlordPropertiesPage
+ * @description Landlord workspace page displaying owned accommodation properties and listings.
+ *
+ * Capabilities:
+ * - Portfolio Overview: Displays owned lodges, room unit counts, and availability numbers.
+ * - Verification Indicators: Tracks administrative approval status (`approved`, `pending`, `draft`).
+ * - Quick Actions: Direct links to create new properties or jump to the availability manager.
+ */
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, Plus, Bed, ShieldCheck, Clock, CheckCircle2, Sliders } from 'lucide-react';

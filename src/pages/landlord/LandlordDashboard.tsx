@@ -1,3 +1,14 @@
+/**
+ * @file LandlordDashboard.tsx
+ * @description Central dashboard for accredited property landlords and hostel managers.
+ * 
+ * Provides:
+ * - Real-time portfolio summary: total listed properties, cumulative capacity, and vacant bedspaces.
+ * - Pending payment receipt alerts requiring urgent landlord bank transaction verification.
+ * - Identity verification status (Approved, Pending, or Action Required).
+ * - Direct navigation to add new listings, adjust bedspace availability, and review payments.
+ */
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, Receipt, ShieldCheck, Clock, Plus, Users, ArrowRight } from 'lucide-react';
@@ -8,6 +19,12 @@ import { verificationService } from '../../application/services/verificationServ
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { useFirebase } from '../../application/context/FirebaseContext';
 
+/**
+ * LandlordDashboard Component
+ * 
+ * Renders portfolio statistics, pending offline payment verification queues,
+ * and quick-action buttons for managing student accommodation listings.
+ */
 export const LandlordDashboard: React.FC = () => {
   const { currentUser } = useFirebase();
   const session = authService.getSession();

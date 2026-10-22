@@ -1,3 +1,14 @@
+/**
+ * @file AdminAuditLogsPage.tsx
+ * @module pages/admin/AdminAuditLogsPage
+ * @description Administrative viewer for inspecting the immutable `audit_logs` security ledger.
+ *
+ * Security & Auditability:
+ * - Append-only Ledger: Displays administrative actions, target entities, timestamps, and details.
+ * - Search & Filter: Allows administrators to filter by actor, action type, or target record ID.
+ * - Direct writes/deletions on this ledger are permanently blocked at the PostgreSQL engine level.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, ShieldCheck } from 'lucide-react';
 import { adminService } from '../../application/services/adminService';

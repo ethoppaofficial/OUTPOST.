@@ -1,3 +1,14 @@
+/**
+ * @file InvoicePage.tsx
+ * @module pages/student/InvoicePage
+ * @description Official student accommodation fee invoice and bank payment slip.
+ *
+ * Capabilities:
+ * - Official Invoice Presentation: Details student registration number, academic session, accommodation unit fee, and due date.
+ * - Landlord Verified Bank Credentials: Displays landlord account number, bank name, and account holder for direct transfer.
+ * - Print-Optimized Layout: Formatted with print media queries (`no-print` classes) for physical receipting or PDF export.
+ */
+
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Printer, ArrowLeft, Building2, CheckCircle2, ShieldCheck } from 'lucide-react';

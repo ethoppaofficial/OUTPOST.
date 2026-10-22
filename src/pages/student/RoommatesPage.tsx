@@ -1,3 +1,15 @@
+/**
+ * @file RoommatesPage.tsx
+ * @description Roommate discovery and pairing page for Bayero University Kano (BUK) students.
+ * 
+ * Features:
+ * - Computes multi-factor compatibility scores via `roommateService.getCompatibilityMatches()`.
+ * - Factors: Budget overlap, study noise preferences, cleanliness, sleep schedule, religious observances, guest policies.
+ * - Allows students to filter candidates by gender and minimum compatibility percentage.
+ * - Displays breakdowns of matching strengths and potential points of friction.
+ * - Facilitates sending formal roommate requests with personalized introduction notes.
+ */
+
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Sparkles, CheckCircle2, Send, ShieldCheck, XCircle } from 'lucide-react';
@@ -8,12 +20,19 @@ import { Modal } from '../../components/ui/Modal';
 import { StudentProfile, User } from '../../domain/types';
 import { CompatibilityResult } from '../../domain/matching';
 
+/** Represents a candidate roommate with user record and compatibility score calculation */
 interface MatchItem {
   student: StudentProfile;
   user: User;
   compatibility: CompatibilityResult;
 }
 
+/**
+ * RoommatesPage Component
+ * 
+ * Renders the roommate candidate list, detailed breakdown modal,
+ * and handles dispatch of connection/pairing invitations.
+ */
 export const RoommatesPage: React.FC = () => {
   const session = authService.getSession();
   const [selectedMatch, setSelectedMatch] = useState<MatchItem | null>(null);

@@ -1,3 +1,18 @@
+/**
+ * @file geoUtils.ts
+ * @module domain/geoUtils
+ * @description Geospatial calculations, geohash encoding, and privacy-preserving coordinate obfuscation.
+ *
+ * Architecture & Privacy Design:
+ * - Domain utility operating on BUK Kano New Site coordinates (Danbare and Rimin Gata).
+ * - Exact landlord device GPS coordinates are considered sensitive private property data and
+ *   are stored in `property_locations` (restricted to landlord owner and platform admin).
+ * - Public property listings expose only obfuscated `public_latitude` / `public_longitude`
+ *   via `computePublicCoordinates()`, using deterministic jitter (~30-50m offset) or street-level
+ *   rounding to prevent unsolicited student loitering while allowing map clustering and proximity search.
+ * - Distance calculations use the spherical Haversine formula against Earth radius (6,371 km).
+ */
+
 import { HousingArea, LocationPrecision } from './types';
 
 // Standard Base32 character set for geohashing
@@ -5,6 +20,11 @@ const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 /**
  * Encodes latitude and longitude into a geohash string.
+ *
+ * @param latitude - Latitude coordinate in decimal degrees [-90, +90].
+ * @param longitude - Longitude coordinate in decimal degrees [-180, +180].
+ * @param precision - Character length of the resulting geohash (defaults to 8 characters, ~38m x 19m).
+ * @returns {string} Base32 geohash string.
  */
 export function encodeGeohash(latitude: number, longitude: number, precision: number = 8): string {
   let isEven = true;

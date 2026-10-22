@@ -1,3 +1,14 @@
+/**
+ * @file GroupsPage.tsx
+ * @description Shared accommodation groups and cohort coordination page for BUK students.
+ * 
+ * Manages collaborative rental arrangements:
+ * - Three tabs: "My Groups" (enrolled cohorts), "Explore Groups" (public or request-to-join clusters in Danbare/Rimin Gata), and "Invitations".
+ * - Group properties: target capacity (e.g. 2-4 students), budget targets, gender cohorting, linked target properties.
+ * - Group messaging linkage: each group has an associated group conversation in `chatService`.
+ * - Access control: Open, Request-to-Join, or Invite-Only visibility settings.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -22,6 +33,12 @@ import { chatService } from '../../application/services/chatService';
 import { AccommodationGroup, GroupInvitation } from '../../domain/types';
 import { Badge } from '../../components/ui/Badge';
 
+/**
+ * GroupsPage Component
+ * 
+ * Displays enrolled student cohorts, allows discovery of new roommate groups,
+ * handles invitation acceptance/rejection, and launches group chat threads.
+ */
 export const GroupsPage: React.FC = () => {
   const navigate = useNavigate();
   const session = authService.getSession();

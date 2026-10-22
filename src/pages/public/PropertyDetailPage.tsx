@@ -1,3 +1,16 @@
+/**
+ * @file PropertyDetailPage.tsx
+ * @module pages/public/PropertyDetailPage
+ * @description Comprehensive accommodation detail view for prospective student tenants.
+ *
+ * Workflows & Features:
+ * - Lodge Showcase: High-resolution photo gallery, amenities checklist, gender policy, and verified landlord details.
+ * - Units & Capacity: Displays individual room units, rental fees, and real-time available spaces.
+ * - 7-Day Hold Booking: Authenticated students can trigger room space reservations.
+ *   - Calls `reservationService.createReservation()` which dispatches to `create_reservation_atomic`.
+ *   - Automatically decrements available spaces and generates an invoice with a 7-day payment deadline.
+ */
+
 import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {

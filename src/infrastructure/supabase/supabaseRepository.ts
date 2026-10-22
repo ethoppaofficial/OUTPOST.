@@ -1,3 +1,21 @@
+/**
+ * @file supabaseRepository.ts
+ * @module infrastructure/supabase/supabaseRepository
+ * @description Authoritative data repository implementation backed by Supabase PostgreSQL tables and Edge Functions.
+ *
+ * Architecture Role:
+ * - Implements `IRepository` contract used by all application services (`authService`, `propertyService`, etc.).
+ * - Synchronizes domain entities across 23 Supabase PostgreSQL tables:
+ *   `profiles`, `student_profiles`, `student_verification_documents`, `landlord_profiles`,
+ *   `landlord_verification_submissions`, `properties`, `units`, `property_locations`,
+ *   `roommate_preferences`, `roommate_requests`, `accommodation_groups`, `group_members`,
+ *   `group_invitations`, `group_join_requests`, `reservations`, `invoices`, `payment_receipts`,
+ *   `conversations`, `conversation_participants`, `messages`, `notifications`, `audit_logs`, `platform_settings`.
+ * - Maintains an in-memory cache for synchronous UI performance with optimistic local writes and remote PostgreSQL sync.
+ * - Production Discipline: In production (`IS_PROD`), silent fallback to browser `localStorage` or mock data is strictly prohibited.
+ * - Realtime Channels: Subscribes to Supabase Realtime for instant messaging and notification delivery.
+ */
+
 import { supabase, invokeEdgeFunction, isSupabaseConfigured } from './supabaseClient';
 import { supabaseStorageService } from './supabaseStorageService';
 import { appEventBus } from '../events/eventBus';
@@ -33,8 +51,7 @@ import {
 const IS_PROD = Boolean((import.meta as any)?.env?.PROD);
 
 /**
- * In-memory synchronized cache for domain entities.
- * In production, localStorage fallback is strictly prohibited.
+ * In-memory synchronized repository for domain entities backed by Supabase PostgreSQL.
  */
 export class SupabaseRepository {
   private isLiveInitialized = false;

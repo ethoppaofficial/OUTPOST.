@@ -1,3 +1,17 @@
+/**
+ * @file adminService.ts
+ * @module application/services/adminService
+ * @description Application service for the OUTPOST administrator workspace.
+ *
+ * Responsibilities & Authorization:
+ * - Restricted Workspace: All operations require the `admin` role, enforced by Supabase RLS and server-side Edge Functions.
+ * - Verification Queue: Reviews student identity documents and landlord legal credentials.
+ * - Listing Approvals: Inspects new property submissions and updates `verification_status` to `approved` or `rejected`.
+ * - User Governance: Suspends abusive accounts, revokes verification badges, and handles disputes.
+ * - Audit Trail: Reads immutable `audit_logs` records to track system actions with timestamps and actor IDs.
+ * - Platform Configuration: Reads and updates singleton `platform_settings` (maintenance mode, hold durations).
+ */
+
 import { AuditLog, User } from '../../domain/types';
 import { computePublicCoordinates } from '../../domain/geoUtils';
 import { supabase, invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';

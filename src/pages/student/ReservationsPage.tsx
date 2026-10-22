@@ -1,3 +1,14 @@
+/**
+ * @file ReservationsPage.tsx
+ * @module pages/student/ReservationsPage
+ * @description Student workspace page displaying active, confirmed, and expired accommodation reservations.
+ *
+ * Capabilities:
+ * - Hold Timer Tracking: Monitors remaining hours/days on 7-day payment holds.
+ * - Invoice Access: Links directly to official student accommodation fee invoices (`/student/invoices/:id`).
+ * - Receipt Status: Tracks whether bank transfer receipts have been submitted, approved, or rejected.
+ */
+
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarCheck, Clock, FileText, ArrowRight, CheckCircle2, XCircle } from 'lucide-react';
