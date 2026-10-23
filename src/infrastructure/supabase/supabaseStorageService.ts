@@ -47,14 +47,20 @@ export class SupabaseStorageService {
 
   /**
    * Upload Student Verification Document to private bucket 'student-docs'
+  /**
+   * Upload Student Verification Document to private bucket 'student-docs'
    */
   async uploadStudentDocument(
-    file: File | Blob,
-    studentId: string,
-    docType: string
+    arg1: File | Blob | string,
+    arg2: string | File | Blob,
+    arg3: string = 'document.pdf',
+    arg4?: string
   ): Promise<SupabaseFileUploadResult> {
+    const file = (typeof arg1 === 'string' ? arg2 : arg1) as File | Blob;
+    const studentId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const originalName = typeof arg1 === 'string' && typeof arg3 === 'string' ? arg3 : (file as File).name || 'document.pdf';
     this.validateFileSize(file.size, 10 * 1024 * 1024, 'Student document');
-    const cleanName = this.sanitizeFileName((file as File).name || 'document.pdf');
+    const cleanName = this.sanitizeFileName(originalName);
     const docId = crypto.randomUUID();
     const storagePath = `${studentId}/${docId}/${cleanName}`;
 
@@ -82,12 +88,16 @@ export class SupabaseStorageService {
    * Upload Landlord Verification Submission to private bucket 'landlord-docs'
    */
   async uploadLandlordDocument(
-    file: File | Blob,
-    landlordId: string,
-    docType: string
+    arg1: File | Blob | string,
+    arg2: string | File | Blob,
+    arg3: string = 'document.pdf',
+    arg4?: string
   ): Promise<SupabaseFileUploadResult> {
+    const file = (typeof arg1 === 'string' ? arg2 : arg1) as File | Blob;
+    const landlordId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const originalName = typeof arg1 === 'string' && typeof arg3 === 'string' ? arg3 : (file as File).name || 'document.pdf';
     this.validateFileSize(file.size, 10 * 1024 * 1024, 'Landlord document');
-    const cleanName = this.sanitizeFileName((file as File).name || 'document.pdf');
+    const cleanName = this.sanitizeFileName(originalName);
     const docId = crypto.randomUUID();
     const storagePath = `${landlordId}/${docId}/${cleanName}`;
 
@@ -100,6 +110,42 @@ export class SupabaseStorageService {
 
     if (error) {
       throw new Error(`Failed to upload landlord document: ${error.message}`);
+    }
+
+    return {
+      url: storagePath,
+      path: storagePath,
+      fileName: cleanName,
+      fileSize: file.size,
+      contentType: file.type || 'application/pdf',
+    };
+  }
+
+  /**
+   * Upload Payment Receipt for a Reservation to tenant-isolated 'payment-receipts' bucket
+   */
+  async uploadPaymentReceipt(
+    reservationId: string,
+    file: File | Blob,
+    originalFileName: string = 'receipt.pdf',
+    landlordId?: string,
+    studentId?: string
+  ): Promise<SupabaseFileUploadResult> {
+    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Payment receipt');
+    const cleanName = this.sanitizeFileName(originalFileName);
+    const effectiveLandlordId = landlordId || 'landlord';
+    const effectiveStudentId = studentId || 'student';
+    const storagePath = `${effectiveLandlordId}/${effectiveStudentId}/${reservationId}/${cleanName}`;
+
+    const { error } = await supabase.storage
+      .from('payment-receipts')
+      .upload(storagePath, file, {
+        contentType: file.type || 'application/pdf',
+        upsert: false,
+      });
+
+    if (error) {
+      throw new Error(`Failed to upload payment receipt: ${error.message}`);
     }
 
     return {

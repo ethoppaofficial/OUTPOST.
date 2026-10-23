@@ -192,8 +192,16 @@ class PropertyService {
     const propId = (data.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : `prop-${Date.now()}`;
 
     // Ensure property location is initialized
+    const hasCoordinates = Boolean(
+      data.location &&
+      typeof data.location.latitude === 'number' &&
+      typeof data.location.longitude === 'number' &&
+      Number.isFinite(data.location.latitude) &&
+      Number.isFinite(data.location.longitude)
+    );
+
     let location: PropertyLocation;
-    if (data.location) {
+    if (hasCoordinates && data.location) {
       location = {
         ...data.location,
         id: data.location.id || `loc-${Date.now()}`,
@@ -204,12 +212,19 @@ class PropertyService {
         state: 'Kano State',
         country: 'Nigeria',
         geohash: encodeGeohash(data.location.latitude, data.location.longitude),
+        verificationStatus: 'pending',
+        locationVerificationStatus: 'pending',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
     } else {
-      const center = AREA_CENTERS[area];
-      const pubCoords = computePublicCoordinates(center.latitude, center.longitude, 'nearby_building', area, propId);
+      /**
+       * Architectural Invariant (Anti-Hallucination):
+       * Area centers (e.g. Danbare or Rimin Gata centroids) are broad geographical discovery
+       * reference points ONLY. They must NEVER be stored, indexed, or presented as exact
+       * physical building coordinates. When a landlord has not placed an explicit pin,
+       * coordinates remain undefined and location verification status is marked 'not_submitted'.
+       */
       location = {
         id: `loc-${Date.now()}`,
         propertyId: propId,
@@ -218,16 +233,17 @@ class PropertyService {
         city: 'Kano',
         state: 'Kano State',
         country: 'Nigeria',
-        latitude: center.latitude,
-        longitude: center.longitude,
-        geohash: encodeGeohash(center.latitude, center.longitude),
-        source: 'landlord_pin',
+        latitude: undefined as any,
+        longitude: undefined as any,
+        geohash: '',
+        source: 'unspecified' as any,
         verificationStatus: 'pending',
-        precision: 'nearby_building',
-        publicLatitude: pubCoords.publicLatitude,
-        publicLongitude: pubCoords.publicLongitude,
-        publicLocationLabel: pubCoords.publicLocationLabel,
-        formattedAddress: data.address || `${area} Student Settlement, Kano`,
+        locationVerificationStatus: 'pending',
+        precision: 'neighbourhood',
+        publicLatitude: undefined,
+        publicLongitude: undefined,
+        publicLocationLabel: `${area} Settlement (Approximate - Verification Pending)`,
+        formattedAddress: data.address || `${area}, Kano State`,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -243,10 +259,12 @@ class PropertyService {
       landlordVerified: landlord?.verificationStatus === 'approved',
       slug,
       verificationStatus: 'pending', // submitted for admin approval
-      locationVerificationStatus: 'pending',
+      locationVerificationStatus: hasCoordinates ? 'pending' : 'pending',
       // Public coordinates are strictly held until administrator verification
       publicLatitude: undefined,
       publicLongitude: undefined,
+      latitude: hasCoordinates ? data.location!.latitude : undefined,
+      longitude: hasCoordinates ? data.location!.longitude : undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

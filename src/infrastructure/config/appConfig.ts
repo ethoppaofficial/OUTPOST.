@@ -1,16 +1,15 @@
 /**
  * @file appConfig.ts
  * @module infrastructure/config/appConfig
- * @description Centralized runtime environment configuration and backend mode resolver.
+ * @description Centralized runtime environment configuration and backend mode resolver for OUTPOST.
  *
- * Architecture Notes:
- * - Authoritative Backend: `backendMode` resolves to 'supabase' as the exclusive production backend.
- * - Validation: Validates presence of `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
- * - In production (`isProduction: true`), missing Supabase configuration surfaces a blocking error screen
- *   (`ConfigErrorScreen`) to prevent silent data leakage or unauthorized mock fallbacks.
+ * Security Rationale & Operating Discipline:
+ * - Production Strictness: In production (`isProduction: true`), missing or malformed `VITE_SUPABASE_URL`
+ *   or `VITE_SUPABASE_ANON_KEY` immediately surfaces a blocking `ConfigErrorScreen`.
+ * - No Fake Defaults in Production: Fake localhost URLs or mock JWTs are strictly prohibited outside tests.
+ * - Secret Isolation: Service-role keys (`SUPABASE_SERVICE_ROLE_KEY`) must NEVER be exposed or referenced in client code.
+ * - Migration Compatibility: Legacy Firebase compatibility flags remain purely as migration aliases without reading private credentials.
  */
-
-import firebaseConfig from '../../../firebase-applet-config.json';
 
 export type BackendMode = 'supabase' | 'mock';
 
@@ -22,65 +21,68 @@ export interface AppConfig {
   };
   firebase: {
     projectId: string;
-    appId: string;
-    apiKey: string;
     authDomain: string;
     firestoreDatabaseId: string;
     storageBucket: string;
-    messagingSenderId?: string;
   };
   isProduction: boolean;
+  isTest: boolean;
   validationError?: string;
 }
 
 function validateConfiguration(): { config: AppConfig; error?: string } {
-  const env: any = (import.meta as any)?.env || (typeof process !== 'undefined' ? process.env : {}) || {};
+  const env: any = (typeof import.meta !== 'undefined' && (import.meta as any).env)
+    ? (import.meta as any).env
+    : (typeof process !== 'undefined' ? process.env : {}) || {};
+
   const isProduction = Boolean(env.PROD || env.NODE_ENV === 'production');
+  const isTest = Boolean(env.NODE_ENV === 'test' || env.VITEST || typeof (globalThis as any).describe === 'function');
   const backendMode: BackendMode = 'supabase';
 
-  const supabaseUrl =
-    env.VITE_SUPABASE_URL ||
-    env.NEXT_PUBLIC_SUPABASE_URL ||
-    'http://127.0.0.1:54321';
+  // Check for prohibited service-role key in client environment
+  if (env.VITE_SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('[SECURITY CRITICAL] Service-role key detected in client environment variables! This key must remain strictly server-side.');
+  }
 
-  const supabaseAnonKey =
-    env.VITE_SUPABASE_ANON_KEY ||
-    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_key';
-
-  const projectId = firebaseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || '';
-  const authDomain = firebaseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || '';
-  const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || env.VITE_FIREBASE_DATABASE_ID || '';
-  const storageBucket = firebaseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || '';
-  const appId = firebaseConfig.appId || env.VITE_FIREBASE_APP_ID || '';
-  const apiKey = firebaseConfig.apiKey || env.VITE_FIREBASE_API_KEY || '';
+  // Canonical public variables with backward-compatible fallbacks
+  const rawUrl = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const rawAnonKey = env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
 
   let error: string | undefined;
 
-  // In production, Supabase URL and Anon Key are mandatory
-  if (isProduction && (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY)) {
-    error = 'Production configuration error: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required.';
-    console.error(error);
+  // In production, Supabase configuration is strictly mandatory
+  if (isProduction) {
+    if (!rawUrl || !rawAnonKey) {
+      error = 'Production configuration error: Both VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required to run in production.';
+    } else if (rawUrl.includes('127.0.0.1') || rawUrl.includes('localhost')) {
+      error = 'Production configuration error: Localhost or loopback Supabase URL cannot be used in a live production environment.';
+    }
+  }
+
+  // In test environments, supply controlled mock defaults if unset
+  const finalUrl = rawUrl || (isTest ? 'http://127.0.0.1:54321' : '');
+  const finalAnonKey = rawAnonKey || (isTest ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_test_key' : '');
+
+  // If in development and missing credentials, set warning error for UI banner
+  if (!isProduction && !isTest && (!finalUrl || !finalAnonKey)) {
+    error = 'Development notice: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are not configured. Please define them in your .env file.';
   }
 
   return {
     config: {
       backendMode,
       supabase: {
-        url: supabaseUrl,
-        anonKey: supabaseAnonKey,
+        url: finalUrl,
+        anonKey: finalAnonKey,
       },
       firebase: {
-        projectId,
-        appId,
-        apiKey,
-        authDomain,
-        firestoreDatabaseId,
-        storageBucket,
-        messagingSenderId: firebaseConfig.messagingSenderId,
+        projectId: env.VITE_FIREBASE_PROJECT_ID || '',
+        authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || '',
+        firestoreDatabaseId: 'supabase-prod',
+        storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || '',
       },
       isProduction,
+      isTest,
       validationError: error,
     },
     error,
@@ -92,10 +94,24 @@ const { config, error } = validateConfiguration();
 export const appConfig = config;
 export const configValidationError = error;
 
+/**
+ * Indicates whether Supabase is the active backend (always true in OUTPOST MVP).
+ */
 export function isSupabaseMode(): boolean {
   return true;
 }
 
+/**
+ * Indicates whether Firebase is the active backend (always false in current Supabase-cutover runtime).
+ */
 export function isFirebaseMode(): boolean {
   return false;
 }
+
+/**
+ * Indicates whether Supabase credentials are valid and present.
+ */
+export function isSupabaseConfigured(): boolean {
+  return Boolean(appConfig.supabase.url && appConfig.supabase.anonKey);
+}
+

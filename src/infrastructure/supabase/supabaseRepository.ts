@@ -329,6 +329,16 @@ export class SupabaseRepository {
 
   public clearActiveSession(): void {
     this.clearActiveUserId();
+    this.notifications = [];
+    this.receipts = [];
+    this.reservations = [];
+    this.invoices = [];
+    this.messages = {};
+    this.conversations = [];
+    this.studentDocs = [];
+    this.roommateRequests = [];
+    this.invitations = [];
+    this.joinRequests = [];
   }
 
   // Public Profiles

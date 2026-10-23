@@ -1,18 +1,19 @@
 /**
  * @file ReservationDetailPage.tsx
  * @module pages/student/ReservationDetailPage
- * @description Detailed view of a specific student accommodation reservation hold.
+ * @description Detailed view of a student accommodation reservation hold.
  *
- * Capabilities & Security Workflow:
- * - 7-Day Countdown Timer: Calculates remaining days/hours until hold expiration based on `holdExpiresAt`.
- * - Landlord Direct Bank Details: Displays verified account number and bank for external transfer.
- * - Receipt Upload Modal: Accepts JPEG, PNG, or PDF bank transfer slips (max 10MB).
- *   - Uploads file through `storageService` into tenant-isolated path `payment-receipts/{landlordId}/{studentId}/{resId}/...`.
- *   - Updates reservation status to `payment_submitted` pending landlord review.
- * - Voluntary Cancellation: Allows student to release the held space immediately if they choose another option.
+ * Security Rationale & Financial Invariants:
+ * - Direct Landlord Bank Details: OUTPOST never takes custody of user funds (an explicit MVP exclusion).
+ *   Payment instructions and account details are retrieved strictly from the authoritative `Invoice`
+ *   record linked to the reservation. Hardcoded fallback bank accounts are strictly prohibited.
+ * - Authentic Evidence Required: Fake receipt URLs or unauthenticated third-party storage fallbacks are forbidden.
+ *   A physical file must be uploaded to tenant-isolated Supabase storage before registering the receipt.
+ * - Eligibility Boundaries: Receipts can only be submitted while the reservation status is `pending_payment`
+ *   or `receipt_submitted` within the 7-day hold window. Expired or cancelled holds reject uploads.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Clock,
@@ -24,12 +25,22 @@ import {
   ArrowLeft,
   Building,
   CreditCard,
+  Loader2,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from '../../application/services/storageService';
 import { ReservationStatusBadge, ReceiptStatusBadge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
+import {
+  validateUploadFile,
+  PAYMENT_RECEIPT_UPLOAD_RULES,
+} from '../../application/utils/uploadValidation';
+import {
+  validateAmount,
+  validateTextLength,
+} from '../../application/utils/validation';
+import { normalizeError } from '../../application/utils/errorUtils';
 
 export const ReservationDetailPage: React.FC = () => {
   const { reservationId } = useParams<{ reservationId: string }>();
@@ -65,46 +76,95 @@ export const ReservationDetailPage: React.FC = () => {
     );
   }
 
+  // Tenant Boundary Check: Student can only view their own reservation
+  const isAuthorizedStudent = reservation.studentId === session.user.id;
+  if (!isAuthorizedStudent && session.user.role !== 'admin') {
+    return (
+      <div className="text-center py-12 space-y-3">
+        <p className="text-sm text-rose-500 font-semibold">Unauthorized: You do not have permission to view this reservation.</p>
+        <Link to="/student/reservations" className="text-xs text-emerald-600 font-semibold underline">
+          Back to my reservations
+        </Link>
+      </div>
+    );
+  }
+
+  // Authoritative invoice & direct landlord payment details
+  const invoice = reservation.invoiceId
+    ? reservationService.getInvoiceById(reservation.invoiceId)
+    : reservationService.getInvoiceByReservationId(reservation.id);
+
+  const bankDetails = invoice?.bankDetails;
+  const hasVerifiedBankDetails = Boolean(
+    bankDetails?.accountNumber && bankDetails?.bankName
+  );
+
   const expiresDate = new Date(reservation.holdExpiresAt);
   const now = new Date();
+  const isExpired = now.getTime() > expiresDate.getTime() || reservation.status === 'expired';
   const diffHours = Math.max(0, Math.round((expiresDate.getTime() - now.getTime()) / (1000 * 60 * 60)));
   const diffDays = Math.floor(diffHours / 24);
   const remainingHours = diffHours % 24;
 
+  const canUploadReceipt =
+    !isExpired &&
+    (reservation.status === 'pending_payment' || reservation.status === 'receipt_submitted');
+
   const handleUploadReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reference.trim()) {
-      setError('Please provide the transaction reference or session ID.');
+    setError(null);
+
+    // 1. Validate eligibility
+    if (!canUploadReceipt) {
+      setError('This reservation is not eligible for receipt submission (it may be confirmed, expired, or cancelled).');
+      return;
+    }
+
+    // 2. Validate transaction reference
+    const refValidation = validateTextLength(reference, 4, 60, 'Transaction reference / Session ID');
+    if (!refValidation.isValid) {
+      setError(refValidation.error!);
+      return;
+    }
+
+    // 3. Validate payment amount
+    const amountValidation = validateAmount(amountPaid, 'Amount paid');
+    if (!amountValidation.isValid) {
+      setError(amountValidation.error!);
+      return;
+    }
+
+    // 4. Validate physical file upload (strictly reject missing or fake fallback URLs)
+    const fileValidation = validateUploadFile(receiptFile, PAYMENT_RECEIPT_UPLOAD_RULES);
+    if (!fileValidation.isValid || !receiptFile) {
+      setError(fileValidation.error || 'Please select an authentic payment receipt file (JPEG, PNG, or PDF).');
       return;
     }
 
     setUploading(true);
-    setError(null);
 
     try {
-      let receiptUrl = `https://outpost-storage.ng/receipts/${reservation.id}_${Date.now()}.png`;
-      let finalSize = 1024 * 400;
+      // Direct upload through tenant-isolated storage service
+      const uploadRes = await storageService.uploadPaymentReceipt(
+        reservation.id,
+        receiptFile,
+        fileValidation.sanitizedFileName || receiptFile.name,
+        reservation.landlordId,
+        session.user.id
+      );
 
-      if (receiptFile) {
-        const uploadRes = await storageService.uploadPaymentReceipt(
-          reservation.id,
-          receiptFile,
-          fileName || receiptFile.name,
-          reservation.landlordId,
-          session.user.id
-        );
-        receiptUrl = uploadRes.url;
-        finalSize = uploadRes.fileSize;
+      if (!uploadRes || !uploadRes.url) {
+        throw new Error('Failed to obtain authenticated storage location for the receipt.');
       }
 
       const res = await reservationService.uploadPaymentReceipt({
         reservationId: reservation.id,
-        invoiceId: reservation.invoiceId,
+        invoiceId: reservation.invoiceId || invoice?.id || `inv-${reservation.id}`,
         studentId: session.user.id,
         landlordId: reservation.landlordId,
-        fileUrl: receiptUrl,
-        fileName: fileName || 'payment_receipt.png',
-        fileSize: finalSize,
+        fileUrl: uploadRes.url,
+        fileName: uploadRes.fileName,
+        fileSize: uploadRes.fileSize,
         paymentReference: reference.trim(),
         payerBankName: payerBank,
         amountPaid: Number(amountPaid),
@@ -114,20 +174,23 @@ export const ReservationDetailPage: React.FC = () => {
         setReceipt(res.receipt);
         setReservation(reservationService.getReservationById(reservation.id));
         setUploadModalOpen(false);
-        setSuccess('Payment receipt submitted successfully! Landlord has been notified for confirmation.');
-        setTimeout(() => setSuccess(null), 5000);
+        setReceiptFile(null);
+        setFileName('');
+        setSuccess('Payment receipt submitted successfully! The landlord has been notified to verify your bank transfer.');
+        setTimeout(() => setSuccess(null), 6000);
       } else {
-        setError(res.error || 'Failed to submit receipt.');
+        setError(res.error || 'Failed to register submitted payment receipt.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to upload receipt to storage.');
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Failed to upload receipt to storage.');
+      setError(normalized.userMessage);
     } finally {
       setUploading(false);
     }
   };
 
   const handleCancelReservation = () => {
-    if (window.confirm('Are you sure you want to cancel this reservation hold? Your room space will be immediately released.')) {
+    if (window.confirm('Are you sure you want to cancel this reservation hold? Your bed-space will be immediately released.')) {
       reservationService.cancelReservation(reservation.id);
       setReservation(reservationService.getReservationById(reservation.id));
     }
@@ -151,7 +214,7 @@ export const ReservationDetailPage: React.FC = () => {
               Hold Ref: {reservation.reservationNumber}
             </span>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5">
-              {reservation.propertyTitle}
+              {reservation.propertyTitle || reservation.propertyName}
             </h1>
           </div>
 
@@ -159,7 +222,7 @@ export const ReservationDetailPage: React.FC = () => {
         </div>
 
         {/* 7-Day Hold Countdown Bar */}
-        {reservation.status === 'pending_payment' && (
+        {reservation.status === 'pending_payment' && !isExpired && (
           <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/60 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
@@ -181,11 +244,21 @@ export const ReservationDetailPage: React.FC = () => {
           </div>
         )}
 
+        {isExpired && (
+          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+            <div>
+              <p className="font-bold">Reservation Hold Expired</p>
+              <p className="text-[11px]">The 7-day payment window for this hold elapsed without verified payment.</p>
+            </div>
+          </div>
+        )}
+
         {/* Property & Invoice Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div>
             <span className="text-slate-400 text-[11px] block">Reserved Unit</span>
-            <span className="font-semibold text-slate-900 dark:text-white">{reservation.roomName}</span>
+            <span className="font-semibold text-slate-900 dark:text-white">{reservation.roomName || reservation.unitName}</span>
           </div>
           <div>
             <span className="text-slate-400 text-[11px] block">Session Cost</span>
@@ -195,17 +268,21 @@ export const ReservationDetailPage: React.FC = () => {
           </div>
           <div>
             <span className="text-slate-400 text-[11px] block">Landlord</span>
-            <span className="font-semibold text-slate-900 dark:text-white">{reservation.landlordName}</span>
+            <span className="font-semibold text-slate-900 dark:text-white">{reservation.landlordName || 'Verified Host'}</span>
           </div>
           <div>
             <span className="text-slate-400 text-[11px] block">Official Invoice</span>
-            <Link
-              to={`/student/invoices/${reservation.invoiceId}`}
-              className="text-emerald-600 hover:underline font-semibold flex items-center gap-1"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>View Invoice</span>
-            </Link>
+            {reservation.invoiceId ? (
+              <Link
+                to={`/student/invoices/${reservation.invoiceId}`}
+                className="text-emerald-600 hover:underline font-semibold flex items-center gap-1"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>View Invoice</span>
+              </Link>
+            ) : (
+              <span className="text-slate-400">Pending creation</span>
+            )}
           </div>
         </div>
       </div>
@@ -217,38 +294,55 @@ export const ReservationDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* Bank Payment Instructions */}
+      {/* Authoritative Landlord Direct Bank Details */}
       <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
         <div className="flex items-center gap-2">
           <Building className="w-5 h-5 text-emerald-600" />
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-            Landlord Official Bank Transfer Details
+            Landlord Verified Direct Bank Transfer Details
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 text-xs">
-          <div>
-            <span className="text-slate-400 text-[11px] block">Beneficiary Bank:</span>
-            <span className="font-bold text-slate-800 dark:text-slate-200">Guaranty Trust Bank (GTBank)</span>
-          </div>
-          <div>
-            <span className="text-slate-400 text-[11px] block">Account Number:</span>
-            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-              0249182391
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400 text-[11px] block">Account Name:</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">
-              OUTPOST HOUSING ESCROW / {(reservation.landlordName || 'VERIFIED LANDLORD').toUpperCase()}
-            </span>
-          </div>
-        </div>
+        {hasVerifiedBankDetails && bankDetails ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 text-xs">
+              <div>
+                <span className="text-slate-400 text-[11px] block">Beneficiary Bank:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{bankDetails.bankName}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[11px] block">Account Number:</span>
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                  {bankDetails.accountNumber}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[11px] block">Beneficiary Name:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                  {bankDetails.accountName}
+                </span>
+              </div>
+            </div>
 
-        <p className="text-[11px] text-slate-500 leading-relaxed">
-          Please transfer exact amount <strong>₦{reservation.amount.toLocaleString()}</strong> using reference code{' '}
-          <strong className="font-mono text-emerald-600">{reservation.reservationNumber}</strong>. Once payment completes on your mobile banking app, upload your receipt below.
-        </p>
+            {bankDetails.paymentInstructions && (
+              <p className="text-[11px] text-slate-500 leading-relaxed italic">
+                {bankDetails.paymentInstructions}
+              </p>
+            )}
+
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Please transfer exact amount <strong>₦{reservation.amount.toLocaleString()}</strong> using reference code{' '}
+              <strong className="font-mono text-emerald-600">{reservation.reservationNumber}</strong>. Once payment completes on your mobile banking app, upload your receipt below.
+            </p>
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+            <p className="font-bold">Landlord Payment Information Unavailable</p>
+            <p className="text-[11px]">
+              Direct bank details have not yet been synchronized for this listing. Please communicate with the landlord via chat before making an external bank transfer.
+            </p>
+          </div>
+        )}
 
         {/* Receipt Status & Action */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -257,10 +351,10 @@ export const ReservationDetailPage: React.FC = () => {
             <ReceiptStatusBadge status={receipt?.status || 'not_submitted'} />
           </div>
 
-          {(reservation.status === 'pending_payment' || reservation.status === 'receipt_submitted') && (
+          {canUploadReceipt && (
             <button
               onClick={() => setUploadModalOpen(true)}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5"
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
             >
               <Upload className="w-4 h-4" />
               <span>{receipt ? 'Upload Updated Receipt' : 'Upload Payment Receipt'}</span>
@@ -295,11 +389,11 @@ export const ReservationDetailPage: React.FC = () => {
       </div>
 
       {/* Cancellation option */}
-      {reservation.status === 'pending_payment' && (
+      {reservation.status === 'pending_payment' && !isExpired && (
         <div className="text-right">
           <button
             onClick={handleCancelReservation}
-            className="text-xs text-rose-500 hover:text-rose-700 font-medium"
+            className="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer"
           >
             Cancel this reservation hold
           </button>
@@ -309,7 +403,9 @@ export const ReservationDetailPage: React.FC = () => {
       {/* Upload Receipt Modal */}
       <Modal
         isOpen={uploadModalOpen}
-        onClose={() => setUploadModalOpen(false)}
+        onClose={() => {
+          if (!uploading) setUploadModalOpen(false);
+        }}
         title="Upload Bank Transfer Receipt"
       >
         <form onSubmit={handleUploadReceipt} className="space-y-4 text-xs">
@@ -317,6 +413,7 @@ export const ReservationDetailPage: React.FC = () => {
             <label className="font-semibold text-slate-700 dark:text-slate-300">Originating Bank</label>
             <select
               value={payerBank}
+              disabled={uploading}
               onChange={(e) => setPayerBank(e.target.value)}
               className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
             >
@@ -325,9 +422,11 @@ export const ReservationDetailPage: React.FC = () => {
               <option value="Zenith Bank">Zenith Bank</option>
               <option value="First Bank">First Bank of Nigeria</option>
               <option value="UBA">United Bank for Africa (UBA)</option>
+              <option value="Stanbic IBTC">Stanbic IBTC Bank</option>
+              <option value="Fidelity Bank">Fidelity Bank</option>
               <option value="Kuda">Kuda Microfinance Bank</option>
-              <option value="OPay">OPay</option>
-              <option value="Moniepoint">Moniepoint</option>
+              <option value="OPay">OPay Digital Services</option>
+              <option value="Moniepoint">Moniepoint Microfinance Bank</option>
             </select>
           </div>
 
@@ -338,6 +437,7 @@ export const ReservationDetailPage: React.FC = () => {
             <input
               type="text"
               required
+              disabled={uploading}
               value={reference}
               onChange={(e) => setReference(e.target.value)}
               placeholder="e.g. 090267238192837192"
@@ -350,6 +450,8 @@ export const ReservationDetailPage: React.FC = () => {
             <input
               type="number"
               required
+              min={1}
+              disabled={uploading}
               value={amountPaid}
               onChange={(e) => setAmountPaid(Number(e.target.value))}
               className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
@@ -358,15 +460,26 @@ export const ReservationDetailPage: React.FC = () => {
 
           <div className="space-y-1.5">
             <label className="font-semibold text-slate-700 dark:text-slate-300">
-              Receipt Screenshot / PDF
+              Receipt Screenshot / PDF Proof
             </label>
             <input
               type="file"
+              required
+              disabled={uploading}
               accept=".png,.jpg,.jpeg,.pdf"
               onChange={(e) => {
+                setError(null);
                 if (e.target.files && e.target.files[0]) {
-                  setReceiptFile(e.target.files[0]);
-                  setFileName(e.target.files[0].name);
+                  const selected = e.target.files[0];
+                  const check = validateUploadFile(selected, PAYMENT_RECEIPT_UPLOAD_RULES);
+                  if (!check.isValid) {
+                    setError(check.error!);
+                    setReceiptFile(null);
+                    setFileName('');
+                    return;
+                  }
+                  setReceiptFile(selected);
+                  setFileName(check.sanitizedFileName || selected.name);
                 }
               }}
               className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs"
@@ -375,24 +488,34 @@ export const ReservationDetailPage: React.FC = () => {
           </div>
 
           {error && (
-            <div className="p-2.5 rounded-xl bg-rose-50 text-rose-700 text-xs">
-              {error}
+            <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={uploading}
               onClick={() => setUploadModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+              disabled={uploading || !receiptFile}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              Submit for Landlord Verification
+              {uploading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Uploading Proof...</span>
+                </>
+              ) : (
+                <span>Submit for Verification</span>
+              )}
             </button>
           </div>
         </form>

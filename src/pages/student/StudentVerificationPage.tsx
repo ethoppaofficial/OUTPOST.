@@ -17,9 +17,11 @@ import React, { useState } from 'react';
 import { ShieldCheck, Upload, FileText, CheckCircle2, Clock, XCircle, AlertTriangle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from '../../application/services/storageService';
 import { StudentDocumentType } from '../../domain/types';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { validateUploadFile, STUDENT_DOCUMENT_UPLOAD_RULES } from '../../application/utils/uploadValidation';
+import { normalizeError } from '../../application/utils/errorUtils';
 
 /**
  * StudentVerificationPage Component
@@ -43,50 +45,50 @@ export const StudentVerificationPage: React.FC = () => {
     setError(null);
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
-      // Check size < 5MB
-      if (selected.size > 5 * 1024 * 1024) {
-        setError('File size must be strictly under 5 MB.');
-        return;
-      }
-      // Check type
-      const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-      if (!allowed.includes(selected.type)) {
-        setError('Only JPEG, PNG, or PDF files are accepted for identity proof.');
+      const check = validateUploadFile(selected, STUDENT_DOCUMENT_UPLOAD_RULES);
+      if (!check.isValid) {
+        setError(check.error!);
+        setFile(null);
+        setFileName('');
         return;
       }
       setFile(selected);
-      setFileName(selected.name);
+      setFileName(check.sanitizedFileName || selected.name);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file && !fileName) {
-      setError('Please select a document file to upload.');
+    setError(null);
+
+    const check = validateUploadFile(file, STUDENT_DOCUMENT_UPLOAD_RULES);
+    if (!check.isValid || !file) {
+      setError(check.error || 'Please select an authentic document file (JPEG, PNG, or PDF, max 5 MB).');
       return;
     }
 
     setSubmitting(true);
-    setError(null);
 
     try {
-      let documentUrl = `https://outpost-storage.ng/docs/student_${session.user.id}_${Date.now()}.pdf`;
-      let finalSize = file?.size || 1024 * 350;
+      const uploadRes = await storageService.uploadStudentDocument(
+        session.user.id,
+        file,
+        check.sanitizedFileName || fileName || file.name,
+        documentType
+      );
 
-      if (file) {
-        const uploadRes = await storageService.uploadStudentDocument(session.user.id, file, fileName || file.name);
-        documentUrl = uploadRes.url;
-        finalSize = uploadRes.fileSize;
+      if (!uploadRes || !uploadRes.url) {
+        throw new Error('Could not upload document to secure storage.');
       }
 
       const res = await verificationService.uploadStudentDocument({
         studentId: session.user.id,
         studentName: student?.fullName || session.displayName || 'Student',
         documentType,
-        fileName: fileName || `${documentType}_proof.pdf`,
-        fileSize: finalSize,
-        fileUrl: documentUrl,
-        documentUrl,
+        fileName: uploadRes.fileName,
+        fileSize: uploadRes.fileSize,
+        fileUrl: uploadRes.url,
+        documentUrl: uploadRes.url,
       });
 
       if (res.success && res.doc) {
@@ -98,8 +100,9 @@ export const StudentVerificationPage: React.FC = () => {
       } else {
         setError(res.error || 'Failed to upload document.');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Error uploading document to storage.');
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Error uploading document to storage.');
+      setError(normalized.userMessage);
     } finally {
       setSubmitting(false);
     }

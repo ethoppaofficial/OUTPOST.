@@ -4,16 +4,20 @@
  * 
  * Flow & Requirements:
  * - Collects landlord legal name, registered business entity name (optional), and national ID (NIN, Driver's License, International Passport, or Voter's Card).
- * - Collects proof of property ownership (Certificate of Occupancy, Deed of Conveyance, Local Government Allocation, or Electricity Utility Bill).
+ * - Collects physical proof of property ownership / authority (C of O, Deed of Assignment, Local Government Allocation, or Utility Bill).
+ * - Uploads the authentic document file to private Supabase storage.
  * - Submits verification package to `verificationService.submitLandlordVerification()`.
  * - Status displays: `pending` (under review), `approved` (grants gold shield badge on listings), or `rejected`.
  */
 
 import React, { useState } from 'react';
-import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle, Loader2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
+import { storageService } from '../../application/services/storageService';
 import { VerificationBadge } from '../../components/ui/Badge';
+import { validateUploadFile } from '../../application/utils/uploadValidation';
+import { normalizeError } from '../../application/utils/errorUtils';
 
 /**
  * LandlordVerificationPage Component
@@ -29,25 +33,84 @@ export const LandlordVerificationPage: React.FC = () => {
   const [idType, setIdType] = useState('NIN');
   const [idNumber, setIdNumber] = useState('');
   const [ownershipDocType, setOwnershipDocType] = useState('Electricity Utility Bill');
+  const [file, setFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   const status = profile?.verificationStatus || 'pending';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
+    if (e.target.files && e.target.files[0]) {
+      const selected = e.target.files[0];
+      const check = validateUploadFile(selected, {
+        maxSizeMB: 10,
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+        allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.pdf'],
+      });
+      if (!check.isValid) {
+        setError(check.error!);
+        setFile(null);
+        setFileName('');
+        return;
+      }
+      setFile(selected);
+      setFileName(check.sanitizedFileName || selected.name);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
 
-    verificationService.submitLandlordVerification({
-      landlordId: session.user.id,
-      legalName: legalName.trim(),
-      businessName: businessName.trim() || undefined,
-      idType,
-      idNumber: idNumber.trim() || 'NIN-8291048291',
-      idDocumentUrl: 'https://outpost-storage.ng/docs/landlord_nin.pdf',
-      proofOfOwnershipUrl: 'https://outpost-storage.ng/docs/property_deed.pdf',
-      ownershipDocType,
-    });
+    if (!legalName.trim() || !idNumber.trim()) {
+      setError('Please provide your full legal name and official ID number.');
+      return;
+    }
 
-    setSubmitted(true);
+    if (!file) {
+      setError('Please select an authentic identification or ownership document file (JPEG, PNG, or PDF, max 10 MB).');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      // Direct upload through tenant-isolated Supabase storage
+      const uploadRes = await storageService.uploadLandlordDocument(
+        session.user.id,
+        file,
+        fileName || file.name
+      );
+
+      if (!uploadRes || !uploadRes.url) {
+        throw new Error('Failed to upload landlord verification document to secure storage.');
+      }
+
+      const res = verificationService.submitLandlordVerification({
+        landlordId: session.user.id,
+        legalName: legalName.trim(),
+        businessName: businessName.trim() || undefined,
+        idType,
+        idNumber: idNumber.trim(),
+        idDocumentUrl: uploadRes.url,
+        proofOfOwnershipUrl: uploadRes.url,
+        ownershipDocType,
+      });
+
+      if (res && (res as any).success) {
+        setSubmitted(true);
+      } else {
+        setError('Failed to submit verification request.');
+      }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Failed to upload verification document.');
+      setError(normalized.userMessage);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -96,9 +159,10 @@ export const LandlordVerificationPage: React.FC = () => {
                 <input
                   type="text"
                   required
+                  disabled={submitting}
                   value={legalName}
                   onChange={(e) => setLegalName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -108,10 +172,11 @@ export const LandlordVerificationPage: React.FC = () => {
                 </label>
                 <input
                   type="text"
+                  disabled={submitting}
                   value={businessName}
                   onChange={(e) => setBusinessName(e.target.value)}
                   placeholder="e.g. Apex Living Properties Ltd"
-                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -120,8 +185,9 @@ export const LandlordVerificationPage: React.FC = () => {
                   <label className="font-semibold text-slate-700 dark:text-slate-300">Identity Document Type</label>
                   <select
                     value={idType}
+                    disabled={submitting}
                     onChange={(e) => setIdType(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                   >
                     <option value="NIN">National Identity Number (NIN Slip)</option>
                     <option value="International Passport">International Passport</option>
@@ -135,10 +201,11 @@ export const LandlordVerificationPage: React.FC = () => {
                   <input
                     type="text"
                     required
+                    disabled={submitting}
                     value={idNumber}
                     onChange={(e) => setIdNumber(e.target.value)}
                     placeholder="e.g. 89201948201"
-                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono"
                   />
                 </div>
               </div>
@@ -149,10 +216,11 @@ export const LandlordVerificationPage: React.FC = () => {
                 </label>
                 <select
                   value={ownershipDocType}
+                  disabled={submitting}
                   onChange={(e) => setOwnershipDocType(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 >
-                  <option value="Electricity Utility Bill">Electricity Utility Bill (EKEDC / IBEDC matching address)</option>
+                  <option value="Electricity Utility Bill">Electricity Utility Bill (KEDCO matching address)</option>
                   <option value="Deed of Assignment">Deed of Assignment</option>
                   <option value="Certificate of Occupancy (C of O)">Certificate of Occupancy (C of O)</option>
                   <option value="Power of Attorney / Management Mandate">Power of Attorney / Management Mandate</option>
@@ -161,19 +229,39 @@ export const LandlordVerificationPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
-                  Upload Document Scan / Photo
+                  Upload Document Scan / Photo (JPEG, PNG, or PDF, max 10 MB)
                 </label>
                 <input
                   type="file"
-                  className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs"
+                  required
+                  disabled={submitting}
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  onChange={handleFileChange}
+                  className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
                 />
+                {fileName && <span className="text-[11px] text-emerald-600 block">Attached: {fileName}</span>}
               </div>
+
+              {error && (
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition"
+                disabled={submitting || !file}
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                Submit Credentials for Review
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Uploading Credentials...</span>
+                  </>
+                ) : (
+                  <span>Submit Credentials for Review</span>
+                )}
               </button>
             </form>
           )}

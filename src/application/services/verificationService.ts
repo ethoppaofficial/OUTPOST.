@@ -90,13 +90,18 @@ class VerificationService {
       : userIdOrData;
     const rawData = isSingleObject ? userIdOrData : (possibleData || {});
 
+    const docUrl = rawData.documentUrl || rawData.idDocumentUrl || rawData.proofOfOwnershipUrl || '';
+    if (!docUrl) {
+      throw new Error('Verification document URL is required. Physical credential upload must succeed before submission.');
+    }
+
     const data = {
       legalName: rawData.legalName || 'Landlord',
       phone: rawData.phone || '+234 802 345 6789',
-      contactAddress: rawData.contactAddress || 'Central District, Metro City',
+      contactAddress: rawData.contactAddress || 'Danbare / Rimin Gata Accommodation Corridor, Kano',
       idType: rawData.idType || 'National ID (NIN)',
-      idReference: rawData.idReference || rawData.idNumber || 'NIN-8291048291',
-      documentUrl: rawData.documentUrl || rawData.idDocumentUrl || rawData.proofOfOwnershipUrl || 'https://outpost-storage.ng/docs/landlord_nin.pdf',
+      idReference: rawData.idReference || rawData.idNumber || 'NIN-REQUIRED',
+      documentUrl: docUrl,
       businessName: rawData.businessName,
     };
 
@@ -126,7 +131,7 @@ class VerificationService {
       link: '/admin/landlord-verifications',
     });
 
-    return updated;
+    return Object.assign(updated, { success: true });
   }
 
   public getAllPendingLandlords(): LandlordProfile[] {

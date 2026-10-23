@@ -150,29 +150,34 @@ export const InvoicePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Bank Wire Payment Details */}
-        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-          <div className="flex items-center gap-2 text-slate-900 font-bold">
+        {/* Direct Landlord Bank Payment Details */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
             <Building2 className="w-4 h-4 text-emerald-600" />
-            <span>Bank Transfer Instructions</span>
+            <span>Landlord Direct Bank Transfer Instructions</span>
           </div>
-          <p className="text-[11px] text-slate-600">
-            Please make transfer to the following verified escrow account:
+          <p className="text-[11px] text-slate-600 dark:text-slate-400">
+            Please make transfer directly to the verified landlord account below:
           </p>
-          <div className="grid grid-cols-3 gap-2 font-mono text-xs pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs pt-1">
             <div>
               <span className="text-slate-400 text-[10px] block">Bank:</span>
-              <span className="font-bold">GTBank</span>
+              <span className="font-bold">{invoice.bankDetails?.bankName || 'Direct Landlord Bank'}</span>
             </div>
             <div>
               <span className="text-slate-400 text-[10px] block">Account No:</span>
-              <span className="font-bold text-emerald-600">0249182391</span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">{invoice.bankDetails?.accountNumber || 'Contact Landlord'}</span>
             </div>
             <div>
               <span className="text-slate-400 text-[10px] block">Payment Ref:</span>
               <span className="font-bold">{invoice.invoiceNumber}</span>
             </div>
           </div>
+          {invoice.bankDetails?.accountName && (
+            <p className="text-[11px] text-slate-500 pt-1">
+              Account Name: <strong className="text-slate-700 dark:text-slate-300">{invoice.bankDetails.accountName}</strong>
+            </p>
+          )}
         </div>
 
         {/* Footer notes */}

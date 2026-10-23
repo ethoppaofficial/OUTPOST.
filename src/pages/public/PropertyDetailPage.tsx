@@ -446,7 +446,7 @@ export const PropertyDetailPage: React.FC = () => {
 
           <ul className="space-y-1.5 text-slate-500 dark:text-slate-400 text-[11px] list-disc list-inside">
             <li>Your space is held for exactly 7 days from now.</li>
-            <li>You will receive an official invoice with landlord GTBank account details.</li>
+            <li>You will receive an official invoice with verified landlord direct bank payment details.</li>
             <li>After making external payment, upload your bank transfer receipt.</li>
             <li>If payment receipt is not approved within 7 days, the hold releases automatically.</li>
           </ul>

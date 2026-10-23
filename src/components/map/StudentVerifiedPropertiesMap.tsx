@@ -233,12 +233,17 @@ export const StudentVerifiedPropertiesMap: React.FC<
           .select(`
             id,
             title,
+            area,
+            address,
+            landmark,
             property_type,
             rental_fee_annual,
             available_spaces,
             total_spaces,
             approval_status,
             is_published,
+            images,
+            featured_image_url,
             property_locations (
               public_latitude,
               public_longitude,
@@ -250,30 +255,58 @@ export const StudentVerifiedPropertiesMap: React.FC<
           .eq('approval_status', 'approved')
           .eq('is_published', true);
 
-        if (!error && data && data.length > 0) {
-          const mapProps: VerifiedMapProperty[] = data.map((p: any) => ({
-            id: p.id,
-            title: p.title,
-            area: 'Dambare' as HousingArea,
-            publicLatitude: Number(p.property_locations?.[0]?.public_latitude || 11.9842),
-            publicLongitude: Number(p.property_locations?.[0]?.public_longitude || 8.4187),
-            publicLocationPrecision: p.property_locations?.[0]?.precision || 'nearby_building',
-            publicLocationLabel: 'Verified in Dambare',
-            propertyType: p.property_type || 'self_contained',
-            accommodationType: 'off_campus',
-            pricePerSession: Number(p.rental_fee_annual || 250000),
-            currency: 'NGN',
-            availableSpaces: p.available_spaces || 1,
-            totalCapacity: p.total_spaces || 1,
-            images: [],
-            slug: p.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-            fullAddress: p.property_locations?.[0]?.formatted_address || 'Kano State',
-          }));
+        if (error) {
+          setError('Could not fetch verified properties from live database. Showing available verified listings from local cache.');
+          loadFallbackFromRepository();
+          return;
+        }
+
+        if (data && data.length > 0) {
+          // Privacy & Integrity Rules:
+          // 1. Never map all properties to Dambare by default; respect actual area (Dambare or Rimin Gata).
+          // 2. Never invent coordinates (e.g. 11.9842, 8.4187) or prices. Properties without verified
+          //    public coordinates are retained for textual discovery but omitted from the map pin canvas.
+          const mapProps: VerifiedMapProperty[] = data
+            .filter((p: any) => {
+              const loc = p.property_locations?.[0];
+              const validLat = typeof loc?.public_latitude === 'number' && Number.isFinite(loc.public_latitude);
+              const validLng = typeof loc?.public_longitude === 'number' && Number.isFinite(loc.public_longitude);
+              return validLat && validLng && ['Dambare', 'Rimin Gata'].includes(p.area);
+            })
+            .map((p: any) => {
+              const loc = p.property_locations?.[0];
+              const propArea: HousingArea = p.area === 'Rimin Gata' ? 'Rimin Gata' : 'Dambare';
+              const imgList = Array.isArray(p.images) && p.images.length > 0
+                ? p.images
+                : (p.featured_image_url ? [p.featured_image_url] : []);
+
+              return {
+                id: p.id,
+                title: p.title || 'Student Accommodation',
+                area: propArea,
+                publicLatitude: Number(loc.public_latitude),
+                publicLongitude: Number(loc.public_longitude),
+                publicLocationPrecision: loc.precision || 'nearby_building',
+                publicLocationLabel: `Verified in ${propArea}`,
+                propertyType: p.property_type || 'self_contained',
+                accommodationType: 'off_campus',
+                pricePerSession: typeof p.rental_fee_annual === 'number' ? p.rental_fee_annual : undefined,
+                currency: 'NGN',
+                availableSpaces: typeof p.available_spaces === 'number' ? p.available_spaces : undefined,
+                totalCapacity: typeof p.total_spaces === 'number' ? p.total_spaces : undefined,
+                images: imgList,
+                slug: (p.title || 'property').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+                fullAddress: p.address || loc.formatted_address || `${propArea}, Kano State`,
+                nearestLandmark: p.landmark || undefined,
+              };
+            });
+
           setProperties(mapProps);
         } else {
           loadFallbackFromRepository();
         }
-      } catch {
+      } catch (err: unknown) {
+        setError('Map data synchronization interrupted. Textual listings remain fully accessible.');
         loadFallbackFromRepository();
       } finally {
         setLoading(false);

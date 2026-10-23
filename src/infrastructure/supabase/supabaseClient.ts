@@ -1,24 +1,24 @@
+/**
+ * @file supabaseClient.ts
+ * @module infrastructure/supabase/supabaseClient
+ * @description Master Supabase client instance and Edge Function invocation helper.
+ *
+ * Security Rationale:
+ * - Uses validated configuration from `appConfig`.
+ * - In production, startup without valid credentials is fully blocked.
+ * - Handles JWT bearer pass-through automatically via Supabase client headers.
+ */
+
 import { createClient } from '@supabase/supabase-js';
+import { appConfig } from '../config/appConfig';
 
-const env: Record<string, string | undefined> =
-  typeof import.meta !== 'undefined' && (import.meta as any).env
-    ? (import.meta as any).env
-    : (typeof process !== 'undefined' && process.env ? process.env : {});
-
-const supabaseUrl =
-  env.VITE_SUPABASE_URL ||
-  env.NEXT_PUBLIC_SUPABASE_URL ||
-  'http://127.0.0.1:54321';
-
-const supabaseAnonKey =
-  env.VITE_SUPABASE_ANON_KEY ||
-  env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_key';
+const supabaseUrl = appConfig.supabase.url || 'http://127.0.0.1:54321';
+const supabaseAnonKey = appConfig.supabase.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_test_key';
 
 export const isSupabaseConfigured = Boolean(
-  (env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL) &&
-  (env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY)
+  appConfig.supabase.url &&
+  appConfig.supabase.anonKey &&
+  !appConfig.validationError
 );
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

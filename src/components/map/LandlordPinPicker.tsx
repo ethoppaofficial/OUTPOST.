@@ -9,6 +9,7 @@ import {
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
+import { requestCurrentDevicePosition } from '../../application/services/geolocationService';
 import { MapPin, Shield, Check, Navigation, AlertTriangle } from 'lucide-react';
 
 interface LandlordPinPickerProps {
@@ -202,26 +203,21 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     updateCoordinates(currentLat, currentLng, area, newPrecision);
   };
 
-  const handleDeviceGPS = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
-      return;
-    }
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        if (markerRef.current && mapRef.current) {
-          markerRef.current.setLngLat([longitude, latitude]);
-          mapRef.current.flyTo({ center: [longitude, latitude], zoom: 17 });
-          updateCoordinates(latitude, longitude, area, precision);
-        }
-      },
-      (err) => {
-        alert(`Location permission denied or unavailable: ${err.message}. Place marker manually.`);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+  const handleDeviceGPS = async () => {
+    setGpsError(null);
+    try {
+      const pos = await requestCurrentDevicePosition();
+      const { latitude, longitude } = pos;
+      if (markerRef.current && mapRef.current) {
+        markerRef.current.setLngLat([longitude, latitude]);
+        mapRef.current.flyTo({ center: [longitude, latitude], zoom: 17 });
+        updateCoordinates(latitude, longitude, area, precision);
+      }
+    } catch (err: any) {
+      setGpsError(err?.message || 'Device location unavailable. Please place marker manually.');
+    }
   };
 
   const geohash = encodeGeohash(currentLat, currentLng);
@@ -267,6 +263,13 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
           </button>
         )}
       </div>
+
+      {gpsError && (
+        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>{gpsError}</span>
+        </div>
+      )}
 
       {/* Privacy & Precision Control */}
       <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2.5">

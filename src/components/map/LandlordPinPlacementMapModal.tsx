@@ -16,6 +16,7 @@ import {
   getPrecisionLabel,
   reverseGeocodeCoordinates,
 } from '../../application/services/geocodingService';
+import { requestCurrentDevicePosition, type GeolocationErrorResult } from '../../application/services/geolocationService';
 import type { GeocodingSuggestion } from '../../domain/types';
 import { Search, MapPin, Navigation, AlertTriangle, Check, Key, Loader2, X, ExternalLink } from 'lucide-react';
 
@@ -365,58 +366,43 @@ export const LandlordPinPlacementMapModal: React.FC<
     setError(null);
   }, [initialArea, initialLocation, isOpen]);
 
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setError('This browser does not support location access. Place the pin manually.');
-      return;
-    }
-
+  const handleUseCurrentLocation = async () => {
     setIsLocating(true);
     setError(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const existingMarker = markerRef.current;
+    try {
+      const position = await requestCurrentDevicePosition();
+      const { latitude, longitude, accuracyMeters } = position;
+      const existingMarker = markerRef.current;
 
-        if (existingMarker) {
-          existingMarker.setLngLat([longitude, latitude]);
-        } else if (mapRef.current) {
-          const marker = new maplibregl.Marker({
-            element: createMarkerElement(),
-            draggable: true,
-          })
-            .setLngLat([longitude, latitude])
-            .addTo(mapRef.current);
+      if (existingMarker) {
+        existingMarker.setLngLat([longitude, latitude]);
+      } else if (mapRef.current) {
+        const marker = new maplibregl.Marker({
+          element: createMarkerElement(),
+          draggable: true,
+        })
+          .setLngLat([longitude, latitude])
+          .addTo(mapRef.current);
 
-          marker.on('dragend', () => {
-            const positionAfterDrag = marker.getLngLat();
-            void setSelectedLocation(
-              positionAfterDrag.lat,
-              positionAfterDrag.lng,
-              'manual_pin',
-            );
-          });
-          markerRef.current = marker;
-        }
+        marker.on('dragend', () => {
+          const positionAfterDrag = marker.getLngLat();
+          void setSelectedLocation(
+            positionAfterDrag.lat,
+            positionAfterDrag.lng,
+            'manual_pin',
+          );
+        });
+        markerRef.current = marker;
+      }
 
-        void setSelectedLocation(latitude, longitude, 'device_gps', accuracy);
-        setIsLocating(false);
-      },
-      (geolocationError) => {
-        setIsLocating(false);
-        setError(
-          geolocationError.code === geolocationError.PERMISSION_DENIED
-            ? 'Location permission was denied. You can still place or search the pin manually.'
-            : 'Your current location could not be determined. Please place the pin manually.',
-        );
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      },
-    );
+      void setSelectedLocation(latitude, longitude, 'device_gps', accuracyMeters);
+    } catch (err: unknown) {
+      const geoErr = err as GeolocationErrorResult;
+      setError(geoErr?.message || 'Your current location could not be determined. Please place the pin manually.');
+    } finally {
+      setIsLocating(false);
+    }
   };
 
   const handleSaveManualKey = (e: React.FormEvent) => {

@@ -45,28 +45,21 @@ export const NewPropertyPage: React.FC = () => {
   const [city, setCity] = useState('Kano');
   const [distanceKm, setDistanceKm] = useState(0.5);
 
+  const [hasCustomCoordinates, setHasCustomCoordinates] = useState(false);
   const [locationData, setLocationData] = useState<{
     area: HousingArea;
-    latitude: number;
-    longitude: number;
+    latitude?: number;
+    longitude?: number;
     geohash: string;
     precision: LocationPrecision;
-    publicLatitude: number;
-    publicLongitude: number;
+    publicLatitude?: number;
+    publicLongitude?: number;
     publicLocationLabel: string;
-  }>(() => {
-    const defaultCoords = AREA_CENTERS.Dambare;
-    const pub = computePublicCoordinates(defaultCoords.latitude, defaultCoords.longitude, 'nearby_building', 'Dambare');
-    return {
-      area: 'Dambare',
-      latitude: defaultCoords.latitude,
-      longitude: defaultCoords.longitude,
-      geohash: encodeGeohash(defaultCoords.latitude, defaultCoords.longitude),
-      precision: 'nearby_building',
-      publicLatitude: pub.publicLatitude,
-      publicLongitude: pub.publicLongitude,
-      publicLocationLabel: pub.publicLocationLabel,
-    };
+  }>({
+    area: 'Dambare',
+    geohash: '',
+    precision: 'neighbourhood',
+    publicLocationLabel: 'Dambare (Approximate Corridor)',
   });
 
   const [propertyType, setPropertyType] = useState('Hostel');
@@ -154,6 +147,7 @@ export const NewPropertyPage: React.FC = () => {
         publicLocationLabel: pub.publicLocationLabel,
       });
 
+      setHasCustomCoordinates(true);
       setDeviceLocationCaptured(true);
       setGeocodingSuccess(
         `Property location captured successfully from your device (GPS accuracy: ~${Math.round(position.accuracyMeters || 10)}m). This point will be stored privately and used only for approximate nearby search after administrator verification.`
@@ -216,6 +210,7 @@ export const NewPropertyPage: React.FC = () => {
       publicLocationLabel: pub.publicLocationLabel,
     });
 
+    setHasCustomCoordinates(true);
     setAddress(suggestion.placeName);
     setAddressSuggestions([]);
     setGeocodingSuccess(`Marker positioned at: ${suggestion.placeName}`);
@@ -247,8 +242,13 @@ export const NewPropertyPage: React.FC = () => {
     e.preventDefault();
     setError(null);
 
-    if (!title.trim() || !address.trim()) {
-      setError('Please provide property title and physical address.');
+    if (!title.trim()) {
+      setError('Please provide property title.');
+      return;
+    }
+
+    if (!address.trim() || !streetOrRoad.trim() || !nearestLandmark.trim() || !directions.trim()) {
+      setError('Physical address, street/road, nearest landmark, and walking directions are strictly required before submitting.');
       return;
     }
 
@@ -263,6 +263,14 @@ export const NewPropertyPage: React.FC = () => {
       .split('\n')
       .map((r) => r.trim())
       .filter(Boolean);
+
+    const hasValidCoords = Boolean(
+      hasCustomCoordinates &&
+      typeof locationData.latitude === 'number' &&
+      typeof locationData.longitude === 'number' &&
+      Number.isFinite(locationData.latitude) &&
+      Number.isFinite(locationData.longitude)
+    );
 
     const newProp = propertyService.createProperty({
       id: propertyDraftId,
@@ -295,13 +303,13 @@ export const NewPropertyPage: React.FC = () => {
       utilitiesIncluded,
       totalCapacity: Number(roomCapacity),
       availableSpaces: Number(roomCapacity),
-      latitude: locationData.latitude,
-      longitude: locationData.longitude,
-      publicLatitude: locationData.publicLatitude,
-      publicLongitude: locationData.publicLongitude,
-      locationSource: 'manual_pin',
+      latitude: hasValidCoords ? locationData.latitude : undefined,
+      longitude: hasValidCoords ? locationData.longitude : undefined,
+      publicLatitude: undefined,
+      publicLongitude: undefined,
+      locationSource: hasValidCoords ? 'manual_pin' : 'unspecified',
       locationPrecision: locationData.precision,
-      locationVerificationStatus: 'pending',
+      locationVerificationStatus: hasValidCoords ? 'pending' : 'pending',
       location: {
         id: `loc-${Date.now()}`,
         propertyId: '',
@@ -315,15 +323,15 @@ export const NewPropertyPage: React.FC = () => {
         nearestLandmark: nearestLandmark.trim(),
         directions: directions.trim(),
         locationNote: locationNote.trim(),
-        latitude: locationData.latitude,
-        longitude: locationData.longitude,
-        geohash: locationData.geohash,
-        source: 'manual_pin',
+        latitude: hasValidCoords ? locationData.latitude! : (undefined as any),
+        longitude: hasValidCoords ? locationData.longitude! : (undefined as any),
+        geohash: hasValidCoords ? locationData.geohash : '',
+        source: hasValidCoords ? 'manual_pin' : ('unspecified' as any),
         verificationStatus: 'pending',
         locationVerificationStatus: 'pending',
         precision: locationData.precision,
-        publicLatitude: locationData.publicLatitude,
-        publicLongitude: locationData.publicLongitude,
+        publicLatitude: undefined,
+        publicLongitude: undefined,
         publicLocationLabel: locationData.publicLocationLabel,
         formattedAddress: address.trim(),
         submittedBy: session.user.id,
@@ -666,6 +674,7 @@ export const NewPropertyPage: React.FC = () => {
               initialPrecision={locationData.precision}
               onLocationChange={(loc) => {
                 setLocationData(loc);
+                setHasCustomCoordinates(true);
                 setNeighbourhood(loc.area);
               }}
             />
@@ -702,6 +711,7 @@ export const NewPropertyPage: React.FC = () => {
                 publicLongitude: pub.publicLongitude,
                 publicLocationLabel: pub.publicLocationLabel,
               });
+              setHasCustomCoordinates(true);
               if (newLoc.formattedAddress && !address) {
                 setAddress(newLoc.formattedAddress);
               }
