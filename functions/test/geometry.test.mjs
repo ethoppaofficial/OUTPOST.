@@ -7,7 +7,7 @@ import {
   bearingToCompassSector,
   calculateCoarseDirection,
   isValidCoordinate,
-} from '../lib/geometry.js';
+} from '../src/geometry.ts';
 
 test('Coordinate validation tests', () => {
   assert.strictEqual(isValidCoordinate(11.9808, 8.4235), true);
