@@ -37,7 +37,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { LOCATIONS, getLocationById } from '../../domain/locations';
 import { PropertyMap } from '../../components/map/PropertyMap';
 import { requestCurrentDevicePosition, GeolocationErrorResult } from '../../application/services/geolocationService';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 import { Compass, Loader2 } from 'lucide-react';
 import { appConfig } from '../../infrastructure/config/appConfig';
 import { NearbyAccommodationItem } from '../../application/services/propertyService';
@@ -64,7 +64,7 @@ export const PropertiesPage: React.FC = () => {
   const [hasError, setHasError] = useState(false);
 
   // Device-location nearby search state (sensitive, one-time only; never stored)
-  const { currentUser } = useFirebase();
+  const { currentUser } = useAuth();
   const [isLocating, setIsLocating] = useState(false);
   const [nearbyResults, setNearbyResults] = useState<NearbyAccommodationItem[] | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -133,7 +133,7 @@ export const PropertiesPage: React.FC = () => {
       // 2. Derive results from backend ranking
       if (appConfig.backendMode === 'mock') {
         setLocationError(
-          'Nearby ranking with trusted Cloud Functions requires live Firebase authentication. In demo/mock mode, please use manual settlement filters (Dambare or Rimin Gata).'
+          'Nearby ranking requires live Supabase authentication. In demo/mock mode, please use manual settlement filters (Dambare or Rimin Gata).'
         );
         setIsLocating(false);
         return;

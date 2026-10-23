@@ -45,7 +45,7 @@ import {
 import { notificationService } from '../../application/services/notificationService';
 import { chatService } from '../../application/services/chatService';
 import { ThemeToggle } from './ThemeToggle';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 
 export interface NavItem {
   id: string;
@@ -67,7 +67,7 @@ interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { currentUser, signOut } = useFirebase();
+  const { currentUser, signOut } = useAuth();
   const session = currentUser
     ? {
         user: currentUser,
@@ -128,7 +128,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     });
   };
 
-  // Notification badges follow the real Firebase-authenticated account.
+  // Notification badges follow the authenticated user account.
   useEffect(() => {
     refreshSession();
   }, [currentUser?.id]);

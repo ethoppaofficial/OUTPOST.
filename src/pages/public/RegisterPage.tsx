@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
-import { configValidationError, isFirebaseMode } from '../../infrastructure/config/appConfig';
+import { configValidationError, isSupabaseMode } from '../../infrastructure/config/appConfig';
 
 export const RegisterPage: React.FC = () => {
   const [role, setRole] = useState<'student' | 'landlord'>('student');
@@ -30,12 +30,12 @@ export const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
 
   const configError = configValidationError;
-  const isFirebaseMisconfigured = isFirebaseMode() && Boolean(configError);
+  const isSupabaseMisconfigured = !isSupabaseMode() || Boolean(configError);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isFirebaseMisconfigured) {
-      setError(configError || 'Firebase authentication is not configured.');
+    if (isSupabaseMisconfigured) {
+      setError(configError || 'Supabase authentication is not configured.');
       return;
     }
 
@@ -44,7 +44,7 @@ export const RegisterPage: React.FC = () => {
 
     try {
       if (role === 'student') {
-        const res = await authService.registerStudentWithFirebase({
+        const res = await authService.registerStudentWithSupabase({
           email,
           password,
           fullName,
@@ -64,7 +64,7 @@ export const RegisterPage: React.FC = () => {
           setError(res.error || 'Failed to complete student registration.');
         }
       } else {
-        const res = await authService.registerLandlordWithFirebase({
+        const res = await authService.registerLandlordWithSupabase({
           email,
           password,
           legalName: legalName || fullName,
@@ -100,11 +100,11 @@ export const RegisterPage: React.FC = () => {
         </p>
       </div>
 
-      {isFirebaseMisconfigured && (
+      {isSupabaseMisconfigured && (
         <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
           <div>
-            <span className="font-bold block">Firebase Authentication Unavailable</span>
+            <span className="font-bold block">Supabase Authentication Unavailable</span>
             <span>{configError}</span>
           </div>
         </div>
@@ -325,7 +325,7 @@ export const RegisterPage: React.FC = () => {
 
             <button
               type="submit"
-              disabled={submitting || isFirebaseMisconfigured}
+              disabled={submitting || isSupabaseMisconfigured}
               className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition shadow-md flex items-center justify-center gap-2"
             >
               <UserPlus className="w-4 h-4" />

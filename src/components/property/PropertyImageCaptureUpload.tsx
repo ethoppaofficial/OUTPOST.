@@ -14,7 +14,7 @@ import {
   Plus,
   Info
 } from 'lucide-react';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from '../../application/services/storageService';
 
 export interface PropertyImageCaptureUploadProps {
   images: string[];

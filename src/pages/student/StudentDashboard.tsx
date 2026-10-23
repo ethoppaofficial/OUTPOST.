@@ -28,7 +28,7 @@ import { reservationService } from '../../application/services/reservationServic
 import { roommateService } from '../../application/services/roommateService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge, ReservationStatusBadge } from '../../components/ui/Badge';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 
 /**
  * StudentDashboard Component
@@ -37,7 +37,7 @@ import { useFirebase } from '../../application/context/FirebaseContext';
  * active reservation holds, verification notices, and navigation to student actions.
  */
 export const StudentDashboard: React.FC = () => {
-  const { currentUser } = useFirebase();
+  const { currentUser } = useAuth();
   const session = authService.getSession();
   const student = authService.getCurrentStudentProfile();
   const reservations = reservationService.getStudentReservations(session.user.id);

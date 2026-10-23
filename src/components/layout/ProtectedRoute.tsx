@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 import { UserRole } from '../../domain/types';
 import { Loader2, Wrench } from 'lucide-react';
 
@@ -29,7 +29,7 @@ interface ProtectedRouteProps {
  * Route protection higher-order component checking authentication, role permissions, and maintenance status.
  */
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children }) => {
-  const { loading, currentUser, maintenanceMode, maintenanceLoaded } = useFirebase();
+  const { loading, currentUser, maintenanceMode, maintenanceLoaded } = useAuth();
   const location = useLocation();
 
   if (loading || (currentUser?.role !== 'admin' && !maintenanceLoaded)) {

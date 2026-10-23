@@ -14,11 +14,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { adminService } from '../../application/services/adminService';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 
 export const AdminLoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser, loading: sessionLoading, signOut, signInWithEmail } = useFirebase();
+  const { currentUser, loading: sessionLoading, signOut, signInWithEmail } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export const AdminLoginPage: React.FC = () => {
       const res = await authService.sendPasswordReset(targetEmail);
       if (res.success) {
         setResetSuccessMessage(
-          `A secure Firebase password reset link has been dispatched to ${targetEmail}. Please check your email inbox (and spam folder) to set your new password.`,
+          `A secure Supabase password reset link has been dispatched to ${targetEmail}. Please check your email inbox (and spam folder) to set your new password.`,
         );
       } else {
         setResetErrorMessage(res.error || 'Failed to dispatch password reset link.');

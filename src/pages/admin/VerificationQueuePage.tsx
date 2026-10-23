@@ -13,7 +13,7 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle, Loader2 } from 'lucide-react';
 import { adminService, AdminRecord } from '../../application/services/adminService';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from '../../application/services/storageService';
 import { Modal } from '../../components/ui/Modal';
 
 type Kind = 'student' | 'landlord';
@@ -104,7 +104,7 @@ export const VerificationQueuePage: React.FC = () => {
       <div className="flex rounded-xl bg-slate-100 p-1 text-sm font-semibold dark:bg-slate-800">
         {(['student', 'landlord'] as Kind[]).map((kind) => <button key={kind} type="button" onClick={() => setActiveTab(kind)} className={`flex-1 rounded-lg py-2.5 capitalize ${activeTab === kind ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white' : 'text-slate-500'}`}>{kind} submissions ({kind === 'student' ? students.length : landlords.length})</button>)}
       </div>
-      {loading ? <p className="text-sm text-slate-500">Loading Firebase submissions…</p> : queue.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No pending {activeTab} submissions.</div> : <div className="space-y-4">
+      {loading ? <p className="text-sm text-slate-500">Loading verification submissions…</p> : queue.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No pending {activeTab} submissions.</div> : <div className="space-y-4">
         {queue.map((item) => {
           const name = activeTab === 'student' ? item.fullName : item.legalName;
           const id = activeTab === 'student' ? item.id : item.userId || item.id;

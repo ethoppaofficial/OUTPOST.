@@ -16,7 +16,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { LogIn, AlertCircle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -24,7 +24,7 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
-  const { signInWithGoogle, connected, firebaseUser, signInWithEmail } = useFirebase();
+  const { signInWithGoogle, connected, authUser, signInWithEmail } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -138,7 +138,7 @@ export const LoginPage: React.FC = () => {
           <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
         </div>
 
-        {/* Firebase Google Auth Button */}
+        {/* Google Auth Button (Supabase Auth) */}
         <button
           type="button"
           onClick={handleGoogleSignIn}
@@ -166,13 +166,12 @@ export const LoginPage: React.FC = () => {
           <span>{googleLoading ? 'Connecting to Google…' : 'Continue with Google'}</span>
         </button>
 
-        {/* Firebase Status Badge (hidden per clean UI guidelines) */}
+        {/* Supabase Status Badge (hidden per clean UI guidelines) */}
         <div className="hidden" aria-hidden="true">
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-            <span className="font-medium text-slate-700 dark:text-slate-300">Firebase Firestore</span>
+            <span className="font-medium text-slate-700 dark:text-slate-300">Supabase Database</span>
           </div>
-          <span className="text-[10px] text-slate-400">gen-lang-client-0233398434 (europe-west2)</span>
         </div>
 
         <div className="text-center text-xs text-slate-500 pt-2">

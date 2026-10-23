@@ -12,7 +12,7 @@
  * Access Control & Route Protection:
  * - `ProtectedRoute`: Inspects active session, enforces authenticated login, role validation (`student` | `landlord` | `admin`),
  *   and redirects unauthorized visitors to `/unauthorized` or `/login`.
- * - Context Providers: Wrapped with `ThemeProvider` (dark/light mode) and `FirebaseProvider` (Supabase Auth & state bridge).
+ * - Context Providers: Wrapped with `ThemeProvider` (dark/light mode) and `AuthProvider` (Supabase Auth session provider).
  */
 
 import React from 'react';
@@ -65,12 +65,12 @@ import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
 import { AdminAccountPage } from './pages/admin/AdminAccountPage';
 import { ThemeProvider } from './application/context/ThemeContext';
-import { FirebaseProvider, useFirebase } from './application/context/FirebaseContext';
+import { AuthProvider, useAuth } from './application/context/AuthContext';
 import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
 import { configValidationError } from './infrastructure/config/appConfig';
 
 const ProfileRouteRedirect: React.FC = () => {
-  const { currentUser, loading } = useFirebase();
+  const { currentUser, loading } = useAuth();
   if (loading) return null;
   if (!currentUser) return <Navigate to="/login" replace />;
   if (currentUser.role === 'admin') return <Navigate to="/admin/account" replace />;
@@ -84,7 +84,7 @@ export default function App() {
   }
 
   return (
-    <FirebaseProvider>
+    <AuthProvider>
       <ThemeProvider>
         <BrowserRouter>
           <AppShell>
@@ -505,6 +505,6 @@ export default function App() {
           </AppShell>
         </BrowserRouter>
       </ThemeProvider>
-    </FirebaseProvider>
+    </AuthProvider>
   );
 }

@@ -14,7 +14,7 @@ import React, { useState } from 'react';
 import { CheckCircle2, XCircle, Clock, FileText, ExternalLink, ShieldCheck, AlertCircle, Eye, Loader2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
-import { storageService } from '../../infrastructure/firebase/storageService';
+import { storageService } from '../../application/services/storageService';
 import { PaymentReceipt } from '../../domain/types';
 import { ReceiptStatusBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';

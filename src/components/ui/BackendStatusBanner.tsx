@@ -1,6 +1,6 @@
 import React from 'react';
 import { Database, AlertTriangle, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 import { configValidationError } from '../../infrastructure/config/appConfig';
 
 export const ConfigErrorScreen: React.FC = () => {
@@ -36,7 +36,7 @@ export const ConfigErrorScreen: React.FC = () => {
 };
 
 export const BackendStatusBadge: React.FC = () => {
-  const { connected } = useFirebase();
+  const { connected } = useAuth();
 
   if (connected) {
     return (

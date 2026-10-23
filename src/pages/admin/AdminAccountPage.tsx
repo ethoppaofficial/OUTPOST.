@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { ShieldCheck, KeyRound, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 import { authService } from '../../application/services/authService';
 
 export const AdminAccountPage: React.FC = () => {
-  const { currentUser, firebaseUser } = useFirebase();
+  const { currentUser, authUser } = useAuth();
   const [sendingReset, setSendingReset] = useState(false);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
 
-  const adminEmail = firebaseUser?.email || currentUser?.email || '';
+  const adminEmail = authUser?.email || currentUser?.email || '';
 
   const handleSendResetEmail = async () => {
     if (!adminEmail) {

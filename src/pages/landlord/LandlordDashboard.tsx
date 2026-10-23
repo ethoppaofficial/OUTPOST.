@@ -17,7 +17,7 @@ import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
-import { useFirebase } from '../../application/context/FirebaseContext';
+import { useAuth } from '../../application/context/AuthContext';
 
 /**
  * LandlordDashboard Component
@@ -26,7 +26,7 @@ import { useFirebase } from '../../application/context/FirebaseContext';
  * and quick-action buttons for managing student accommodation listings.
  */
 export const LandlordDashboard: React.FC = () => {
-  const { currentUser } = useFirebase();
+  const { currentUser } = useAuth();
   const session = authService.getSession();
   const profile = authService.getCurrentLandlordProfile();
   const properties = propertyService.getLandlordProperties(session.user.id);

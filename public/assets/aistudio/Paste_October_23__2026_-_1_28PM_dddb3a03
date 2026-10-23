@@ -1,0 +1,1339 @@
+OUTPOST — Supabase-Only Cutover, Firebase Archive, Naming Cleanup, and Documentation Correction
+
+Copy this entire prompt into Google AI Studio
+
+Act as a senior React/TypeScript architect, Supabase engineer, security engineer, technical writer, and migration specialist.
+
+Inspect and modify the existing OUTPOST Student Housing and Accommodation project. The application has already been designed around Supabase, but the codebase still contains legacy Firebase files, imports, naming, deployment configuration, UI text, and contradictory documentation.
+
+Your task is to complete the Supabase-only frontend/application cleanup safely and accurately.
+
+Do not invent a new architecture. Do not migrate the project back to Firebase. Do not delete legacy Firebase materials before confirming that no active runtime path depends on them.
+
+The final application must declare Supabase as the only active backend. Firebase must be clearly marked as legacy/archive and must not initialize, receive reads, receive writes, authenticate users, or handle active storage operations.
+
+
+
+
+1. AUTHORITATIVE ARCHITECTURE
+
+The active OUTPOST backend is Supabase:
+
+•
+Supabase Auth
+
+•
+Supabase PostgreSQL
+
+•
+Supabase Row Level Security
+
+•
+Supabase Storage
+
+•
+Supabase Realtime
+
+•
+Supabase Edge Functions
+
+•
+PostgreSQL stored procedures and triggers
+
+The authoritative database files are:
+
+Plain Text
+
+
+supabase/migrations/20261020000001_initial_schema.sql
+supabase/migrations/20261020000002_row_level_security.sql
+supabase/migrations/20261020000003_storage_buckets_and_policies.sql
+supabase/migrations/20261020000004_functions_triggers_and_automation.sql
+
+
+
+Apply and document these migrations in the exact timestamp order shown above.
+
+Firebase is legacy/archive only. It is not an alternative runtime backend, fallback backend, authentication provider, database, storage provider, or active serverless-function provider.
+
+
+
+
+2. OPERATING SAFEGUARDS
+
+Before editing:
+
+1.
+Confirm the real repository root.
+
+2.
+Inspect git status, current branch, changed files, and untracked files.
+
+3.
+Preserve all user changes.
+
+4.
+Create a backup outside the repository before large-scale renaming.
+
+5.
+Do not expose or print secrets.
+
+6.
+Do not rotate credentials automatically.
+
+7.
+Do not run destructive database SQL.
+
+8.
+Do not execute:
+
+SQL
+
+
+DROP SCHEMA public CASCADE;
+DROP TABLE ... CASCADE;
+TRUNCATE;
+
+
+
+1.
+Do not delete the remote Supabase database.
+
+2.
+Do not deploy to production automatically.
+
+3.
+Do not remove Firebase files until active Firebase imports and runtime dependencies have been audited.
+
+4.
+Do not change product scope.
+
+5.
+Do not weaken Supabase RLS, Storage policies, authentication, or Edge Function authorization to make tests pass.
+
+
+
+
+3. REQUIRED END STATE
+
+The project must satisfy all of the following:
+
+•
+Supabase is the only active backend.
+
+•
+backendMode is permanently supabase for the application runtime.
+
+•
+No production code initializes Firebase.
+
+•
+No active frontend path reads or writes Firestore.
+
+•
+No active frontend path authenticates through Firebase Auth.
+
+•
+No active frontend path uploads to Firebase Storage.
+
+•
+No active application workflow calls Firebase Cloud Functions.
+
+•
+Firebase files are either archived outside active source paths or clearly marked legacy and excluded from builds.
+
+•
+Firebase is removed from active frontend dependencies when no active import remains.
+
+•
+Authentication context uses Supabase terminology.
+
+•
+All UI text says Supabase, Auth, PostgreSQL, Storage, or Edge Functions where appropriate.
+
+•
+Documentation identifies Supabase as authoritative.
+
+•
+Documentation explains why legacy Firebase files remain, if they are retained.
+
+•
+The project contains a clear backend deployment-status section.
+
+•
+Comments explain important migration and security decisions.
+
+•
+Typecheck, build, tests, and static scans pass.
+
+
+
+
+4. PHASE A — COMPLETE ACTIVE-BACKEND INVENTORY
+
+Inspect all of these locations:
+
+Plain Text
+
+
+src/**
+functions/**
+supabase/**
+firebase.json
+firebase-blueprint.json
+firebase-applet-config.json
+firestore.rules
+firestore.indexes.json
+storage.rules
+package.json
+package-lock.json
+functions/package.json
+README.md
+ADMIN_SETUP.md
+docs/**
+
+
+
+Search for all of the following terms:
+
+Plain Text
+
+
+firebase
+Firebase
+Firestore
+firestore
+FirebaseContext
+useFirebase
+firebaseUser
+firebaseConfig
+firebaseRepository
+firebaseAdmin
+firestoreService
+firebaseStorage
+getFirestore
+getAuth
+initializeApp
+firebase-functions
+firebase-admin
+firebase deploy
+firestore.rules
+storage.rules
+VITE_FIREBASE
+Firebase Authentication
+Firebase Firestore
+Firebase data
+
+
+
+Classify every match as one of:
+
+Plain Text
+
+
+ACTIVE RUNTIME
+LEGACY COMPATIBILITY
+ARCHIVE/DOCUMENTATION
+STALE TEXT
+TEST-ONLY
+UNUSED DEPENDENCY
+
+
+
+Do not rely only on filename names. Trace imports and execution paths.
+
+Produce an internal inventory before editing:
+
+Plain Text
+
+
+File
+Firebase reference
+Classification
+Imported by active runtime?
+Can it initialize Firebase?
+Can it read/write Firebase?
+Required action
+
+
+
+
+
+
+5. PHASE B — REMOVE FIREBASE FROM THE ACTIVE RUNTIME
+
+5.1 Repository selector
+
+Inspect:
+
+Plain Text
+
+
+src/infrastructure/repositories/index.ts
+
+
+
+The active selector must import and instantiate only the Supabase repository.
+
+Do not eagerly import the Firebase repository from the active selector.
+
+The active file should not do this:
+
+Plain Text
+
+
+import { FirebaseRepository } from './firebaseRepository';
+
+
+
+If backward compatibility is temporarily required, use a type-only reference or place Firebase behind a separate archive boundary that cannot be included in the normal Vite build.
+
+The active selector must make this clear:
+
+Plain Text
+
+
+export function getActiveRepository(): IRepository {
+  return supabaseRepository;
+}
+
+
+
+No Firebase repository should be constructed by the application.
+
+5.2 Firebase configuration isolation
+
+Inspect:
+
+Plain Text
+
+
+src/infrastructure/firebase/firebaseConfig.ts
+
+
+
+Ensure that no active frontend module imports this file.
+
+Do not allow the following to run in the active browser bundle:
+
+Plain Text
+
+
+initializeApp(...)
+getFirestore(...)
+getAuth(...)
+getStorage(...)
+getFunctions(...)
+
+
+
+If Firebase must be retained for historical reference:
+
+•
+Move it to an explicit archive directory outside the active src runtime path, or
+
+•
+Retain it only in a clearly marked legacy/firebase-archive/ directory excluded from builds.
+
+Add a README in the archive explaining that these files are not active and must not be reconnected without a deliberate migration decision.
+
+5.3 Firebase dependency removal
+
+After confirming no active imports remain:
+
+•
+Remove the firebase package from the frontend package.json.
+
+•
+Update package-lock.json.
+
+•
+Do not remove Firebase dependencies from the archive’s separate historical deployment package unless the archive is being permanently deleted.
+
+•
+Remove unused Firebase-only packages from the active frontend bundle.
+
+Run a fresh install after the dependency update.
+
+5.4 Firebase deployment files
+
+The following files must not be mistaken for the active deployment configuration:
+
+Plain Text
+
+
+firebase.json
+firestore.rules
+firestore.indexes.json
+storage.rules
+functions/
+
+
+
+Preferred outcome:
+
+Plain Text
+
+
+legacy/firebase-archive/firebase.json
+legacy/firebase-archive/firestore.rules
+legacy/firebase-archive/firestore.indexes.json
+legacy/firebase-archive/storage.rules
+legacy/firebase-archive/functions/**
+
+
+
+If moving them would break required tooling, retain them at the root but add an unmistakable archive marker and update documentation. In that case:
+
+•
+Do not include Firebase deploy commands in the main deployment instructions.
+
+•
+Do not describe functions/ as the active serverless API.
+
+•
+Do not let CI deploy Firebase by accident.
+
+•
+Add a guard that fails or warns if someone attempts a Firebase deployment from the main application workflow.
+
+Do not delete the Firebase archive without explicit approval.
+
+
+
+
+6. PHASE C — RENAME AUTHENTICATION CONTEXT SAFELY
+
+The current compatibility names are misleading:
+
+Plain Text
+
+
+FirebaseContext
+FirebaseProvider
+useFirebase()
+firebaseUser
+
+
+
+Rename them to Supabase-neutral authentication names.
+
+Preferred names:
+
+Plain Text
+
+
+AuthContext
+AuthProvider
+useAuth()
+authenticatedUser
+
+
+
+Alternative acceptable names:
+
+Plain Text
+
+
+SupabaseAuthContext
+SupabaseAuthProvider
+useSupabaseAuth()
+supabaseUser
+
+
+
+Use the neutral AuthContext naming unless the project intentionally wants to expose Supabase in the name.
+
+Update all imports and usages across:
+
+Plain Text
+
+
+src/App.tsx
+src/application/context/**
+src/components/**
+src/pages/**
+src/application/services/**
+
+
+
+The context must use:
+
+Plain Text
+
+
+supabase.auth.onAuthStateChange()
+supabase.auth.signInWithPassword()
+supabase.auth.signInWithOAuth()
+supabase.auth.signOut()
+
+
+
+Do not leave an active compatibility provider whose name says Firebase unless there is a documented temporary reason.
+
+If a temporary compatibility alias is required:
+
+Plain Text
+
+
+export const useFirebase = useAuth;
+
+
+
+then:
+
+•
+Mark it deprecated with JSDoc.
+
+•
+Ensure it does not import Firebase.
+
+•
+Add a migration comment.
+
+•
+Do not use it in new code.
+
+•
+Update all existing application consumers to useAuth().
+
+•
+Remove the alias after all consumers are migrated.
+
+Update interface names too:
+
+Plain Text
+
+
+firebaseUser → authUser or supabaseUser
+firestoreDatabaseId → remove or replace with database/environment metadata
+
+
+
+Do not keep misleading Firestore concepts in the Supabase auth context.
+
+
+
+
+7. PHASE D — RENAME STORAGE AND SERVICE COMPATIBILITY PATHS
+
+Inspect:
+
+Plain Text
+
+
+src/infrastructure/firebase/storageService.ts
+src/application/services/storageService.ts
+src/components/property/PropertyImageCaptureUpload.tsx
+src/pages/admin/VerificationQueuePage.tsx
+src/pages/landlord/LandlordReceiptsPage.tsx
+
+
+
+The active storage path must use:
+
+Plain Text
+
+
+src/infrastructure/supabase/supabaseStorageService.ts
+
+
+
+Update all active imports to use the Supabase storage service or a provider-neutral storageService facade that delegates only to Supabase.
+
+Remove or archive the file:
+
+Plain Text
+
+
+src/infrastructure/firebase/storageService.ts
+
+
+
+Do not keep a file in a Firebase directory that silently delegates to Supabase unless there is a documented and temporary compatibility reason. Such a file causes future developers to use the wrong provider.
+
+Critical security requirement:
+
+•
+Do not retain direct-upload fallback paths for payment receipts or private chat attachments when a secure Supabase Edge Function upload session fails.
+
+•
+Fail visibly and require retry.
+
+•
+Do not silently downgrade to an uncontrolled upload workflow.
+
+
+
+
+8. PHASE E — REMOVE STALE FIREBASE UI TEXT
+
+Search all visible UI strings, labels, aria labels, tooltips, error messages, loading states, and help text.
+
+Replace incorrect text such as:
+
+Plain Text
+
+
+Firebase Authentication
+Firebase Firestore
+Firebase property records
+Firebase user profiles
+Loading Firebase data
+Firebase configuration
+Firebase password reset link
+Firebase Google Auth
+
+
+
+With accurate terms such as:
+
+Plain Text
+
+
+Supabase Authentication
+Supabase database records
+Supabase user profiles
+Loading live platform data
+Supabase configuration
+Supabase password reset email
+Google sign-in through Supabase Auth
+
+
+
+Inspect at minimum:
+
+Plain Text
+
+
+src/pages/public/LoginPage.tsx
+src/pages/public/RegisterPage.tsx
+src/pages/public/AdminLoginPage.tsx
+src/pages/admin/AdminDashboard.tsx
+src/pages/admin/AdminReportsPage.tsx
+src/pages/admin/AdminSettingsPage.tsx
+src/pages/admin/DisputesPage.tsx
+src/pages/admin/PropertyApprovalsPage.tsx
+src/pages/admin/UsersPage.tsx
+src/pages/admin/VerificationQueuePage.tsx
+src/components/layout/AppShell.tsx
+src/components/layout/ProtectedRoute.tsx
+src/components/ui/BackendStatusBanner.tsx
+src/pages/public/PropertiesPage.tsx
+src/pages/landlord/NewPropertyPage.tsx
+
+
+
+Do not replace Firebase text with Supabase text if the screen is actually referring to the archive. In that case use:
+
+Plain Text
+
+
+Legacy Firebase archive
+Historical Firebase migration materials
+
+
+
+
+
+
+9. PHASE F — FIX ACTIVE SUPABASE CONFIGURATION
+
+Inspect:
+
+Plain Text
+
+
+src/infrastructure/config/appConfig.ts
+src/infrastructure/supabase/supabaseClient.ts
+.env.example
+.env.local
+.gitignore
+
+
+
+Requirements:
+
+1.
+Supabase is the only runtime backend mode.
+
+2.
+Remove firebase and mock as production backend options.
+
+3.
+Do not create a browser Supabase client with fake localhost credentials outside test-only code.
+
+4.
+Do not create a client if required production configuration is missing.
+
+5.
+Use canonical variables:
+
+Plain Text
+
+
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+
+
+
+1.
+A publishable/anon key may be exposed to the browser, but service-role keys may not.
+
+2.
+Never reference these in client code:
+
+Plain Text
+
+
+SUPABASE_SERVICE_ROLE_KEY
+service_role
+DATABASE_URL with credentials
+JWT secret
+
+
+
+1.
+Do not log credentials.
+
+2.
+.env.local must remain ignored.
+
+3.
+.env.local must not be added to the repository or archive.
+
+4.
+Update .env.example to document only active Supabase and other genuinely required public client variables.
+
+5.
+Move Firebase environment variables to the archive documentation instead of presenting them as active configuration.
+
+
+
+
+10. PHASE G — DOCUMENTATION CORRECTION
+
+Update these files:
+
+Plain Text
+
+
+README.md
+ADMIN_SETUP.md
+docs/ARCHITECTURE.md
+docs/architecture.md
+docs/CODEBASE_GUIDE.md
+docs/DATABASE.md
+docs/DEVELOPMENT.md
+docs/KNOWN_ISSUES.md
+docs/SECURITY.md
+docs/WORKFLOWS.md
+docs/backend-migration.md
+docs/data-model.md
+docs/API.md
+
+
+
+10.1 Single authoritative backend statement
+
+Add this near the beginning of the main README and architecture document:
+
+Plain Text
+
+
+## Authoritative Backend
+
+OUTPOST uses Supabase as its only active backend:
+
+- Supabase Auth for authentication and sessions.
+- Supabase PostgreSQL for relational persistence.
+- PostgreSQL Row Level Security for database authorization.
+- Supabase Storage for files and media.
+- Supabase Realtime for live messaging and notifications.
+- Supabase Edge Functions and PostgreSQL procedures for privileged workflows.
+
+Firebase is legacy/archive material only. It is not used by the active application for authentication, database reads or writes, storage, realtime communication, or server-side workflows.
+
+
+
+10.2 Authoritative migrations section
+
+Add this section:
+
+Plain Text
+
+
+## Authoritative Database Migrations
+
+The authoritative database schema and security definitions are the timestamped Supabase migrations in `supabase/migrations/`.
+
+Apply them sequentially:
+
+1. `20261020000001_initial_schema.sql`
+2. `20261020000002_row_level_security.sql`
+3. `20261020000003_storage_buckets_and_policies.sql`
+4. `20261020000004_functions_triggers_and_automation.sql`
+
+Do not use the archived Firebase Firestore rules, Firestore indexes, Firebase Storage rules, or Firebase Cloud Functions as the active backend contract.
+
+
+
+10.3 Required backend deployment-status section
+
+Add and maintain this section in README.md and docs/DEVELOPMENT.md:
+
+Plain Text
+
+
+## Backend Deployment Status
+
+| Component | Provider | Status | Verification method | Remaining action |
+|---|---|---|---|---|
+| Authentication | Supabase Auth | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [record evidence] | [action] |
+| PostgreSQL schema | Supabase PostgreSQL | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [migration/query evidence] | [action] |
+| Row Level Security | Supabase PostgreSQL | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [policy verification evidence] | [action] |
+| Storage buckets | Supabase Storage | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [bucket/policy evidence] | [action] |
+| Realtime | Supabase Realtime | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [channel/subscription evidence] | [action] |
+| Edge Functions | Supabase Edge Functions | [DEPLOYED / NOT DEPLOYED / UNKNOWN] | [function list/invocation evidence] | [action] |
+| Reservation expiry scheduler | pg_cron or external scheduler | [CONFIGURED / NOT CONFIGURED / UNKNOWN] | [job/invocation evidence] | [action] |
+
+
+
+Do not fill DEPLOYED merely because source files exist. Source files mean PREPARED, not deployed.
+
+Do not fill CONFIGURED merely because a SQL migration contains a pg_cron attempt. Verify that the remote scheduler job exists and has executed successfully.
+
+10.4 Single Firebase migration/archive note
+
+Add this exact concept to the documentation:
+
+Plain Text
+
+
+## Legacy Firebase Archive Note
+
+The repository retains selected Firebase configuration, Firestore rules, Storage rules, and Cloud Function files for historical migration traceability and rollback analysis. These files are not part of the active OUTPOST runtime and must not be deployed or imported by the active frontend. Supabase is the only supported backend. The archive may be removed after production acceptance testing, backup verification, and explicit maintainer approval.
+
+
+
+Remove contradictory statements that say Firebase is active.
+
+
+
+
+11. PHASE H — UPDATE COMMENTS AND CODE DOCUMENTATION
+
+Every retained compatibility boundary must have a concise comment explaining:
+
+•
+Why the file still exists.
+
+•
+Whether it can be imported by the active runtime.
+
+•
+Whether it can be deployed.
+
+•
+What the replacement Supabase file is.
+
+•
+When it can be removed.
+
+Use JSDoc such as:
+
+Plain Text
+
+
+/**
+ * Legacy archive only.
+ *
+ * This module is retained for historical Firebase migration reference.
+ * It must not be imported by the active OUTPOST application and must not
+ * be deployed as part of the Supabase production backend.
+ *
+ * Active replacement:
+ * - Supabase Auth: src/application/context/AuthContext.tsx
+ * - Supabase repository: src/infrastructure/supabase/supabaseRepository.ts
+ * - Supabase storage: src/infrastructure/supabase/supabaseStorageService.ts
+ */
+
+
+
+For the active Supabase files, document:
+
+•
+Authoritative data source.
+
+•
+Trust boundary.
+
+•
+Failure behavior.
+
+•
+RLS/backend dependency.
+
+•
+Whether the method is safe for direct client invocation.
+
+•
+Whether the operation must use an Edge Function or stored procedure.
+
+Do not leave comments saying “Firebase” in active Supabase behavior unless they explicitly identify a legacy compatibility/archive reason.
+
+
+
+
+12. PHASE I — SECURITY AND BUG CHECKS
+
+While performing the cleanup, check and fix the following:
+
+12.1 Client secrets
+
+Search for and fail the build if any of these appear in active frontend code:
+
+Plain Text
+
+
+SUPABASE_SERVICE_ROLE_KEY
+service_role key
+private key
+database password
+JWT secret
+
+
+
+Public Supabase URL and anon/publishable key are allowed in client configuration.
+
+12.2 Fake configuration fallback
+
+Remove production fallbacks such as:
+
+Plain Text
+
+
+http://127.0.0.1:54321
+anon_local_test_key
+
+
+
+These may exist only in isolated test setup.
+
+12.3 Direct private-file uploads
+
+Payment receipts, student documents, landlord documents, and chat attachments must use the intended secure Supabase Storage/Edge Function workflows.
+
+Do not silently fall back to uncontrolled direct upload after a secure workflow failure.
+
+12.4 Firebase accidental initialization
+
+Add a static check that fails if active src/** files import:
+
+Plain Text
+
+
+firebase/app
+firebase/auth
+firebase/firestore
+firebase/storage
+firebase/functions
+
+
+
+The only allowed Firebase references should be inside the explicitly marked archive, if retained.
+
+12.5 Stale data and cache
+
+Ensure the in-memory Supabase cache:
+
+•
+Is never treated as authorization.
+
+•
+Is cleared on logout/account switch.
+
+•
+Does not show successful mutation before Supabase confirmation.
+
+•
+Displays synchronization errors.
+
+•
+Does not fabricate records after backend failure.
+
+12.6 UI correctness
+
+Replace stale provider names in:
+
+•
+Loading states.
+
+•
+Empty states.
+
+•
+Error messages.
+
+•
+Help text.
+
+•
+Tooltips.
+
+•
+Accessibility labels.
+
+•
+Administrator instructions.
+
+•
+Login and password reset messages.
+
+
+
+
+13. TESTS AND VALIDATION
+
+Use the project’s existing test framework and add meaningful tests.
+
+Add tests proving:
+
+1.
+Active application imports Supabase, not Firebase.
+
+2.
+Firebase files are not included in the active Vite bundle.
+
+3.
+No active source file imports Firebase SDK modules.
+
+4.
+The active repository is SupabaseRepository.
+
+5.
+The active storage service is SupabaseStorageService.
+
+6.
+Authentication uses Supabase Auth.
+
+7.
+No service-role key appears in client source or production bundle.
+
+8.
+Fake localhost Supabase credentials are unavailable in production runtime.
+
+9.
+.env.local is ignored and not tracked.
+
+10.
+Stale Firebase UI text is absent from active pages.
+
+11.
+Supabase migration files are present in timestamp order.
+
+12.
+Documentation identifies Supabase as authoritative.
+
+13.
+Documentation contains the deployment-status table.
+
+14.
+Documentation contains one clear Firebase archive note.
+
+15.
+Firebase archive files, if retained, contain no active deployment instruction presented as current.
+
+Run:
+
+Bash
+
+
+npm ci
+npm run lint
+npm run build
+npm test
+npm audit --audit-level=high
+
+
+
+If the project has a separate functions package, inspect it separately. Do not run Firebase deployment commands as part of validation.
+
+Run static scans such as:
+
+Bash
+
+
+grep -RInE "from ['\"]firebase/|initializeApp|getFirestore|getAuth|firebase-admin|firebase-functions" src supabase --exclude-dir=node_modules
+
+
+
+Expected result:
+
+•
+No active Firebase imports under src.
+
+•
+Firebase references only under an explicitly marked archive or historical documentation.
+
+Inspect the generated bundle:
+
+Bash
+
+
+grep -RInE "firebase|firestore|firebaseapp|firebaseio" dist
+
+
+
+Any remaining match must be explained. The preferred result is no Firebase runtime code in dist.
+
+
+
+
+14. REQUIRED FINAL REPORT
+
+Return a complete report with these sections:
+
+A. Active backend determination
+
+State clearly:
+
+Plain Text
+
+
+Active backend: Supabase
+Firebase active at runtime: YES or NO
+Firebase files retained: YES or NO
+Firebase SDK included in active bundle: YES or NO
+
+
+
+B. Files changed
+
+List every changed, moved, archived, or deleted file.
+
+C. Firebase inventory
+
+For every remaining Firebase reference, state:
+
+Plain Text
+
+
+Path
+Reason retained
+Active or archive
+Can initialize Firebase?
+Can be deployed accidentally?
+Removal plan
+
+
+
+D. Naming migration
+
+List:
+
+Plain Text
+
+
+Old name
+New name
+Files updated
+Compatibility alias retained?
+Removal condition
+
+
+
+E. Documentation update
+
+Confirm:
+
+•
+Supabase-only architecture statement.
+
+•
+Authoritative migration section.
+
+•
+Backend deployment-status table.
+
+•
+Legacy Firebase archive note.
+
+•
+Contradictory Firebase-active statements removed.
+
+F. Security findings
+
+List any fixed or remaining issues involving:
+
+•
+Secrets.
+
+•
+Fake environment fallbacks.
+
+•
+Accidental Firebase initialization.
+
+•
+Private upload paths.
+
+•
+Storage access.
+
+•
+Realtime subscriptions.
+
+•
+Stale cache.
+
+•
+RLS/backend boundary.
+
+G. Verification results
+
+Use only these statuses:
+
+Plain Text
+
+
+PASS — executed and passed
+FAIL — executed and failed
+BLOCKED — could not execute, with reason
+NOT RUN — not attempted
+
+
+
+Report:
+
+•
+Dependency installation.
+
+•
+Typecheck.
+
+•
+Production build.
+
+•
+Tests.
+
+•
+Dependency audit.
+
+•
+Firebase import scan.
+
+•
+Production bundle scan.
+
+•
+Secret scan.
+
+•
+Documentation consistency scan.
+
+H. Deployment status
+
+Do not guess. Report independently:
+
+Plain Text
+
+
+Database: DEPLOYED / NOT DEPLOYED / UNKNOWN
+Storage: DEPLOYED / NOT DEPLOYED / UNKNOWN
+RLS: DEPLOYED / NOT DEPLOYED / UNKNOWN
+Realtime: DEPLOYED / NOT DEPLOYED / UNKNOWN
+Edge Functions: DEPLOYED / PREPARED ONLY / NOT DEPLOYED / UNKNOWN
+Scheduler: CONFIGURED / NOT CONFIGURED / UNKNOWN
+
+
+
+I. Final release status
+
+Use exactly one:
+
+Plain Text
+
+
+SUPABASE-ONLY CUTOVER COMPLETE — FIREBASE ARCHIVED AND ACTIVE RUNTIME CLEAN
+
+
+
+Use only if all active imports, bundle traces, UI references, and deployment instructions are corrected.
+
+Plain Text
+
+
+SUPABASE ACTIVE — FIREBASE LEGACY REMAINS BUT ISOLATED
+
+
+
+Use if Firebase is retained but cannot initialize or run in the active application.
+
+Plain Text
+
+
+CUTOVER INCOMPLETE — ACTIVE FIREBASE PATHS OR SECURITY BLOCKERS REMAIN
+
+
+
+Use if any Firebase runtime path, unsafe compatibility path, or serious security problem remains.
+
+Do not claim Supabase-only completion if Firebase is still eagerly imported by the active application.
+
+
+
+
+15. BEGIN NOW
+
+Start by tracing the actual runtime imports and backend calls. Do not start with a blind rename.
+
+Then:
+
+1.
+Inventory Firebase and Supabase usage.
+
+2.
+Confirm the active runtime path.
+
+3.
+Remove Firebase from the active runtime.
+
+4.
+Safely rename the authentication context and hooks.
+
+5.
+Update storage service imports.
+
+6.
+Correct all stale UI text.
+
+7.
+Update architecture and development documentation.
+
+8.
+Add the deployment-status section.
+
+9.
+Add the single Firebase archive note.
+
+10.
+Add comments explaining retained compatibility boundaries.
+
+11.
+Run security and bundle scans.
+
+12.
+Run typecheck, build, tests, and dependency audit.
+
+13.
+Review the complete diff.
+
+14.
+Return the honest final report.
+
+Do not weaken security. Do not delete historical Firebase material prematurely. Do not claim that source files are deployed. Do not claim that Edge Functions or schedulers are active without live verification.
+
+End of prompt
+
