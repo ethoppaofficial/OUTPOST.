@@ -346,7 +346,7 @@ CREATE POLICY "Public coordinates visible only after admin verification"
   TO authenticated, anon
   USING (
     (
-      verification_status = 'verified'
+      verification_status = 'approved'
       AND EXISTS (
         SELECT 1 FROM public.properties p
         WHERE p.id = property_locations.property_id
@@ -388,7 +388,7 @@ CREATE POLICY "Landlords delete pending location"
   ON public.property_locations FOR DELETE
   TO authenticated
   USING (
-    (submitted_by = auth.uid() AND verification_status != 'verified')
+    (submitted_by = auth.uid() AND verification_status != 'approved')
     OR public.is_admin()
   );
 
