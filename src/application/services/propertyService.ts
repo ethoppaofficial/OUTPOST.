@@ -455,7 +455,7 @@ class PropertyService {
 
   /**
    * Performs trusted nearby accommodation ranking for an authenticated student.
-   * Calls the trusted Cloud Function in Firebase mode.
+   * Calls the trusted Supabase Edge Function or database procedure in live mode.
    * In mock mode, explicitly refuses to pretend secure server ranking works and
    * informs the caller of the mock limitation.
    */

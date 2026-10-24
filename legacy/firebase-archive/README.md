@@ -2,6 +2,8 @@
 
 ## Legacy Firebase Archive Note
 
+These files are retained for historical migration and rollback reference only. They are not imported, initialized, deployed, or used by the active OUTPOST application. Supabase is the sole active backend. The archive may be permanently deleted after production acceptance testing, backup verification, and explicit maintainer approval.
+
 The repository retains selected Firebase configuration, Firestore rules, Storage rules, and Cloud Function files for historical migration traceability and rollback analysis. These files are not part of the active OUTPOST runtime and must not be deployed or imported by the active frontend. Supabase is the only supported backend. The archive may be removed after production acceptance testing, backup verification, and explicit maintainer approval.
 
 ### Retained Historical Assets

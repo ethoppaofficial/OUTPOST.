@@ -4,11 +4,12 @@
  * @description Centralized runtime environment configuration and backend mode resolver for OUTPOST.
  *
  * Security Rationale & Operating Discipline:
+ * - Authoritative Backend: Supabase is the exclusive active backend (Supabase Auth, PostgreSQL, RLS, Storage, Realtime, Edge Functions).
  * - Production Strictness: In production (`isProduction: true`), missing or malformed `VITE_SUPABASE_URL`
  *   or `VITE_SUPABASE_ANON_KEY` immediately surfaces a blocking `ConfigErrorScreen`.
- * - No Fake Defaults in Production: Fake localhost URLs or mock JWTs are strictly prohibited outside tests.
- * - Secret Isolation: Service-role keys (`SUPABASE_SERVICE_ROLE_KEY`) must NEVER be exposed or referenced in client code.
- * - Migration Compatibility: Legacy Firebase compatibility flags remain purely as migration aliases without reading private credentials.
+ * - No Fake Defaults in Production: Fake localhost URLs or mock keys are strictly prohibited outside automated test environments.
+ * - Secret Isolation: Service-role keys (`SUPABASE_SERVICE_ROLE_KEY`) must NEVER be exposed, bundled, or referenced in client code.
+ * - Legacy Deprecation: Firebase is archived and never initialized in the active runtime.
  */
 
 export type BackendMode = 'supabase' | 'mock';
@@ -19,7 +20,10 @@ export interface AppConfig {
     url: string;
     anonKey: string;
   };
-  firebase: {
+  /**
+   * @deprecated Historical migration metadata. Firebase is archived and inactive.
+   */
+  firebase?: {
     projectId: string;
     authDomain: string;
     firestoreDatabaseId: string;
@@ -65,7 +69,7 @@ function validateConfiguration(): { config: AppConfig; error?: string } {
 
   // If in development and missing credentials, set warning error for UI banner
   if (!isProduction && !isTest && (!finalUrl || !finalAnonKey)) {
-    error = 'Development notice: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are not configured. Please define them in your .env file.';
+    error = 'Development notice: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are not configured. Please define them in your .env.local file.';
   }
 
   return {
@@ -76,10 +80,10 @@ function validateConfiguration(): { config: AppConfig; error?: string } {
         anonKey: finalAnonKey,
       },
       firebase: {
-        projectId: env.VITE_FIREBASE_PROJECT_ID || '',
-        authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || '',
+        projectId: '',
+        authDomain: '',
         firestoreDatabaseId: 'supabase-prod',
-        storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || '',
+        storageBucket: '',
       },
       isProduction,
       isTest,
@@ -95,14 +99,14 @@ export const appConfig = config;
 export const configValidationError = error;
 
 /**
- * Indicates whether Supabase is the active backend (always true in OUTPOST MVP).
+ * Indicates whether Supabase is the active backend (always true in OUTPOST).
  */
 export function isSupabaseMode(): boolean {
   return true;
 }
 
 /**
- * Indicates whether Firebase is the active backend (always false in current Supabase-cutover runtime).
+ * Indicates whether Firebase is the active backend (always false; Firebase is archived).
  */
 export function isFirebaseMode(): boolean {
   return false;
@@ -114,4 +118,3 @@ export function isFirebaseMode(): boolean {
 export function isSupabaseConfigured(): boolean {
   return Boolean(appConfig.supabase.url && appConfig.supabase.anonKey);
 }
-

@@ -403,6 +403,22 @@ export class SupabaseStorageService {
 
     return data.downloadUrl;
   }
+
+  /**
+   * Redact sensitive query parameters for safe logging.
+   */
+  public sanitizeUrlForLog(url: string): string {
+    if (!url) return '';
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('token')) {
+        parsed.searchParams.set('token', 'REDACTED');
+      }
+      return parsed.toString();
+    } catch {
+      return url.split('?')[0] + '?REDACTED_QUERY';
+    }
+  }
 }
 
 export const supabaseStorageService = new SupabaseStorageService();

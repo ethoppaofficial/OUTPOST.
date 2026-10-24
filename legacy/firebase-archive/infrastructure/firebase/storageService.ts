@@ -7,8 +7,8 @@ import {
   supabaseStorageService,
   SupabaseStorageService,
   SupabaseFileUploadResult,
-} from '../supabase/supabaseStorageService';
-import { supabase, invokeEdgeFunction } from '../supabase/supabaseClient';
+} from '../../../../src/infrastructure/supabase/supabaseStorageService';
+import { supabase, invokeEdgeFunction } from '../../../../src/infrastructure/supabase/supabaseClient';
 
 export interface FileUploadResult {
   url: string;

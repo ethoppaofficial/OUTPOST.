@@ -175,7 +175,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
           if (!blob) return;
           const fileName = `camera_photo_${Date.now()}.jpg`;
           try {
-            const uploadRes = await storageService.uploadPropertyImage(blob, fileName, propertyId, landlordId);
+            const uploadRes = await storageService.uploadPropertyImage(blob, landlordId || 'landlord', propertyId || 'draft');
             const newUrl = uploadRes.url;
             setCapturedInSession((prev) => [...prev, newUrl]);
             onChange([...images, newUrl]);
@@ -222,7 +222,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
         }
 
         try {
-          const uploadRes = await storageService.uploadPropertyImage(file, file.name, propertyId, landlordId);
+          const uploadRes = await storageService.uploadPropertyImage(file, landlordId || 'landlord', propertyId || 'draft');
           newUrls.push(uploadRes.url);
         } catch {
           // Fallback to local Object URL for instant preview

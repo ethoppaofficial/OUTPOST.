@@ -142,7 +142,10 @@ describe('OUTPOST Master Security Regression Test Suite', () => {
 
   describe('3. StorageService Implementation Security', () => {
     test('sanitizeFileName removes directory traversal and illegal characters', async () => {
-      const { StorageService } = await import('../src/infrastructure/firebase/storageService.ts');
+      const storagePath = fs.existsSync('src/infrastructure/firebase/storageService.ts')
+        ? '../src/infrastructure/firebase/storageService.ts'
+        : '../legacy/firebase-archive/infrastructure/firebase/storageService.ts';
+      const { StorageService } = await import(storagePath);
       const svc = new StorageService();
       assert.equal(typeof svc.sanitizeUrlForLog, 'function', 'sanitizeUrlForLog method must exist');
 

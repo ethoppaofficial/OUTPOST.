@@ -110,7 +110,7 @@ export const NewPropertyPage: React.FC = () => {
       if (appConfig.backendMode === 'mock') {
         // In mock mode, explain the limitation clearly and prevent insecure mock storage
         setDeviceLocationError(
-          'Private device-location capture and secure nearby ranking require the live Firebase backend. In demo/mock mode, please enter written address and directions manually.'
+          'Private device-location capture and secure nearby ranking require the live Supabase backend. In demo/mock mode, please enter written address and directions manually.'
         );
         setIsCapturingDeviceLocation(false);
         return;

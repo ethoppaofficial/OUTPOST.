@@ -1,5 +1,17 @@
 # OUTPOST: Firebase to Supabase Migration Specification & Runbook
 
+## Authoritative Backend Statement
+
+> **OUTPOST uses Supabase as its only active backend: Supabase Auth for authentication, Supabase PostgreSQL for persistence, PostgreSQL Row Level Security for authorization, Supabase Storage for files, Supabase Realtime for live communication, and Supabase Edge Functions and database procedures for privileged workflows. Firebase is legacy/archive material only and is not used by the active application.**
+
+## Authoritative Database Migrations Statement
+
+> **The authoritative database contract is the ordered set of timestamped SQL migrations in supabase/migrations/. Apply 20261020000001_initial_schema.sql, then 20261020000002_row_level_security.sql, then 20261020000003_storage_buckets_and_policies.sql, then 20261020000004_functions_triggers_and_automation.sql. Archived Firebase rules and functions are not the active backend contract.**
+
+## Legacy Firebase Archive Note
+
+> **The repository retains selected Firebase configuration, Firestore rules, Storage rules, and Cloud Function files for historical migration traceability and rollback analysis. These files are not part of the active OUTPOST runtime and must not be deployed or imported by the active frontend. Supabase is the only supported backend. The archive may be removed after production acceptance testing, backup verification, and explicit maintainer approval.**
+
 This document defines the architectural mapping and zero-loss cutover runbook for transitioning the OUTPOST Student Accommodation Platform from its Firebase (Firestore / Auth / Storage / Cloud Functions) implementation to Supabase (PostgreSQL / Supabase Auth / Supabase Storage / Edge Functions / Supabase Realtime).
 
 ---
@@ -349,9 +361,9 @@ Before any migration or backend cutover is initiated:
 ### 4.4 Staged Rollback Execution Workflow
 If critical production errors, elevated error rates (> 0.5%), or reconciliation mismatches occur during or following cutover, follow this staged procedure:
 
-1. **Stage 1 — Application Routing Fallback (Zero Downtime, Immediate)**:
-   - Toggle frontend client repository mode via application configuration environment variables (`VITE_BACKEND_MODE=firebase` or toggle fallback adapter).
-   - In-flight browser sessions safely switch data routing without altering database state or deleting records.
+1. **Stage 1 — Version Control & Baseline Rollback (Maintainer Approval Required)**:
+   - If a catastrophic backend blocker occurs, redeploy the tagged pre-cutover baseline release branch from version control under explicit maintainer approval.
+   - Dual-writing or client-side runtime switching between backends is strictly prohibited to prevent split-brain states and data corruption.
 2. **Stage 2 — Data Reconciliation & Delta Capture**:
    - Query all reservations, invoices, receipts, and audit logs created during the active Supabase window:
      ```sql

@@ -120,6 +120,9 @@ class AuthService {
     }
   }
 
+  /**
+   * @deprecated Temporary migration alias forwarding directly to loginWithSupabase.
+   */
   public async loginWithFirebase(email: string, password?: string) {
     return this.loginWithSupabase(email, password);
   }
@@ -205,6 +208,9 @@ class AuthService {
     }
   }
 
+  /**
+   * @deprecated Temporary migration alias forwarding directly to registerStudentWithSupabase.
+   */
   public async registerStudentWithFirebase(data: any) {
     return this.registerStudentWithSupabase(data);
   }
@@ -277,6 +283,9 @@ class AuthService {
     }
   }
 
+  /**
+   * @deprecated Temporary migration alias forwarding directly to registerLandlordWithSupabase.
+   */
   public async registerLandlordWithFirebase(data: any) {
     return this.registerLandlordWithSupabase(data);
   }

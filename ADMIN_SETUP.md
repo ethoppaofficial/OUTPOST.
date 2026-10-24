@@ -1,67 +1,105 @@
-# OUTPOST administrator setup and deployment
+# OUTPOST Administrator Setup and Deployment Guide
 
-This implementation uses the existing Firebase Authentication and OUTPOST's **named Firestore database**. It does not add an admin password, backdoor, hard-coded email allowlist, or client-side privilege switch.
+## Authoritative Backend Statement
 
-## What changed
+> **OUTPOST uses Supabase as its only active backend: Supabase Auth for authentication, Supabase PostgreSQL for persistence, PostgreSQL Row Level Security for authorization, Supabase Storage for files, Supabase Realtime for live communication, and Supabase Edge Functions and database procedures for privileged workflows. Firebase is legacy/archive material only and is not used by the active application.**
 
-- `/admin/login` is a dedicated email/password sign-in screen. It does not offer admin self-registration.
-- Admin UI access requires a Firebase Auth custom claim: `admin: true`.
-- Firestore, Storage, and callable functions verify that claim. A `users/{uid}.role = "admin"` field by itself is not sufficient.
-- Admin account, verification, property, settings, and authenticated sign-in/sign-out events run through Cloud Functions and create immutable audit entries. Suspension also disables the Firebase Auth user and requires a reason.
-- Listing approval and private location verification remain separate. A property becomes active/public only after the listing is approved and the location is verified.
-- Reservation and receipt screens are read-only. Admins cannot edit payment amounts or approve receipts there.
-- The admin settings screen stores validated settings and audits changes. `maintenanceMode` is enforced on Student/Landlord protected routes; `notificationsEnabled` controls notifications emitted by the new admin decisions. Existing reservation/receipt workflows do not yet consume the other settings (hold period, receipt deadline, verification requirement toggles), so those values are **stored only** until their business rules are wired. The Firestore policy continues to cap a reservation hold at seven days.
-- `vercel.json` includes the SPA rewrite required for direct navigation to `/admin/...` URLs.
+## Authoritative Database Migrations Statement
 
-## One-time administrator bootstrap
+> **The authoritative database contract is the ordered set of timestamped SQL migrations in supabase/migrations/. Apply 20261020000001_initial_schema.sql, then 20261020000002_row_level_security.sql, then 20261020000003_storage_buckets_and_policies.sql, then 20261020000004_functions_triggers_and_automation.sql. Archived Firebase rules and functions are not the active backend contract.**
 
-1. In the Firebase Console for the OUTPOST project, enable **Authentication → Sign-in method → Email/Password**.
-2. Create or confirm the administrator account in Firebase Authentication using the intended administrator email. Verify the email. Do not put the password in source code, AI Studio prompts, or this setup script.
-3. From a trusted developer machine with this project checked out, install the Functions dependencies and authenticate the Firebase CLI:
+## Legacy Firebase Archive Note
 
-   ```bash
-   npm --prefix functions install
-   firebase login
-   firebase use --add
-   ```
+> **The repository retains selected Firebase configuration, Firestore rules, Storage rules, and Cloud Function files for historical migration traceability and rollback analysis. These files are not part of the active OUTPOST runtime and must not be deployed or imported by the active frontend. Supabase is the only supported backend. The archive may be removed after production acceptance testing, backup verification, and explicit maintainer approval.**
 
-   Select the same project used by `firebase-applet-config.json`.
-4. Authenticate Application Default Credentials with an account authorized to manage Firebase Authentication custom claims and write the OUTPOST Firestore database. Then promote the existing verified account:
+---
 
-   ```bash
-   gcloud auth application-default login
-   npm --prefix functions run admin:promote -- <existing-verified-admin-email> --confirm
-   ```
+## Remote Deployment Status Table
 
-   The script reads the project ID and named Firestore database ID from `firebase-applet-config.json`. It sets only the custom claim and the matching role/status profile fields; it never creates or reads a password. The signed-in Google identity needs an appropriate privileged IAM role. If `gcloud` is unavailable, run the script in an environment with valid Application Default Credentials and the Firebase Admin SDK.
-5. The promoted administrator must sign out and sign back in at `/admin/login`; the script revokes old refresh tokens so a fresh token includes the admin claim.
+| Component | Provider | Status | Verification Method | Remaining Action |
+| :--- | :--- | :--- | :--- | :--- |
+| **Authentication** | Supabase Auth | CONFIGURED | Remote REST probe `/auth/v1/settings` returns HTTP 200 with signup & email enabled | Ready for administrative sign-in |
+| **PostgreSQL Schema** | Supabase PostgreSQL | PREPARED ONLY | Authoritative ordered migrations in `supabase/migrations/` validated via in-memory PostgreSQL test suite | Apply via `supabase db push` with project access token |
+| **Row Level Security** | Supabase PostgreSQL RLS | PREPARED ONLY | 23 tables protected with RLS in `20261020000002_row_level_security.sql`, tested across tenant roles | Automatically applied during migration push |
+| **Storage Buckets & Policies** | Supabase Storage | PREPARED ONLY | 6 buckets and bucket RLS policies defined in `20261020000003_storage_buckets_and_policies.sql` | Automatically created during migration push |
+| **Realtime** | Supabase Realtime | PREPARED ONLY | Publications enabled for messages & notifications in schema migration | Active upon database push |
+| **Edge Functions** | Supabase Edge Functions (Deno) | PREPARED ONLY | 8 functions implemented, CORS-validated, and tested in `supabase/functions/` | Deploy via `supabase functions deploy --all` |
+| **Reservation Expiration Scheduler** | PostgreSQL / pg_cron | PREPARED ONLY | Hourly procedure `expire_pending_reservations` defined in migration 4 | Enabled with `pg_cron` in Supabase project dashboard |
 
-If the email account does not already exist in Firebase Authentication, create it through the Firebase Console first. The promoter intentionally refuses unverified or disabled accounts.
+---
 
-## Deploy the backend rules and functions
+## Administrator Bootstrap & Security Guardrails
 
-Run from the repository root after selecting the correct Firebase project:
+OUTPOST enforces zero-client-trust administration:
+1. `/admin/login` is a dedicated administrator authentication portal. It does NOT permit self-registration.
+2. Administrative privileges are rooted in `public.profiles.role = 'admin'` backed by database triggers that strictly prevent client mutations.
+3. System audit logs are append-only; direct `UPDATE`, `DELETE`, and `TRUNCATE` privileges on `audit_logs` are revoked from `PUBLIC`, `authenticated`, and `anon`.
+4. Stored procedures (`create_reservation_atomic`, `review_payment_receipt_atomic`, `expire_pending_reservations`) execute as `SECURITY DEFINER` with fixed `search_path = public, auth`.
 
-```bash
-npm --prefix functions install
-firebase deploy --only functions,firestore:rules,storage
+### One-Time Administrator Bootstrap (Supabase SQL)
+
+To promote an initial verified user to administrator, execute the following SQL in the Supabase SQL Editor:
+
+```sql
+-- 1. Verify user exists in auth.users
+SELECT id, email, created_at FROM auth.users WHERE email = 'mrrex0312@gmail.com';
+
+-- 2. Set administrator role in profiles table
+UPDATE public.profiles
+SET role = 'admin',
+    account_status = 'active'
+WHERE id = (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com');
+
+-- 3. Ensure corresponding admin_profile entry exists
+INSERT INTO public.admin_profiles (id, full_name, permissions)
+VALUES (
+  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com'),
+  'System Administrator',
+  '{"can_verify_students": true, "can_verify_landlords": true, "can_approve_properties": true, "can_manage_settings": true, "can_suspend_users": true}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE
+SET permissions = EXCLUDED.permissions;
+
+-- 4. Record bootstrap in immutable audit log
+INSERT INTO public.audit_logs (actor_id, actor_role, action, target_type, target_id, details)
+VALUES (
+  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com'),
+  'admin',
+  'ADMIN_BOOTSTRAP',
+  'admin_profile',
+  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com')::text,
+  '{"method": "manual_bootstrap_sql", "reason": "initial_admin_setup"}'::jsonb
+);
 ```
 
-The `firebase.json` deploy target is the named OUTPOST Firestore database, not `(default)`. The Cloud Functions Admin SDK and the property-location trigger are configured for that same database. Do not deploy the rules to a different database. Cloud Functions deployment may require the Firebase project to have the required billing plan/APIs enabled.
+---
 
-Deploy the Vite frontend through the existing Vercel project from the intended production branch. Verify the Vercel build command is `npm run build`, output directory is `dist`, and its existing public Firebase configuration matches the same project. The deployment is not complete until the Functions and rules deployment has succeeded as well as the frontend build.
+## Deployment Commands for Supabase
 
-## Smoke tests after deployment
+From developer workstation with the Supabase CLI installed:
 
-1. Open `/admin/login`; an ordinary Student or Landlord must not be accepted as an administrator.
-2. Sign in with the promoted account and verify `/admin/dashboard` loads live Firestore collections.
-3. Open a Student/Landlord route while signed in as admin; the route should redirect to `/unauthorized` rather than change personas.
-4. As a non-admin, enter `/admin/users` directly; Firestore rules and route protection must deny administrative access.
-5. Review a test verification submission and confirm the stored status, user notification (when enabled), and new immutable audit record.
-6. Sign out and back in as an administrator; confirm `ADMIN_LOGOUT` and `ADMIN_LOGIN` events appear in the audit log.
-7. Approve a test listing without approving its location; it must remain inactive. Verify the location separately and confirm only its derived public coordinates become public.
-8. Suspend a test non-admin account with a reason; Firebase Auth should disable it and the audit log should contain the reason. Reactivate it and confirm the new audit entry.
-9. Turn maintenance mode on; protected Student/Landlord pages should show the maintenance notice while the admin workspace remains available.
-10. Test a direct Vercel URL such as `/admin/login` after deployment to confirm the SPA rewrite works.
+```bash
+# 1. Link project
+supabase link --project-ref bljscjzpycbzkubyyfrq
 
-Do not test account suspension against the only administrator. User administration deliberately refuses to suspend any account carrying the admin claim or stored admin role.
+# 2. Push database schema, RLS, storage, and automation migrations
+supabase db push
+
+# 3. Deploy all Edge Functions
+supabase functions deploy --all
+
+# 4. Verify Edge Function secrets
+supabase secrets set \
+  MAPTILER_API_KEY="" \
+  ALLOWED_ORIGINS="https://ais-dev-fimwv26mpozkczddnrurtm-564723309739.europe-west2.run.app"
+```
+
+---
+
+## Production Smoke Tests
+
+1. Navigate to `/admin/login`. Ensure standard student or landlord credentials are not permitted.
+2. Sign in with the promoted administrator account and verify `/admin/dashboard` loads live statistics.
+3. Access `/admin/users` and ensure user directory displays Supabase user records and allows account suspension with recorded reasons.
+4. Access `/admin/properties` and verify property approval and location verification workflows execute independently.
+5. Access `/admin/settings` and verify platform settings (maintenance mode) update and record audit entries.

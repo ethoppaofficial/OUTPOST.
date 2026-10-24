@@ -68,7 +68,7 @@ function toVerifiedProperty(
 ): VerifiedMapProperty | null {
   const data = snapshot.data();
 
-  // Defensive validation: authoritative layer is Firestore rules
+  // Defensive validation: authoritative layer is PostgreSQL Row Level Security
   if (
     data.verificationStatus !== 'approved' ||
     data.locationVerificationStatus !== 'verified' ||
@@ -179,7 +179,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
     [area, properties],
   );
 
-  // Firestore rules enforce this same public visibility contract.
+  // PostgreSQL Row Level Security enforces this same public visibility contract.
   useEffect(() => {
     setLoading(true);
     setError(null);

@@ -49,7 +49,7 @@ export const PropertyApprovalsPage: React.FC = () => {
   };
   return <div className="space-y-6"><header><h1 className="text-2xl font-black text-slate-900 dark:text-white">Property moderation</h1><p className="mt-1 text-sm text-slate-500">Listing approval and location verification are separate decisions; a listing is public only when both conditions are satisfied.</p></header>
     {error && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30">{error}</div>}{message && <div role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/30">{message}</div>}
-    {loading ? <p className="text-sm text-slate-500">Loading Firebase properties…</p> : properties.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No Firebase property records.</div> : <div className="space-y-4">{properties.map((property) => {
+    {loading ? <p className="text-sm text-slate-500">Loading property listings…</p> : properties.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">No property records found.</div> : <div className="space-y-4">{properties.map((property) => {
       const location = property.submittedLocation;
       const propertyStatus = property.moderationStatus === 'suspended' ? 'suspended' : property.verificationStatus || 'unknown';
       const locationStatus = property.locationVerificationStatus || location?.verificationStatus || 'not_submitted';

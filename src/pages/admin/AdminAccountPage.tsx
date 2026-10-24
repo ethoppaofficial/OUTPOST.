@@ -64,7 +64,7 @@ export const AdminAccountPage: React.FC = () => {
           </div>
           <div>
             <dt className="text-xs text-slate-500">Email verified</dt>
-            <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{firebaseUser?.emailVerified ? 'Yes' : 'Yes (Designated)'}</dd>
+            <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{authUser?.email_confirmed_at || authUser?.emailVerified ? 'Yes' : 'Yes (Designated)'}</dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500">Role Status</dt>
@@ -81,12 +81,12 @@ export const AdminAccountPage: React.FC = () => {
           </span>
           <div>
             <h2 className="font-bold text-slate-900 dark:text-white">Security & Password Management</h2>
-            <p className="text-xs text-slate-500">Enforce or change administrator password via Firebase Authentication</p>
+            <p className="text-xs text-slate-500">Enforce or change administrator password via Supabase Authentication</p>
           </div>
         </div>
 
         <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-          Need to change or recover the administrator password? Requesting a reset link will dispatch an official, time-limited Firebase password change link directly to <strong>{adminEmail}</strong>.
+          Need to change or recover the administrator password? Requesting a reset link will dispatch an official, time-limited Supabase password reset email directly to <strong>{adminEmail}</strong>.
         </p>
 
         {resetSuccess && (

@@ -1,0 +1,670 @@
+{
+  "prompt_name": "OUTPOST Secure Firebase-to-Supabase One-Way Cutover",
+  "version": "1.0.0",
+  "purpose": "Safely rewrite the active OUTPOST application from Firebase-dependent authentication, storage, repositories, and privileged workflows to Supabase, then isolate Firebase as legacy archive material without introducing authorization loopholes, data loss, security regressions, or misleading deployment claims.",
+  "paste_instruction": "Paste the value of the instruction field, or this complete JSON object if Google AI Studio supports structured project instructions. Inspect the repository before modifying anything.",
+  "instruction": "Act as a senior React and TypeScript architect, Supabase PostgreSQL engineer, application-security engineer, migration specialist, QA engineer, and technical writer. Inspect the existing OUTPOST Student Housing and Accommodation codebase and perform a controlled one-way migration from Firebase-dependent runtime code to Supabase. Supabase must become the only active backend. Firebase must not operate alongside Supabase in the active application. Firebase may be retained temporarily only as an isolated, clearly marked historical archive. Preserve the existing MVP scope: student and landlord registration, email verification, authentication, profiles, student verification, landlord verification, verified accommodation listings for Dambare and Rimin Gata in Kano State, roommate preferences and requests, groups, reservations, invoices, payment-evidence upload and review, notifications, chat, administrator controls, and security auditability. Do not invent unrelated product features. Do not weaken security to make the migration appear complete. Do not delete or alter remote data destructively. Do not claim a remote component is deployed merely because source files exist.",
+  "project_context": {
+    "application_name": "OUTPOST - Student Housing and Accommodation",
+    "active_backend_target": "Supabase only",
+    "legacy_backend": "Firebase, retained only as temporary archive material if necessary",
+    "frontend": "React with TypeScript and Vite",
+    "case_study_areas": [
+      "Dambare",
+      "Rimin Gata"
+    ],
+    "case_study_region": "Kano State, Nigeria",
+    "required_backend_services": [
+      "Supabase Auth",
+      "Supabase PostgreSQL",
+      "PostgreSQL Row Level Security",
+      "Supabase Storage",
+      "Supabase Realtime",
+      "Supabase Edge Functions",
+      "PostgreSQL functions, triggers, and scheduled jobs where appropriate"
+    ],
+    "authoritative_migrations": [
+      "supabase/migrations/20261020000001_initial_schema.sql",
+      "supabase/migrations/20261020000002_row_level_security.sql",
+      "supabase/migrations/20261020000003_storage_buckets_and_policies.sql",
+      "supabase/migrations/20261020000004_functions_triggers_and_automation.sql"
+    ]
+  },
+  "non_negotiable_rules": [
+    "Supabase is the only active production, staging, and development backend after cutover.",
+    "Do not run Firebase and Supabase as equal active backends.",
+    "Do not create a hidden Firebase fallback if a Supabase operation fails.",
+    "Do not perform dual writes merely to make migration appear safer.",
+    "Do not trust client-submitted user IDs, roles, account statuses, ownership IDs, reviewer IDs, payment statuses, invoice totals, or reservation ownership.",
+    "Derive identity from the authenticated Supabase JWT and enforce authorization again with PostgreSQL RLS or trusted Edge Functions.",
+    "Never expose SUPABASE_SERVICE_ROLE_KEY, database passwords, JWT secrets, private keys, or other server credentials to browser code.",
+    "Never place service-role credentials in VITE_ variables, NEXT_PUBLIC_ variables, .env.example, public files, or the production bundle.",
+    "Do not use fake localhost Supabase credentials or fake anonymous keys in production runtime code.",
+    "Do not weaken RLS, Storage policies, Edge Function authorization, or database constraints to make the frontend work.",
+    "Do not use direct private-file upload fallback after a secure signed-upload workflow fails.",
+    "Do not execute DROP SCHEMA public CASCADE, DROP TABLE ... CASCADE, TRUNCATE, or destructive remote SQL.",
+    "Do not automatically deploy to production.",
+    "Do not permanently delete Firebase archive files until active imports are removed, Supabase workflows are verified, backups are confirmed, and explicit maintainer approval exists.",
+    "Preserve user changes and inspect git status before editing.",
+    "If a requirement conflicts with security, stop and report the conflict instead of implementing an unsafe workaround."
+  ],
+  "execution_mode": {
+    "strategy": "phased_controlled_cutover",
+    "rule": "Complete and validate each boundary before moving to the next boundary.",
+    "required_behavior": [
+      "Inspect first, then plan the exact changes.",
+      "Make the smallest safe change that satisfies the migration requirement.",
+      "Run targeted validation after each phase.",
+      "Keep a migration log and record unresolved blockers.",
+      "Never mark a phase complete based solely on source-file presence."
+    ]
+  },
+  "phase_0_preflight_and_backup": {
+    "objective": "Create a safe working point before rewriting active authentication, repositories, storage, or backend workflows.",
+    "actions": [
+      "Confirm the repository root and inspect the complete file tree.",
+      "Run git status --short and preserve all existing user changes.",
+      "Create a dedicated branch named supabase-final-cutover unless an equivalent approved branch already exists.",
+      "Create a source backup outside the repository.",
+      "Inspect package.json, lockfiles, Vite configuration, TypeScript configuration, environment examples, Supabase configuration, Firebase configuration, migrations, tests, and deployment scripts.",
+      "Inspect the remote Supabase project only through approved credentials and never print secrets.",
+      "Confirm whether the authoritative Supabase migrations have actually been applied remotely.",
+      "Confirm whether Supabase Auth, PostgreSQL tables, RLS policies, Storage buckets, Realtime, Edge Functions, and the reservation scheduler are deployed.",
+      "Record every component as DEPLOYED, PREPARED ONLY, NOT DEPLOYED, or UNKNOWN."
+    ],
+    "stop_conditions": [
+      "Stop before modifying application code if the repository root is ambiguous.",
+      "Stop before destructive migration work if a backup cannot be confirmed.",
+      "Stop and report if the remote Supabase project cannot be authenticated safely.",
+      "Do not infer deployment status from source files."
+    ]
+  },
+  "phase_1_runtime_inventory": {
+    "objective": "Trace actual imports and execution paths instead of performing a blind rename.",
+    "search_terms": [
+      "firebase",
+      "Firebase",
+      "Firestore",
+      "firestore",
+      "FirebaseContext",
+      "FirebaseProvider",
+      "useFirebase",
+      "firebaseUser",
+      "firebaseConfig",
+      "firebaseRepository",
+      "FirestoreService",
+      "firebaseAdmin",
+      "firebaseStorage",
+      "initializeApp",
+      "getFirestore",
+      "getAuth",
+      "getStorage",
+      "getFunctions",
+      "firebase-admin",
+      "firebase-functions",
+      "Firebase Authentication",
+      "Firebase Firestore",
+      "Firebase Storage",
+      "Firebase data",
+      "VITE_FIREBASE",
+      "NEXT_PUBLIC_FIREBASE"
+    ],
+    "inspect_paths": [
+      "src/**",
+      "functions/**",
+      "supabase/**",
+      "firebase.json",
+      "firebase-blueprint.json",
+      "firebase-applet-config.json",
+      "firestore.rules",
+      "firestore.indexes.json",
+      "storage.rules",
+      "package.json",
+      "package-lock.json",
+      "functions/package.json",
+      "README.md",
+      "ADMIN_SETUP.md",
+      "docs/**",
+      ".env.example",
+      ".env.local",
+      ".gitignore"
+    ],
+    "classification_labels": [
+      "ACTIVE_RUNTIME",
+      "LEGACY_COMPATIBILITY",
+      "ARCHIVE_DOCUMENTATION",
+      "STALE_UI_TEXT",
+      "TEST_ONLY",
+      "UNUSED_DEPENDENCY",
+      "DEPLOYMENT_RISK"
+    ],
+    "required_inventory_columns": [
+      "path",
+      "reference",
+      "classification",
+      "imported_by_active_runtime",
+      "can_initialize_firebase",
+      "can_read_or_write_firebase",
+      "can_be_deployed_accidentally",
+      "required_action"
+    ]
+  },
+  "phase_2_supabase_backend_gate": {
+    "objective": "Verify the target backend before redirecting active application workflows.",
+    "verify": [
+      "Supabase Auth registration and login.",
+      "Email verification and password reset.",
+      "profiles table linked one-to-one with auth.users.id.",
+      "student_profiles and landlord_profiles.",
+      "student and landlord verification documents.",
+      "properties and units.",
+      "property locations and approved public location fields.",
+      "roommate preferences and requests.",
+      "groups and group membership.",
+      "conversations, participants, messages, read states, and message edits.",
+      "reservations and atomic availability changes.",
+      "invoices and authoritative landlord payment details.",
+      "payment receipts and review status.",
+      "notifications and audit logs.",
+      "RLS policies for every table.",
+      "Storage buckets and Storage policies.",
+      "Supabase Realtime publications and subscriptions.",
+      "all required Edge Functions.",
+      "seven-day reservation expiration scheduler."
+    ],
+    "authoritative_migration_order": [
+      "20261020000001_initial_schema.sql",
+      "20261020000002_row_level_security.sql",
+      "20261020000003_storage_buckets_and_policies.sql",
+      "20261020000004_functions_triggers_and_automation.sql"
+    ],
+    "rule": "If the remote schema or security policies are missing, report the blocker and provide the exact safe deployment step. Do not weaken frontend checks or create client-side substitutes for missing backend security."
+  },
+  "phase_3_authentication_rewrite": {
+    "objective": "Replace Firebase authentication with Supabase Auth while preserving the product's role and account workflows.",
+    "rename_map": {
+      "FirebaseContext": "AuthContext",
+      "FirebaseProvider": "AuthProvider",
+      "useFirebase": "useAuth",
+      "firebaseUser": "authUser or supabaseUser",
+      "FirebaseAuthentication": "SupabaseAuthentication"
+    },
+    "create_or_update": [
+      "src/application/context/AuthContext.tsx",
+      "src/application/services/authService.ts",
+      "src/components/layout/ProtectedRoute.tsx",
+      "src/App.tsx",
+      "src/pages/public/LoginPage.tsx",
+      "src/pages/public/RegisterPage.tsx",
+      "src/pages/public/AdminLoginPage.tsx"
+    ],
+    "required_operations": [
+      "student registration",
+      "landlord registration",
+      "email verification",
+      "password login",
+      "password reset",
+      "Google OAuth through Supabase Auth if the MVP currently requires it",
+      "session restoration",
+      "auth state change subscription",
+      "logout",
+      "session expiry handling",
+      "suspended-account handling",
+      "role loading from trusted profiles data",
+      "protected route loading and error states",
+      "admin authentication"
+    ],
+    "security_requirements": [
+      "Use supabase.auth.onAuthStateChange for session events.",
+      "Use the authenticated Supabase user ID as the canonical user ID.",
+      "Enforce auth.users.id = public.profiles.id.",
+      "Do not allow clients to self-promote to admin or landlord.",
+      "Do not derive authorization only from local state or route parameters.",
+      "Clear user-specific caches and subscriptions on logout or account switch.",
+      "Do not log access tokens or credentials.",
+      "Show safe user-facing errors without exposing database internals."
+    ],
+    "temporary_alias_rule": "If migration risk requires a temporary useFirebase alias, implement it as a deprecated alias to useAuth without importing Firebase, update every active consumer to useAuth immediately, document its removal condition, and remove it after the import scan passes."
+  },
+  "phase_4_repository_rewrite": {
+    "objective": "Make SupabaseRepository the only active data repository and map each workflow to the correct Supabase table, RPC, RLS policy, or Edge Function.",
+    "active_selector_requirement": "src/infrastructure/repositories/index.ts must not eagerly import or instantiate FirebaseRepository.",
+    "active_target": "src/infrastructure/supabase/supabaseRepository.ts",
+    "domain_workflows": [
+      "profiles",
+      "student profiles",
+      "landlord profiles",
+      "student verification documents",
+      "landlord verification submissions",
+      "properties",
+      "units and availability",
+      "property locations",
+      "roommate preferences",
+      "roommate requests",
+      "groups and group membership",
+      "conversations and participants",
+      "messages, mentions, editing, delivery, and read states",
+      "reservations",
+      "invoices",
+      "payment receipts",
+      "notifications",
+      "audit logs",
+      "platform settings"
+    ],
+    "implementation_rules": [
+      "Do not merely rename Firebase methods.",
+      "Verify every selected table and column against the authoritative Supabase schema.",
+      "Use supabase.from for ordinary authorized queries governed by RLS.",
+      "Use supabase.rpc or Edge Functions for atomic or privileged workflows.",
+      "Never trust a client-supplied owner, reviewer, student, landlord, or role identifier.",
+      "Do not treat the in-memory cache as authoritative or as an authorization layer.",
+      "Invalidate or refresh stale cache state after mutations and Realtime events.",
+      "Do not fabricate mock records after Supabase errors in production mode.",
+      "Return typed errors and preserve loading, empty, retry, and failure states."
+    ]
+  },
+  "phase_5_storage_rewrite": {
+    "objective": "Replace Firebase Storage with secure Supabase Storage workflows without creating private-file exposure.",
+    "active_service": "src/infrastructure/supabase/supabaseStorageService.ts",
+    "buckets": [
+      "student-docs",
+      "landlord-docs",
+      "payment-receipts",
+      "chat-attachments",
+      "property-images",
+      "profile-pictures"
+    ],
+    "public_or_listing_media_flow": [
+      "authenticate the user",
+      "validate file type and size locally for user feedback",
+      "upload only to the intended tenant-isolated path",
+      "enforce ownership through Supabase Storage policies",
+      "save only validated metadata to PostgreSQL",
+      "show retryable errors"
+    ],
+    "private_media_flow": [
+      "authenticate the user with Supabase Auth",
+      "request a signed upload session from an Edge Function",
+      "derive ownership and path constraints server-side",
+      "validate requested MIME type and size server-side",
+      "upload to the private bucket",
+      "verify that the object exists at the exact expected path",
+      "verify object metadata where supported",
+      "finalize the database record through a trusted Edge Function or transaction",
+      "write an audit record for sensitive uploads",
+      "use short-lived signed download URLs for authorized viewers"
+    ],
+    "private_assets": [
+      "student verification documents",
+      "landlord verification documents",
+      "payment receipts",
+      "chat attachments"
+    ],
+    "prohibited_behavior": [
+      "No direct Firebase Storage fallback.",
+      "No unauthenticated public bucket for private documents.",
+      "No client-selected arbitrary bucket.",
+      "No client-selected arbitrary storage path.",
+      "No long-lived signed URLs for sensitive records.",
+      "No storage path traversal.",
+      "No registration of receipt or attachment metadata before object existence is verified.",
+      "No client-controlled payment amount, reviewer, owner, or status authority."
+    ]
+  },
+  "phase_6_privileged_workflow_rewrite": {
+    "objective": "Replace Firebase Cloud Functions with Supabase Edge Functions and PostgreSQL procedures using server-authoritative authorization.",
+    "workflows": [
+      "create reservation atomically",
+      "review payment receipt",
+      "expire pending reservations",
+      "request receipt upload",
+      "finalize receipt upload",
+      "request chat attachment upload",
+      "finalize chat attachment upload",
+      "generate authorized private asset URL",
+      "administrator account actions",
+      "landlord and property verification"
+    ],
+    "every_edge_function_must": [
+      "validate the HTTP method",
+      "handle OPTIONS without weakening authenticated methods",
+      "use an allowlisted CORS origin rather than a production wildcard where possible",
+      "validate the Authorization header",
+      "validate the Supabase JWT through Supabase Auth",
+      "derive caller ID from the verified JWT",
+      "load role and account status from trusted database records",
+      "reject suspended or unauthorized accounts",
+      "validate request JSON shape and field lengths",
+      "reject unknown or invalid enum values",
+      "enforce ownership server-side",
+      "use a transaction or atomic RPC for multi-step state changes",
+      "avoid returning raw database errors, secrets, or stack traces",
+      "write audit records for sensitive actions",
+      "return appropriate 2xx, 4xx, and 5xx status codes",
+      "avoid logging tokens, private file paths, or sensitive documents"
+    ],
+    "transaction_requirements": [
+      "Receipt finalization must not insert a receipt while failing to update the reservation, notification, and audit trail.",
+      "Reservation creation must not decrement availability without creating the reservation and invoice consistently.",
+      "Receipt review must not change status without recording reviewer and audit information.",
+      "Expiration must release availability exactly once and be safe to retry.",
+      "Duplicate client submissions must be idempotent where the workflow requires it."
+    ]
+  },
+  "phase_7_ui_and_symbol_cleanup": {
+    "objective": "Remove misleading Firebase-facing names and text from active code and user interfaces.",
+    "active_rename_map": {
+      "FirebaseContext.tsx": "AuthContext.tsx",
+      "FirebaseProvider": "AuthProvider",
+      "useFirebase": "useAuth",
+      "firebaseUser": "authUser",
+      "firebaseRepository": "supabaseRepository",
+      "firebaseStorageService": "supabaseStorageService",
+      "FirestoreService": "SupabaseDataService where a provider-neutral name is appropriate"
+    },
+    "inspect_files": [
+      "src/App.tsx",
+      "src/application/context/**",
+      "src/components/**",
+      "src/pages/**",
+      "src/application/services/**",
+      "src/infrastructure/repositories/**",
+      "src/infrastructure/firebase/**",
+      "src/infrastructure/supabase/**"
+    ],
+    "replace_visible_text": {
+      "Firebase Authentication": "Supabase Authentication",
+      "Firebase Firestore": "Supabase database",
+      "Firebase property records": "live property records",
+      "Firebase user profiles": "live user profiles",
+      "Loading Firebase data": "Loading live platform data",
+      "Firebase configuration": "Supabase configuration",
+      "Firebase password reset link": "Supabase password reset email",
+      "Firebase Google Auth": "Google sign-in through Supabase Auth"
+    },
+    "requirements": [
+      "Update loading, empty, error, tooltip, help, and accessibility text.",
+      "Do not use Firebase terminology in active administrator pages.",
+      "Use legacy Firebase archive terminology only when the UI is intentionally describing historical archive material.",
+      "Preserve responsive design, dark mode, animations, accessibility, and existing MVP workflows."
+    ]
+  },
+  "phase_8_environment_and_dependency_cleanup": {
+    "objective": "Make active environment configuration Supabase-only and remove unnecessary Firebase runtime dependencies.",
+    "canonical_variables": [
+      "VITE_SUPABASE_URL",
+      "VITE_SUPABASE_PUBLISHABLE_KEY",
+      "VITE_MAPTILER_API_KEY"
+    ],
+    "rules": [
+      "Use one canonical Supabase browser key variable consistently in source and documentation.",
+      "Remove real project credentials from .env.example and replace them with placeholders where appropriate.",
+      "Do not include Firebase variables in the active .env.example.",
+      "Keep Firebase environment examples only in the isolated legacy archive if needed.",
+      "Never expose service-role or database credentials to the browser.",
+      "Remove fake localhost Supabase URL and fake local anonymous key fallbacks from production runtime code.",
+      "Require valid production Supabase configuration before creating the active client.",
+      "Ensure .env.local, .env, and real secret files are ignored and untracked.",
+      "After all active imports are removed, remove the Firebase frontend dependency from package.json and update the lockfile.",
+      "Do not remove dependencies needed by tests until test execution has been verified."
+    ],
+    "required_secret_scan_patterns": [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "service_role",
+      "JWT_SECRET",
+      "DATABASE_URL with embedded credentials",
+      "PRIVATE_KEY",
+      "private_key"
+    ]
+  },
+  "phase_9_firebase_isolation": {
+    "objective": "Retain Firebase only as clearly marked historical archive material after the active runtime no longer depends on it.",
+    "preferred_archive": "legacy/firebase-archive/",
+    "archive_candidates": [
+      "firebase.json",
+      "firebase-blueprint.json",
+      "firebase-applet-config.json",
+      "firestore.rules",
+      "firestore.indexes.json",
+      "storage.rules",
+      "functions/**",
+      "src/infrastructure/firebase/**",
+      "src/infrastructure/repositories/firebaseRepository.ts"
+    ],
+    "archive_readme_required_text": "These files are retained for historical migration and rollback reference only. They are not imported, initialized, deployed, or used by the active OUTPOST application. Supabase is the sole active backend. The archive may be permanently deleted after production acceptance testing, backup verification, and explicit maintainer approval.",
+    "isolation_rules": [
+      "The active Vite build must not import the archive.",
+      "The active TypeScript project must not include archive runtime files unless they are type-only historical references.",
+      "The active package scripts must not deploy Firebase.",
+      "The active CI/CD pipeline must not deploy Firebase.",
+      "The active environment template must not load Firebase variables.",
+      "The archive must not be described as the current backend.",
+      "Do not permanently delete the archive during this task unless explicitly instructed."
+    ]
+  },
+  "phase_10_documentation_and_comments": {
+    "objective": "Make the codebase understandable to future programmers and eliminate contradictory backend claims.",
+    "update_files": [
+      "README.md",
+      "ADMIN_SETUP.md",
+      "docs/ARCHITECTURE.md",
+      "docs/architecture.md",
+      "docs/CODEBASE_GUIDE.md",
+      "docs/DATABASE.md",
+      "docs/DEVELOPMENT.md",
+      "docs/KNOWN_ISSUES.md",
+      "docs/SECURITY.md",
+      "docs/WORKFLOWS.md",
+      "docs/backend-migration.md",
+      "docs/data-model.md",
+      "docs/API.md"
+    ],
+    "required_authoritative_backend_statement": "OUTPOST uses Supabase as its only active backend: Supabase Auth for authentication, Supabase PostgreSQL for persistence, PostgreSQL Row Level Security for authorization, Supabase Storage for files, Supabase Realtime for live communication, and Supabase Edge Functions and database procedures for privileged workflows. Firebase is legacy/archive material only and is not used by the active application.",
+    "required_authoritative_migrations_statement": "The authoritative database contract is the ordered set of timestamped SQL migrations in supabase/migrations/. Apply 20261020000001_initial_schema.sql, then 20261020000002_row_level_security.sql, then 20261020000003_storage_buckets_and_policies.sql, then 20261020000004_functions_triggers_and_automation.sql. Archived Firebase rules and functions are not the active backend contract.",
+    "required_archive_note": "The repository retains selected Firebase configuration, Firestore rules, Storage rules, and Cloud Function files for historical migration traceability and rollback analysis. These files are not part of the active OUTPOST runtime and must not be deployed or imported by the active frontend. Supabase is the only supported backend. The archive may be removed after production acceptance testing, backup verification, and explicit maintainer approval.",
+    "required_deployment_status_table": {
+      "columns": [
+        "Component",
+        "Provider",
+        "Status",
+        "Verification method",
+        "Remaining action"
+      ],
+      "components": [
+        "Authentication",
+        "PostgreSQL schema",
+        "Row Level Security",
+        "Storage buckets and policies",
+        "Realtime",
+        "Edge Functions",
+        "Reservation expiration scheduler"
+      ],
+      "allowed_status_values": [
+        "DEPLOYED",
+        "PREPARED ONLY",
+        "NOT DEPLOYED",
+        "CONFIGURED",
+        "NOT CONFIGURED",
+        "UNKNOWN"
+      ],
+      "status_rule": "Do not mark a component deployed or configured merely because source files or migrations exist. Verify the remote component or report UNKNOWN."
+    },
+    "comment_requirements": [
+      "Explain why each retained compatibility file exists.",
+      "State whether the file can be imported by active runtime.",
+      "State whether the file can be deployed.",
+      "Identify the active Supabase replacement.",
+      "State the removal condition.",
+      "Document trust boundaries and why privileged operations use Edge Functions or RPCs.",
+      "Document cache limitations without presenting cache as authoritative."
+    ]
+  },
+  "phase_11_security_regression_checks": {
+    "objective": "Find and fix vulnerabilities introduced or exposed during the cutover.",
+    "checks": [
+      "No active Firebase SDK import under src or active Supabase code.",
+      "No Firebase initialization in the active runtime.",
+      "No Firebase runtime code in the production bundle.",
+      "No service-role key or private credential in browser source or dist.",
+      "No fake localhost credentials in production runtime.",
+      "No wildcard production CORS where an origin allowlist is required.",
+      "No direct private upload fallback.",
+      "No client-controlled authorization fields.",
+      "No public access to private documents, receipts, or chat attachments.",
+      "No storage path traversal or arbitrary bucket selection.",
+      "No signed URL longer than the documented short lifetime for sensitive assets.",
+      "No receipt registration before object existence verification.",
+      "No message attachment record before object existence and participant verification.",
+      "No partial receipt finalization without transaction or compensating consistency logic.",
+      "No duplicate reservation allocation under concurrent requests.",
+      "No duplicate expiration release under retried scheduler calls.",
+      "No client ability to alter profile roles or account status.",
+      "No stale cache treated as authorization.",
+      "No cross-account data leakage after logout or account switch.",
+      "No misleading Firebase provider text in active UI.",
+      "No Firebase deployment command presented as the active deployment route."
+    ],
+    "security_test_payloads": [
+      "unauthenticated request",
+      "expired JWT",
+      "suspended account",
+      "student acting as landlord",
+      "landlord acting as student",
+      "student accessing another student's verification document",
+      "student accessing another user's receipt",
+      "nonparticipant accessing chat attachment",
+      "modified storage path",
+      "modified owner ID",
+      "modified payment amount",
+      "modified reviewer ID",
+      "oversized upload",
+      "disallowed MIME type",
+      "duplicate finalize request",
+      "duplicate reservation request",
+      "concurrent reservation requests",
+      "HTML and script payload in user-controlled marker or message text"
+    ]
+  },
+  "phase_12_tests_and_validation": {
+    "objective": "Prove the cutover with reproducible automated and static validation.",
+    "commands": [
+      "npm ci",
+      "npm run lint",
+      "npm run build",
+      "npm test",
+      "npm audit --audit-level=high"
+    ],
+    "static_scans": [
+      "grep -RInE \"from ['\\\"]firebase/|initializeApp|getFirestore|getAuth|firebase-admin|firebase-functions|useFirebase|FirebaseContext\" src supabase --exclude-dir=node_modules",
+      "grep -RInE \"firebase|firestore|firebaseio\" dist",
+      "grep -RInE \"SUPABASE_SERVICE_ROLE_KEY|service_role|JWT_SECRET|DATABASE_URL=.*@|private_key|PRIVATE_KEY\" src public dist .env.example --exclude-dir=node_modules"
+    ],
+    "required_tests": [
+      "Supabase is the active repository.",
+      "Supabase is the active authentication provider.",
+      "Supabase is the active storage provider.",
+      "No active source imports Firebase SDK modules.",
+      "Firebase cannot initialize through active application imports.",
+      "Firebase does not occur as runtime code in dist.",
+      "No service-role key appears in client source or bundle.",
+      "Fake production credentials are rejected.",
+      "All authoritative migration files exist in correct order.",
+      "RLS and Storage policy tests pass.",
+      "Private asset authorization tests pass.",
+      "Reservation concurrency and expiration tests pass.",
+      "Receipt finalization consistency tests pass.",
+      "Chat participant and attachment authorization tests pass.",
+      "Logout clears user-specific cache and subscriptions.",
+      "Stale Firebase UI text is absent from active pages.",
+      "Documentation contains authoritative backend, migration, deployment-status, and archive sections."
+    ],
+    "status_rules": [
+      "PASS means the command or test was actually executed and passed.",
+      "FAIL means the command or test was executed and failed.",
+      "BLOCKED means execution was impossible and the reason is recorded.",
+      "NOT RUN means it was not attempted.",
+      "Never report a blocked check as passed."
+    ]
+  },
+  "phase_13_acceptance_criteria": {
+    "application": [
+      "Supabase Auth handles registration, login, logout, email verification, password reset, and session restoration.",
+      "Protected routes use the verified Supabase session.",
+      "Student and landlord roles are loaded from trusted profile data.",
+      "Profiles and domain records persist in Supabase PostgreSQL.",
+      "Properties are limited to the approved MVP case-study workflow for Dambare and Rimin Gata.",
+      "Property images use Supabase Storage.",
+      "Private identity documents use secure private Storage workflows.",
+      "Reservations use an atomic trusted workflow.",
+      "Invoices use authoritative database data.",
+      "Payment receipts use secure upload and finalization.",
+      "Administrator receipt and verification workflows work.",
+      "Seven-day reservation expiration is actually scheduled or clearly reported as not configured.",
+      "Realtime chat and notifications use Supabase.",
+      "RLS blocks unauthorized database operations.",
+      "Loading, empty, error, and retry states are present and correct."
+    ],
+    "cutover": [
+      "Firebase is not initialized by the active application.",
+      "Active source files do not import Firebase SDK modules.",
+      "Firebase is not present as runtime code in the production bundle.",
+      "Firebase environment variables are not active.",
+      "Firebase deployment commands are not part of the active deployment path.",
+      "Firebase files are archived and clearly labeled if retained.",
+      "Authentication context uses AuthContext and useAuth or an explicitly documented equivalent.",
+      "Stale Firebase UI statements are removed from active pages.",
+      "Supabase is documented as the only active backend.",
+      "The authoritative migration list is documented.",
+      "Backend deployment status is documented honestly.",
+      "Code comments explain the active architecture and retained archive boundaries."
+    ],
+    "security": [
+      "No service-role or private secrets are exposed to the browser.",
+      "No insecure direct private upload fallback remains.",
+      "No unauthorized document, receipt, attachment, reservation, or profile access is possible through the active client workflows.",
+      "No client-supplied authorization field is trusted.",
+      "Multi-step financial and reservation operations are atomic or consistency-safe.",
+      "The active build, tests, and security scans pass or are honestly reported as blocked."
+    ]
+  },
+  "phase_14_final_report": {
+    "required_sections": [
+      "Executive summary",
+      "Active backend determination",
+      "Firebase inventory and archive status",
+      "Files changed, moved, archived, or deleted",
+      "Authentication migration results",
+      "Repository migration results",
+      "Storage migration results",
+      "Edge Function and database workflow results",
+      "Security findings fixed",
+      "Security findings remaining",
+      "Documentation and code-comment updates",
+      "Test and validation results",
+      "Remote deployment-status table",
+      "Rollback and archive plan",
+      "Final release status"
+    ],
+    "required_backend_status_fields": [
+      "Active backend: Supabase or another value only if a verified blocker exists",
+      "Firebase active at runtime: YES or NO",
+      "Firebase initialized by active bundle: YES or NO",
+      "Firebase SDK present in production bundle: YES or NO",
+      "Firebase files archived: YES, NO, or PARTIAL",
+      "Authentication: COMPLETE, PARTIAL, or BLOCKED",
+      "Repository: COMPLETE, PARTIAL, or BLOCKED",
+      "Storage: COMPLETE, PARTIAL, or BLOCKED",
+      "Edge Functions: DEPLOYED, PREPARED ONLY, NOT DEPLOYED, or UNKNOWN",
+      "Scheduler: CONFIGURED, NOT CONFIGURED, or UNKNOWN",
+      "Database migrations: DEPLOYED, NOT DEPLOYED, or UNKNOWN",
+      "RLS: DEPLOYED, NOT DEPLOYED, or UNKNOWN"
+    ],
+    "allowed_final_statuses": [
+      "SUPABASE-ONLY CUTOVER COMPLETE - FIREBASE ARCHIVED AND ACTIVE RUNTIME CLEAN",
+      "SUPABASE ACTIVE - FIREBASE LEGACY REMAINS BUT ISOLATED",
+      "CUTOVER INCOMPLETE - ACTIVE FIREBASE PATHS OR SECURITY BLOCKERS REMAIN"
+    ],
+    "honesty_rule": "Do not use the complete status if any active Firebase import, initialization path, deployment path, unsafe fallback, unverified privileged workflow, or unresolved critical security blocker remains."
+  },
+  "start_command": "Begin with Phase 0 and Phase 1. Inspect actual runtime imports and remote Supabase deployment state before editing. Then execute the phases in order, preserving user changes, adding comments for non-obvious security decisions, and returning the complete final report."
+}

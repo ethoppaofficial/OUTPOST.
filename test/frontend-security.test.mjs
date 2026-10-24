@@ -361,4 +361,76 @@ describe('OUTPOST Frontend Security & Stability Regression Suite', () => {
       assert.equal(repo.getInvoices().length, 0);
     });
   });
+
+  describe('8. Supabase-Only Final Cutover Validation (Phase 13)', () => {
+    test('Zero source files in src/ import from firebase client SDK', () => {
+      function scanDirForFirebase(dir, violations = []) {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== '.git') {
+              scanDirForFirebase(fullPath, violations);
+            }
+          } else if (entry.isFile() && /\.(tsx?|jsx?)$/.test(entry.name)) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            if (/(?:from|import)\s+['"]firebase(\/.*)?['"]/.test(content)) {
+              violations.push(fullPath);
+            }
+          }
+        }
+        return violations;
+      }
+      const violations = scanDirForFirebase(path.resolve('src'));
+      assert.deepEqual(violations, [], `No src files should import firebase: found ${violations.join(', ')}`);
+    });
+
+    test('Authoritative production repository is SupabaseRepository', async () => {
+      const { repository, getActiveRepository, SupabaseRepository } = await import('../src/infrastructure/repositories/index.ts');
+      assert.ok(repository instanceof SupabaseRepository, 'repository export must be an instance of SupabaseRepository');
+      assert.ok(getActiveRepository() instanceof SupabaseRepository, 'getActiveRepository() must return SupabaseRepository');
+    });
+
+    test('Authoritative storage service is SupabaseStorageService', async () => {
+      const { storageService, StorageService } = await import('../src/application/services/storageService.ts');
+      const { SupabaseStorageService } = await import('../src/infrastructure/supabase/supabaseStorageService.ts');
+      assert.ok(storageService instanceof SupabaseStorageService, 'storageService must be instance of SupabaseStorageService');
+      assert.equal(StorageService, SupabaseStorageService, 'StorageService must export SupabaseStorageService');
+    });
+
+    test('appConfig is configured exclusively for Supabase mode', async () => {
+      const { appConfig, isSupabaseMode, isFirebaseMode } = await import('../src/infrastructure/config/appConfig.ts');
+      assert.equal(appConfig.backendMode, 'supabase', 'backendMode must be strictly supabase');
+      assert.equal(isSupabaseMode(), true, 'isSupabaseMode() must be true');
+      assert.equal(isFirebaseMode(), false, 'isFirebaseMode() must be false');
+    });
+
+    test('No unmanaged SUPABASE_SERVICE_ROLE_KEY or raw secret tokens in src/', () => {
+      function scanDirForSecrets(dir, violations = []) {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== '.git') {
+              scanDirForSecrets(fullPath, violations);
+            }
+          } else if (entry.isFile() && /\.(tsx?|jsx?|json)$/.test(entry.name)) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            if (/service_role.*eyJhbGciOi/i.test(content) || /sbp_[a-zA-Z0-9]{30,}/.test(content)) {
+              violations.push(fullPath);
+            }
+          }
+        }
+        return violations;
+      }
+      const violations = scanDirForSecrets(path.resolve('src'));
+      assert.deepEqual(violations, [], `No frontend source files should embed secret keys: found ${violations.join(', ')}`);
+    });
+
+    test('.gitignore explicitly ignores .env.local and private environment files', () => {
+      const gitignore = fs.readFileSync('.gitignore', 'utf8');
+      assert.ok(gitignore.includes('.env*'), '.gitignore must ignore environment files');
+      assert.ok(gitignore.includes('.env.local'), '.gitignore must ignore .env.local explicitly');
+    });
+  });
 });
