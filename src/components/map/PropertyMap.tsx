@@ -23,7 +23,15 @@ import {
   Eye,
   ExternalLink,
   CheckCircle2,
+  Navigation,
+  X,
 } from 'lucide-react';
+import {
+  requestCurrentDevicePosition,
+  DevicePosition,
+  GeolocationErrorResult,
+} from '../../application/services/geolocationService';
+import { calculateDistanceKm } from '../../domain/geoUtils';
 import { Link } from 'react-router-dom';
 
 interface PropertyMapProps {
@@ -49,12 +57,19 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const landmarkMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const userLocationMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [activeStyleUrl, setActiveStyleUrl] = useState<string | any>(() => getEffectiveMapStyle());
   const [isUsingFallback, setIsUsingFallback] = useState(false);
   const [attributionText, setAttributionText] = useState(() => getEffectiveAttribution());
+
+  // Device Geolocation State
+  const [isLocating, setIsLocating] = useState(false);
+  const [userLocation, setUserLocation] = useState<DevicePosition | null>(null);
+  const [userLocationError, setUserLocationError] = useState<string | null>(null);
+  const [isOutsideStudyArea, setIsOutsideStudyArea] = useState(false);
 
   // Subscribe to reactive Map Configuration changes (e.g., MapTiler key, style change)
   useEffect(() => {
@@ -148,6 +163,11 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
       // Remove landmarks
       landmarkMarkersRef.current.forEach((m) => m.remove());
       landmarkMarkersRef.current = [];
+      // Remove user location marker
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
       map?.remove();
       mapInstanceRef.current = null;
       setMapLoaded(false);
@@ -372,6 +392,73 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
     });
   };
 
+  const handleUseCurrentLocation = async () => {
+    setUserLocationError(null);
+    setIsOutsideStudyArea(false);
+    setIsLocating(true);
+
+    try {
+      const position = await requestCurrentDevicePosition();
+      setUserLocation(position);
+
+      const map = mapInstanceRef.current;
+      if (map) {
+        if (userLocationMarkerRef.current) {
+          userLocationMarkerRef.current.remove();
+          userLocationMarkerRef.current = null;
+        }
+
+        const el = document.createElement('div');
+        el.className = 'outpost-user-location-marker relative flex items-center justify-center';
+        el.setAttribute('role', 'img');
+        el.setAttribute('aria-label', 'Your current location');
+        el.innerHTML = `
+          <div class="absolute w-8 h-8 rounded-full bg-blue-500/30 animate-ping"></div>
+          <div class="relative w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-lg flex items-center justify-center">
+            <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+          </div>
+        `;
+
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: 'center',
+        })
+          .setLngLat([position.longitude, position.latitude])
+          .addTo(map);
+
+        userLocationMarkerRef.current = marker;
+
+        map.flyTo({
+          center: [position.longitude, position.latitude],
+          zoom: 16,
+          essential: true,
+        });
+
+        const distDambare = calculateDistanceKm(
+          position.latitude,
+          position.longitude,
+          AREA_CENTERS.Dambare.latitude,
+          AREA_CENTERS.Dambare.longitude
+        );
+        const distRiminGata = calculateDistanceKm(
+          position.latitude,
+          position.longitude,
+          AREA_CENTERS['Rimin Gata'].latitude,
+          AREA_CENTERS['Rimin Gata'].longitude
+        );
+
+        if (distDambare > 8 && distRiminGata > 8) {
+          setIsOutsideStudyArea(true);
+        }
+      }
+    } catch (err: any) {
+      const geoErr = err as GeolocationErrorResult;
+      setUserLocationError(geoErr.message || 'Unable to retrieve device location.');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
   // Find currently selected property for desktop preview card overlay
   const selectedProp = properties.find((p) => p.id === selectedPropertyId);
 
@@ -395,7 +482,7 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
       </div>
 
       {/* Map Reset View, Style Selector & Context Controls */}
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-2 flex-wrap">
         <button
           onClick={handleResetView}
           title="Reset map view to Dambare / BUK corridor"
@@ -405,6 +492,27 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
           <span className="hidden sm:inline">Reset View</span>
         </button>
 
+        <button
+          type="button"
+          onClick={handleUseCurrentLocation}
+          disabled={isLocating}
+          title="Find accommodations near my current device location"
+          aria-label="Use my current location"
+          className="p-2 sm:px-3 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+        >
+          {isLocating ? (
+            <>
+              <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <span className="hidden sm:inline">Locating...</span>
+            </>
+          ) : (
+            <>
+              <Navigation className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="hidden sm:inline">Use my current location</span>
+            </>
+          )}
+        </button>
+
         <MapStyleSelector />
 
         <div className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-600 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-800 shadow-md backdrop-blur-xs">
@@ -412,6 +520,60 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
           <span>Bayero Univ. Kano (BUK) Off-Campus Corridor</span>
         </div>
       </div>
+
+      {/* Geolocation Feedback / Boundary Alert Banner */}
+      {userLocationError && (
+        <div className="absolute top-16 left-3 right-3 sm:right-auto sm:max-w-md z-20 pointer-events-auto animate-in fade-in slide-in-from-top-2">
+          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/90 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 shadow-lg text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Location Access</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed">{userLocationError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUserLocationError(null)}
+              className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer"
+              aria-label="Dismiss error"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isOutsideStudyArea && (
+        <div className="absolute top-16 left-3 right-3 sm:right-auto sm:max-w-md z-20 pointer-events-auto animate-in fade-in slide-in-from-top-2">
+          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/90 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200 shadow-lg text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Outside Study Area</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed">
+                Your device is outside the Danbare and Rimin Gata study area. OUTPOST focuses exclusively on off-campus accommodation near BUK New Campus.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  handleResetView();
+                  setIsOutsideStudyArea(false);
+                }}
+                className="mt-2 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-semibold cursor-pointer inline-flex items-center gap-1 shadow-xs"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Return to Danbare / Rimin Gata</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOutsideStudyArea(false)}
+              className="text-amber-500 hover:text-amber-700 p-0.5 rounded cursor-pointer"
+              aria-label="Dismiss notice"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Selected Property Preview Overlay (Floating Card) */}
       {selectedProp && (

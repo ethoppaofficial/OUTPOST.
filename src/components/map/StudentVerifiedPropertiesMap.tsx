@@ -10,7 +10,13 @@ import {
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { MapStyleSelector } from './MapStyleSelector';
-import { AlertTriangle, MapPin, Building2, ExternalLink } from 'lucide-react';
+import { AlertTriangle, MapPin, Building2, ExternalLink, Navigation, RotateCcw, X } from 'lucide-react';
+import {
+  requestCurrentDevicePosition,
+  DevicePosition,
+  GeolocationErrorResult,
+} from '../../application/services/geolocationService';
+import { calculateDistanceKm, AREA_CENTERS } from '../../domain/geoUtils';
 
 export type HousingArea = 'Dambare' | 'Rimin Gata';
 
@@ -148,12 +154,19 @@ export const StudentVerifiedPropertiesMap: React.FC<
   const mapRef = useRef<MapInstance | null>(null);
   const markersRef = useRef<globalThis.Map<string, Marker>>(new globalThis.Map());
   const popupsRef = useRef<globalThis.Map<string, Popup>>(new globalThis.Map());
+  const userLocationMarkerRef = useRef<Marker | null>(null);
   const [area, setArea] = useState<HousingArea>(initialArea);
   const [properties, setProperties] = useState<VerifiedMapProperty[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasMapKey, setHasMapKey] = useState(Boolean(getMaptilerApiKey()));
+
+  // Device Geolocation State
+  const [isLocating, setIsLocating] = useState(false);
+  const [userLocation, setUserLocation] = useState<DevicePosition | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [isOutsideStudyArea, setIsOutsideStudyArea] = useState(false);
 
   const activeStyle = mapStyleUrl || mapConfig.styleUrl;
 
@@ -366,6 +379,10 @@ export const StudentVerifiedPropertiesMap: React.FC<
       popupsRef.current.forEach((popup: Popup) => popup.remove());
       markersRef.current.clear();
       popupsRef.current.clear();
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
     };
@@ -466,6 +483,77 @@ export const StudentVerifiedPropertiesMap: React.FC<
     }
   }, [onPropertyOpen, visibleProperties]);
 
+  const handleUseCurrentLocation = async () => {
+    setLocationError(null);
+    setIsOutsideStudyArea(false);
+    setIsLocating(true);
+
+    try {
+      const position = await requestCurrentDevicePosition();
+      setUserLocation(position);
+
+      const map = mapRef.current;
+      if (map) {
+        if (userLocationMarkerRef.current) {
+          userLocationMarkerRef.current.remove();
+          userLocationMarkerRef.current = null;
+        }
+
+        const el = document.createElement('div');
+        el.className = 'outpost-user-location-marker relative flex items-center justify-center';
+        el.setAttribute('role', 'img');
+        el.setAttribute('aria-label', 'Your current location');
+        el.innerHTML = `
+          <div class="absolute w-8 h-8 rounded-full bg-blue-500/30 animate-ping"></div>
+          <div class="relative w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-lg flex items-center justify-center">
+            <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+          </div>
+        `;
+
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: 'center',
+        })
+          .setLngLat([position.longitude, position.latitude])
+          .addTo(map);
+
+        userLocationMarkerRef.current = marker;
+
+        map.flyTo({
+          center: [position.longitude, position.latitude],
+          zoom: 16,
+          essential: true,
+        });
+
+        const distDambare = calculateDistanceKm(
+          position.latitude,
+          position.longitude,
+          AREA_CENTERS.Dambare.latitude,
+          AREA_CENTERS.Dambare.longitude
+        );
+        const distRiminGata = calculateDistanceKm(
+          position.latitude,
+          position.longitude,
+          AREA_CENTERS['Rimin Gata'].latitude,
+          AREA_CENTERS['Rimin Gata'].longitude
+        );
+
+        if (distDambare > 8 && distRiminGata > 8) {
+          setIsOutsideStudyArea(true);
+        } else if (distRiminGata < distDambare) {
+          setArea('Rimin Gata');
+        } else {
+          setArea('Dambare');
+        }
+      }
+    } catch (err: any) {
+      const geoErr = err as GeolocationErrorResult;
+      setLocationError(geoErr.message || 'Unable to retrieve device location.');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
   const selectProperty = (property: VerifiedMapProperty) => {
     setSelectedId(property.id);
     mapRef.current?.flyTo({
@@ -487,7 +575,28 @@ export const StudentVerifiedPropertiesMap: React.FC<
             Only approved properties with administrator-verified public locations are shown.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleUseCurrentLocation}
+            disabled={isLocating}
+            title="Locate my position on the accommodation map"
+            aria-label="Use my current location"
+            className="p-2 sm:px-3 rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+          >
+            {isLocating ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                <span className="hidden sm:inline">Locating...</span>
+              </>
+            ) : (
+              <>
+                <Navigation className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span className="hidden sm:inline">Use my current location</span>
+              </>
+            )}
+          </button>
+
           <MapStyleSelector />
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Case-study area">
             {(['Dambare', 'Rimin Gata'] as HousingArea[]).map((item) => (
@@ -509,6 +618,58 @@ export const StudentVerifiedPropertiesMap: React.FC<
           </div>
         </div>
       </div>
+
+      {/* Location Error Feedback */}
+      {locationError && (
+        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/80 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 shadow-sm text-xs flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">Location Access</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed">{locationError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLocationError(null)}
+            className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Outside Study Area Notice */}
+      {isOutsideStudyArea && (
+        <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/80 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200 shadow-sm text-xs flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">Device Location Outside Study Area</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed">
+              Your device is located outside the Danbare and Rimin Gata study area. Showing OUTPOST accommodations in {area}.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const viewport = caseStudyViewports[area];
+                mapRef.current?.flyTo({ center: viewport.center, zoom: viewport.zoom, essential: true });
+                setIsOutsideStudyArea(false);
+              }}
+              className="mt-2 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-semibold cursor-pointer inline-flex items-center gap-1 shadow-xs"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Center on {area} Accommodations</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsOutsideStudyArea(false)}
+            className="text-amber-500 hover:text-amber-700 p-0.5 rounded cursor-pointer"
+            aria-label="Dismiss notice"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Missing Key State */}
       {!hasMapKey && (

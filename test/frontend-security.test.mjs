@@ -433,4 +433,84 @@ describe('OUTPOST Frontend Security & Stability Regression Suite', () => {
       assert.ok(gitignore.includes('.env.local'), '.gitignore must ignore .env.local explicitly');
     });
   });
+
+  describe('9. MapTiler Configuration & Device Geolocation Privacy Suite', () => {
+    test('MapTiler key is read via import.meta.env.VITE_MAPTILER_API_KEY without hardcoded credentials', () => {
+      const mapConfigSrc = fs.readFileSync('src/infrastructure/config/mapConfig.ts', 'utf8');
+      assert.ok(
+        mapConfigSrc.includes('import.meta.env.VITE_MAPTILER_API_KEY'),
+        'mapConfig must read VITE_MAPTILER_API_KEY from import.meta.env'
+      );
+      assert.doesNotMatch(
+        mapConfigSrc,
+        /(?:apiKey|api_key|maptilerKey)\s*[:=]\s*['"][a-zA-Z0-9]{15,}['"]/i,
+        'mapConfig must not contain hardcoded private API keys'
+      );
+    });
+
+    test('.env.example includes VITE_MAPTILER_API_KEY placeholder and comments', () => {
+      const envExample = fs.readFileSync('.env.example', 'utf8');
+      assert.ok(
+        envExample.includes('VITE_MAPTILER_API_KEY'),
+        '.env.example must declare VITE_MAPTILER_API_KEY'
+      );
+    });
+
+    test('Geolocation service strictly forbids watchPosition and requires user action', () => {
+      const geoSrc = fs.readFileSync('src/application/services/geolocationService.ts', 'utf8');
+      assert.ok(
+        geoSrc.includes('navigator.geolocation.getCurrentPosition'),
+        'Must use single-shot navigator.geolocation.getCurrentPosition'
+      );
+      assert.doesNotMatch(
+        geoSrc,
+        /\.watchPosition\(/,
+        'Must never use watchPosition to track students continuously'
+      );
+      assert.ok(
+        geoSrc.includes('maximumAge: 0'),
+        'Must set maximumAge: 0 to prevent stale cached positions'
+      );
+      assert.ok(
+        geoSrc.includes('timeout: 10000'),
+        'Must set reasonable 10s timeout'
+      );
+    });
+
+    test('Both PropertyMap and StudentVerifiedPropertiesMap provide "Use my current location" buttons', () => {
+      const propMapSrc = fs.readFileSync('src/components/map/PropertyMap.tsx', 'utf8');
+      const studentMapSrc = fs.readFileSync('src/components/map/StudentVerifiedPropertiesMap.tsx', 'utf8');
+
+      assert.ok(
+        propMapSrc.includes('Use my current location'),
+        'PropertyMap must provide "Use my current location" button'
+      );
+      assert.ok(
+        studentMapSrc.includes('Use my current location'),
+        'StudentVerifiedPropertiesMap must provide "Use my current location" button'
+      );
+      assert.ok(
+        propMapSrc.includes('requestCurrentDevicePosition'),
+        'PropertyMap must invoke requestCurrentDevicePosition only on user click'
+      );
+      assert.ok(
+        studentMapSrc.includes('requestCurrentDevicePosition'),
+        'StudentVerifiedPropertiesMap must invoke requestCurrentDevicePosition only on user click'
+      );
+    });
+
+    test('Device GPS coordinates are never stored in Supabase or persistent storage', () => {
+      const geoSrc = fs.readFileSync('src/application/services/geolocationService.ts', 'utf8');
+      assert.doesNotMatch(
+        geoSrc,
+        /supabase\s*\.\s*from/,
+        'geolocationService must never persist device coordinates to Supabase'
+      );
+      assert.doesNotMatch(
+        geoSrc,
+        /localStorage\s*\.\s*setItem\s*\(\s*['"][^'"]*location/,
+        'geolocationService must never save raw GPS coordinates to localStorage'
+      );
+    });
+  });
 });
