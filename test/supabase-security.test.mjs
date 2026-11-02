@@ -8,6 +8,7 @@ describe('Supabase Authenticated RLS & Storage Security Test Suite', () => {
   const rlsSql = fs.readFileSync('supabase/migrations/20261020000002_row_level_security.sql', 'utf8');
   const storageSql = fs.readFileSync('supabase/migrations/20261020000003_storage_buckets_and_policies.sql', 'utf8');
   const automationSql = fs.readFileSync('supabase/migrations/20261020000004_functions_triggers_and_automation.sql', 'utf8');
+  const hardeningSql = fs.readFileSync('supabase/migrations/20261020000005_pre_deployment_hardening.sql', 'utf8');
 
   describe('1. RLS Policy Definitions and Security Definers', () => {
     test('All security definer functions set explicit search_path = public, auth', () => {
@@ -292,6 +293,59 @@ describe('Supabase Authenticated RLS & Storage Security Test Suite', () => {
       assert.match(migrationDoc, /strictly prohibited/i);
       assert.match(migrationDoc, /Pre-Migration Backup and Restoration Verification/);
       assert.match(migrationDoc, /Classification of Reversible vs\. Irreversible Migrations/);
+    });
+  });
+
+  describe('7. Pre-Deployment Hardening Verification (Migration 05)', () => {
+    test('handle_new_user trigger function automatically creates profiles on auth.users insert', () => {
+      assert.match(hardeningSql, /CREATE OR REPLACE FUNCTION public\.handle_new_user/);
+      assert.match(hardeningSql, /AFTER INSERT ON auth\.users/);
+      assert.match(hardeningSql, /SECURITY DEFINER/);
+      assert.match(hardeningSql, /SET search_path = public, auth, extensions, pg_temp/);
+      assert.match(hardeningSql, /INSERT INTO public\.profiles/);
+    });
+
+    test('Partial unique index prevents concurrent active reservations across properties', () => {
+      assert.match(
+        hardeningSql,
+        /CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_reservation_per_student/
+      );
+      assert.match(
+        hardeningSql,
+        /ON public\.reservations\s*\(student_id\)\s*WHERE status IN \('pending_payment', 'payment_submitted', 'confirmed'\)/
+      );
+    });
+
+    test('Unit capacity mutations automatically synchronize parent property spaces', () => {
+      assert.match(hardeningSql, /CREATE OR REPLACE FUNCTION public\.sync_property_spaces/);
+      assert.match(hardeningSql, /AFTER INSERT OR UPDATE OF capacity, available_spaces OR DELETE ON public\.units/);
+      assert.match(hardeningSql, /UPDATE public\.properties/);
+    });
+
+    test('FORCE Row Level Security is applied to sensitive application tables', () => {
+      const requiredForcedTables = [
+        'profiles',
+        'student_profiles',
+        'landlord_profiles',
+        'landlord_verification_submissions',
+        'reservations',
+        'invoices',
+        'payment_receipts',
+        'audit_logs',
+      ];
+      for (const table of requiredForcedTables) {
+        assert.match(
+          hardeningSql,
+          new RegExp(`ALTER TABLE public\\.${table} FORCE ROW LEVEL SECURITY;`),
+          `Table public.${table} must have FORCE ROW LEVEL SECURITY applied`
+        );
+      }
+    });
+
+    test('Hourly expiration cron helper function is defined with safe exception handling', () => {
+      assert.match(hardeningSql, /CREATE OR REPLACE FUNCTION public\.ensure_hourly_expiration_cron/);
+      assert.match(hardeningSql, /cron\.schedule/);
+      assert.match(hardeningSql, /expire-pending-reservations-hourly/);
     });
   });
 });

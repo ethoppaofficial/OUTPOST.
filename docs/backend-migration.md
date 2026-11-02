@@ -6,7 +6,7 @@
 
 ## Authoritative Database Migrations Statement
 
-> **The authoritative database contract is the ordered set of timestamped SQL migrations in supabase/migrations/. Apply 20261020000001_initial_schema.sql, then 20261020000002_row_level_security.sql, then 20261020000003_storage_buckets_and_policies.sql, then 20261020000004_functions_triggers_and_automation.sql. Archived Firebase rules and functions are not the active backend contract.**
+> **The authoritative database contract is the ordered set of timestamped SQL migrations in supabase/migrations/. Apply 20261020000001_initial_schema.sql, then 20261020000002_row_level_security.sql, then 20261020000003_storage_buckets_and_policies.sql, then 20261020000004_functions_triggers_and_automation.sql, and finally 20261020000005_pre_deployment_hardening.sql. Archived Firebase rules and functions are not the active backend contract.**
 
 ## Legacy Firebase Archive Note
 
