@@ -54,3 +54,31 @@ export const SAFE_EXTERNAL_LINK_PROPS = {
   target: '_blank',
   rel: 'noopener noreferrer',
 } as const;
+
+/**
+ * Validates coordinate pair before constructing external navigation URLs.
+ */
+function isValidNavCoordinate(lat: unknown, lon: unknown): boolean {
+  if (typeof lat !== 'number' || typeof lon !== 'number') return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || isNaN(lat) || isNaN(lon)) return false;
+  return lat >= 4.0 && lat <= 14.5 && lon >= 2.5 && lon <= 15.0; // Nigeria geographic bounds
+}
+
+/**
+ * Generates a validated Google Maps pedestrian navigation URL.
+ * URL structure: https://www.google.com/maps/dir/?api=1&destination=LAT,LON&travelmode=walking
+ */
+export function getGoogleMapsWalkingUrl(destinationLat: number, destinationLon: number): string | null {
+  if (!isValidNavCoordinate(destinationLat, destinationLon)) return null;
+  return `https://www.google.com/maps/dir/?api=1&destination=${destinationLat.toFixed(6)},${destinationLon.toFixed(6)}&travelmode=walking`;
+}
+
+/**
+ * Generates a validated OpenStreetMap pedestrian navigation URL.
+ * URL structure: https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=;DEST_LAT,DEST_LON
+ */
+export function getOpenStreetMapWalkingUrl(destinationLat: number, destinationLon: number): string | null {
+  if (!isValidNavCoordinate(destinationLat, destinationLon)) return null;
+  return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=;${destinationLat.toFixed(6)},${destinationLon.toFixed(6)}`;
+}
+

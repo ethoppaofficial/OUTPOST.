@@ -11,7 +11,7 @@
  *   - Automatically decrements available spaces and generates an invoice with a 7-day payment deadline.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   MapPin,
@@ -26,6 +26,8 @@ import {
   Flag,
   Share2,
   Sparkles,
+  Compass,
+  ExternalLink,
 } from 'lucide-react';
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
@@ -35,6 +37,17 @@ import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PropertyMap } from '../../components/map/PropertyMap';
+import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
+import {
+  calculateDualGateProximity,
+  getImmediateDualGateProximity,
+  type DualGateProximity,
+} from '../../application/services/walkingRouteService';
+import {
+  getGoogleMapsWalkingUrl,
+  getOpenStreetMapWalkingUrl,
+  SAFE_EXTERNAL_LINK_PROPS,
+} from '../../application/utils/urlUtils';
 
 export const PropertyDetailPage: React.FC = () => {
   const { id, propertyId } = useParams<{ id?: string; propertyId?: string }>();
@@ -50,6 +63,7 @@ export const PropertyDetailPage: React.FC = () => {
     property?.rooms[0]?.id || ''
   );
   const [reserveModalOpen, setReserveModalOpen] = useState(false);
+  const [directionsModalOpen, setDirectionsModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState<any>('Misleading photos');
   const [reportDetails, setReportDetails] = useState('');
@@ -66,6 +80,41 @@ export const PropertyDetailPage: React.FC = () => {
       />
     );
   }
+
+  const propLat = property.location?.publicLatitude ?? property.location?.latitude;
+  const propLon = property.location?.publicLongitude ?? property.location?.longitude;
+  const hasCoordinates = typeof propLat === 'number' && typeof propLon === 'number';
+
+  // Dual-gate proximity state initialized with immediate straight-line distance
+  const [dualProximity, setDualProximity] = useState<DualGateProximity | null>(() => {
+    if (!hasCoordinates) return null;
+    return getImmediateDualGateProximity(propLat, propLon);
+  });
+
+  // Dynamic landmark orientation relative to nearest reference landmark
+  const landmarkOrientation = hasCoordinates
+    ? getNearestLandmarkOrientation(propLat, propLon)
+    : null;
+
+  // Asynchronously compute true pedestrian walking routes to Gate 1 and Gate 2
+  useEffect(() => {
+    if (!hasCoordinates) return;
+    let isCancelled = false;
+
+    calculateDualGateProximity(propLat, propLon)
+      .then((res) => {
+        if (!isCancelled) {
+          setDualProximity(res);
+        }
+      })
+      .catch(() => {
+        // Retain initial straight-line fallback on error
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [propLat, propLon, hasCoordinates]);
 
   const selectedRoom = property.rooms.find((r) => r.id === selectedUnitId) || property.rooms[0];
 
@@ -287,13 +336,93 @@ export const PropertyDetailPage: React.FC = () => {
             </div>
 
             {/* Address, Landmark & Directions Information */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-3">
-              <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white">
-                <Navigation className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span>Physical Address & Campus Transit Guide</span>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white">
+                  <Navigation className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Physical Address & Campus Transit Guide</span>
+                </div>
+
+                {hasCoordinates && (
+                  <button
+                    type="button"
+                    onClick={() => setDirectionsModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition cursor-pointer self-start sm:self-auto"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>Get Directions</span>
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Dual BUK Gates Walking Proximity Panel */}
+              {dualProximity && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    <span>Walking Proximity to BUK New Site Gates</span>
+                    <span>
+                      {dualProximity.gate1.isPedestrianRoute || dualProximity.gate2.isPedestrianRoute
+                        ? 'Pedestrian Network Calculated'
+                        : 'Straight-Line Distance Mode'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Gate 1 Proximity Card */}
+                    <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-emerald-900 dark:text-emerald-200">
+                          BUK New Site Gate 1 (Main Gate)
+                        </span>
+                        {dualProximity.gate1.isPedestrianRoute && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200/70 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+                            {dualProximity.gate1.formattedDuration}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-emerald-800 dark:text-emerald-300 font-medium">
+                        {dualProximity.gate1.displayText}
+                      </p>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
+                        Gwarzo Road corridor entrance (facing central Danbare)
+                      </span>
+                    </div>
+
+                    {/* Gate 2 Proximity Card */}
+                    <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-blue-900 dark:text-blue-200">
+                          BUK New Site Gate 2
+                        </span>
+                        {dualProximity.gate2.isPedestrianRoute && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-200/70 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300">
+                            {dualProximity.gate2.formattedDuration}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-blue-800 dark:text-blue-300 font-medium">
+                        {dualProximity.gate2.displayText}
+                      </p>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
+                        Southern campus perimeter gate (accessible from Rimin Gata)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Landmark Orientation Context */}
+              {landmarkOrientation && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 text-xs">
+                  <Compass className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">Landmark Orientation: </span>
+                    <span className="text-slate-600 dark:text-slate-400">{landmarkOrientation.formattedDescription}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
                 <div>
                   <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block">Address & Area</span>
                   <p className="font-medium text-slate-800 dark:text-slate-200 mt-0.5">
@@ -534,6 +663,81 @@ export const PropertyDetailPage: React.FC = () => {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* External Navigation / Directions Modal */}
+      <Modal
+        isOpen={directionsModalOpen}
+        onClose={() => setDirectionsModalOpen(false)}
+        title="Navigate to Accommodation"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-600 dark:text-slate-300">
+            Open external pedestrian navigation directly to the verified location of <strong>{property.title}</strong>:
+          </p>
+
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-1.5 border border-slate-200/80 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">Target Area</span>
+              <span className="font-bold text-slate-900 dark:text-white">{property.neighbourhood}, Kano</span>
+            </div>
+            {hasCoordinates && (
+              <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                <span>Verified Coordinates</span>
+                <span>{propLat?.toFixed(6)}, {propLon?.toFixed(6)}</span>
+              </div>
+            )}
+            {landmarkOrientation && (
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                🧭 {landmarkOrientation.formattedDescription}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 pt-1">
+            {hasCoordinates && getGoogleMapsWalkingUrl(propLat!, propLon!) && (
+              <a
+                href={getGoogleMapsWalkingUrl(propLat!, propLon!)!}
+                {...SAFE_EXTERNAL_LINK_PROPS}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center justify-between transition shadow-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-4 h-4" />
+                  <span>Open Walking Route in Google Maps</span>
+                </div>
+                <ExternalLink className="w-4 h-4 opacity-80" />
+              </a>
+            )}
+
+            {hasCoordinates && getOpenStreetMapWalkingUrl(propLat!, propLon!) && (
+              <a
+                href={getOpenStreetMapWalkingUrl(propLat!, propLon!)!}
+                {...SAFE_EXTERNAL_LINK_PROPS}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold flex items-center justify-between border border-slate-300 dark:border-slate-700 transition"
+              >
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Open Route in OpenStreetMap</span>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-400" />
+              </a>
+            )}
+          </div>
+
+          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed">
+            <span className="font-semibold">Pedestrian Advisory:</span> Navigation is handled externally. OUTPOST does not guarantee route safety or travel times. Always choose well-lit, active main thoroughfares around BUK New Campus when walking off-campus.
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => setDirectionsModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

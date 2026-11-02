@@ -85,13 +85,65 @@ export const AREA_CENTERS: Record<HousingArea, { latitude: number; longitude: nu
 };
 
 /**
- * Landmark coordinates for context (BUK New Campus Main Gate)
+ * Landmark coordinates for context: BUK New Campus Gate 1 (Main Gate along Gwarzo Road)
  */
-export const BUK_NEW_CAMPUS_GATE = {
+export const BUK_NEW_CAMPUS_GATE_1 = {
+  id: 'gate-1',
   latitude: 11.9808,
   longitude: 8.4235,
-  name: 'Bayero University Kano (BUK) New Campus Gate',
+  name: 'BUK New Site Gate 1',
+  label: 'BUK New Site Gate 1 (Main Gate, Gwarzo Road)',
 };
+
+/**
+ * Landmark coordinates for context: BUK New Campus Gate 2 (Secondary Access Gate)
+ */
+export const BUK_NEW_CAMPUS_GATE_2 = {
+  id: 'gate-2',
+  latitude: 11.9752,
+  longitude: 8.4190,
+  name: 'BUK New Site Gate 2',
+  label: 'BUK New Site Gate 2 (Southern Corridor)',
+};
+
+/**
+ * Backward compatibility alias: defaults to BUK New Campus Gate 1
+ */
+export const BUK_NEW_CAMPUS_GATE = BUK_NEW_CAMPUS_GATE_1;
+
+/**
+ * Canonical verified reference landmarks in Danbare and Rimin Gata
+ */
+export const LOCAL_REFERENCE_LANDMARKS = [
+  {
+    id: 'buk-gate-1',
+    name: 'BUK Gate 1',
+    fullName: 'BUK New Site Gate 1 (Main Gate)',
+    latitude: 11.9808,
+    longitude: 8.4235,
+  },
+  {
+    id: 'buk-gate-2',
+    name: 'BUK Gate 2',
+    fullName: 'BUK New Site Gate 2',
+    latitude: 11.9752,
+    longitude: 8.4190,
+  },
+  {
+    id: 'danbare-market',
+    name: 'Danbare Market',
+    fullName: 'Danbare Market Hub',
+    latitude: 11.9848,
+    longitude: 8.4172,
+  },
+  {
+    id: 'rimin-gata-centre',
+    name: 'Rimin Gata Centre',
+    fullName: 'Rimin Gata Settlement Centre',
+    latitude: 11.9785,
+    longitude: 8.4093,
+  },
+] as const;
 
 /**
  * Pseudo-random deterministic jitter for privacy protection based on propertyId string hash
@@ -230,3 +282,96 @@ export function calculateCoarseDirection(
   const bearing = (toDeg(θ) + 360) % 360;
   return bearingToCompassSector(bearing);
 }
+
+/**
+ * Human-readable labels for the eight compass sectors.
+ */
+export const COMPASS_SECTOR_LABELS: Record<CompassSector, string> = {
+  N: 'North',
+  NE: 'North-East',
+  E: 'East',
+  SE: 'South-East',
+  S: 'South',
+  SW: 'South-West',
+  W: 'West',
+  NW: 'North-West',
+};
+
+export interface LandmarkOrientation {
+  landmarkId: string;
+  landmarkName: string;
+  landmarkFullName: string;
+  compassSector: CompassSector;
+  compassLabel: string;
+  distanceKm: number;
+  distanceMeters: number;
+  formattedDescription: string;
+}
+
+/**
+ * Identifies the nearest verified reference landmark to a property and computes
+ * the 8-point compass bearing from the landmark to the property.
+ */
+export function getNearestLandmarkOrientation(
+  propertyLat: number,
+  propertyLon: number
+): LandmarkOrientation | null {
+  if (!isValidKanoCoordinate(propertyLat, propertyLon)) {
+    return null;
+  }
+
+  let closestLandmark: (typeof LOCAL_REFERENCE_LANDMARKS)[number] = LOCAL_REFERENCE_LANDMARKS[0];
+  let minDistance = calculateDistanceKm(
+    closestLandmark.latitude,
+    closestLandmark.longitude,
+    propertyLat,
+    propertyLon
+  );
+
+  for (let i = 1; i < LOCAL_REFERENCE_LANDMARKS.length; i++) {
+    const lk = LOCAL_REFERENCE_LANDMARKS[i];
+    const dist = calculateDistanceKm(lk.latitude, lk.longitude, propertyLat, propertyLon);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestLandmark = lk;
+    }
+  }
+
+  const direction = calculateCoarseDirection(
+    closestLandmark.latitude,
+    closestLandmark.longitude,
+    propertyLat,
+    propertyLon
+  );
+
+  const compassSector = direction || 'N';
+  const compassLabel = COMPASS_SECTOR_LABELS[compassSector];
+  const distanceMeters = Math.round(minDistance * 1000);
+
+  const formattedDistance =
+    distanceMeters < 1000
+      ? `~${distanceMeters} m`
+      : `~${minDistance.toFixed(1)} km`;
+
+  return {
+    landmarkId: closestLandmark.id,
+    landmarkName: closestLandmark.name,
+    landmarkFullName: closestLandmark.fullName,
+    compassSector,
+    compassLabel,
+    distanceKm: minDistance,
+    distanceMeters,
+    formattedDescription: `${compassLabel} of ${closestLandmark.name} (${formattedDistance})`,
+  };
+}
+
+/**
+ * Validates that latitude and longitude are finite numbers within Kano geographic bounds.
+ */
+export function isValidKanoCoordinate(lat: unknown, lon: unknown): boolean {
+  if (typeof lat !== 'number' || typeof lon !== 'number') return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || isNaN(lat) || isNaN(lon)) return false;
+  // Bounding box for Kano State and BUK New Site corridor
+  return lat >= 11.75 && lat <= 12.25 && lon >= 8.20 && lon <= 8.70;
+}
+

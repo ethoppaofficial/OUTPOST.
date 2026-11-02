@@ -17,6 +17,8 @@ import { Link } from 'react-router-dom';
 import { MapPin, Navigation, Bed, CheckCircle2, Compass } from 'lucide-react';
 import { Property } from '../../domain/types';
 import { VerificationBadge, Badge } from './Badge';
+import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
+import { getImmediateDualGateProximity } from '../../application/services/walkingRouteService';
 
 interface PropertyCardProps {
   /** Accommodation listing entity to render */
@@ -107,6 +109,48 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
             <Navigation className="w-3.5 h-3.5 flex-shrink-0 text-emerald-500" />
             <span>{property.distanceKm} km from {property.campus.split('(')[0]}</span>
           </div>
+
+          {/* Dual BUK Gates Proximity & Landmark Orientation */}
+          {(() => {
+            const loc = property.location;
+            const lat = loc?.publicLatitude ?? loc?.latitude;
+            const lon = loc?.publicLongitude ?? loc?.longitude;
+            if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+
+            const dual = getImmediateDualGateProximity(lat, lon);
+            const orientation = getNearestLandmarkOrientation(lat, lon);
+
+            return (
+              <div className="mt-2.5 space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                {/* Dual Gate badges */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="p-1.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300">
+                    <span className="font-semibold block text-[10px] text-emerald-700 dark:text-emerald-400">Gate 1 (Main)</span>
+                    <span className="font-medium truncate block">
+                      {dual.gate1.formattedDuration ? `${dual.gate1.formattedDuration} • ` : ''}
+                      {dual.gate1.formattedDistance}
+                    </span>
+                  </div>
+
+                  <div className="p-1.5 rounded-lg bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/60 text-blue-800 dark:text-blue-300">
+                    <span className="font-semibold block text-[10px] text-blue-700 dark:text-blue-400">Gate 2</span>
+                    <span className="font-medium truncate block">
+                      {dual.gate2.formattedDuration ? `${dual.gate2.formattedDuration} • ` : ''}
+                      {dual.gate2.formattedDistance}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Landmark Orientation Context */}
+                {orientation && (
+                  <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 text-[11px] px-1">
+                    <Compass className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="truncate">{orientation.formattedDescription}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {proximity && (
             <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/80 px-2.5 py-1 rounded-xl mt-2">

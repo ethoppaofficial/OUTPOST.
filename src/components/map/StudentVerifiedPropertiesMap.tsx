@@ -10,13 +10,22 @@ import {
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { MapStyleSelector } from './MapStyleSelector';
-import { AlertTriangle, MapPin, Building2, ExternalLink, Navigation, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, MapPin, Building2, ExternalLink, Navigation, RotateCcw, X, Compass } from 'lucide-react';
 import {
   requestCurrentDevicePosition,
   DevicePosition,
   GeolocationErrorResult,
 } from '../../application/services/geolocationService';
-import { calculateDistanceKm, AREA_CENTERS } from '../../domain/geoUtils';
+import {
+  calculateDistanceKm,
+  AREA_CENTERS,
+  BUK_NEW_CAMPUS_GATE_1,
+  BUK_NEW_CAMPUS_GATE_2,
+  LOCAL_REFERENCE_LANDMARKS,
+  getNearestLandmarkOrientation,
+} from '../../domain/geoUtils';
+import { walkingRouteService } from '../../application/services/walkingRouteService';
+import { getGoogleMapsWalkingUrl } from '../../application/utils/urlUtils';
 
 export type HousingArea = 'Dambare' | 'Rimin Gata';
 
@@ -435,6 +444,42 @@ export const StudentVerifiedPropertiesMap: React.FC<
         ? `<div class="text-[10px] text-slate-500 line-clamp-1 italic">${escapeHtml(property.directions)}</div>`
         : '';
 
+      const proximity = walkingRouteService.getImmediateDualGateProximity(
+        property.publicLatitude,
+        property.publicLongitude
+      );
+      const orientation = getNearestLandmarkOrientation(
+        property.publicLatitude,
+        property.publicLongitude
+      );
+      const googleMapsUrl = getGoogleMapsWalkingUrl(
+        property.publicLatitude,
+        property.publicLongitude
+      );
+
+      const orientationHtml = orientation
+        ? `<div class="px-2 py-1 rounded bg-slate-50 border border-slate-200/80 text-[10px] text-slate-600 flex items-center gap-1">
+            <span class="text-emerald-600">🧭</span>
+            <span>${escapeHtml(orientation.formattedDescription)}</span>
+          </div>`
+        : '';
+
+      const gatesHtml = `
+        <div class="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
+          <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">BUK Campus Access</div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <div class="p-1 rounded bg-emerald-50 border border-emerald-100 text-[10px]">
+              <div class="font-bold text-emerald-900">Gate 1</div>
+              <div class="text-emerald-700 font-semibold">${escapeHtml(proximity.gate1.displayText)}</div>
+            </div>
+            <div class="p-1 rounded bg-blue-50 border border-blue-100 text-[10px]">
+              <div class="font-bold text-blue-900">Gate 2</div>
+              <div class="text-blue-700 font-semibold">${escapeHtml(proximity.gate2.displayText)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+
       const popup = new maplibregl.Popup({
         closeButton: true,
         closeOnClick: false,
@@ -447,9 +492,14 @@ export const StudentVerifiedPropertiesMap: React.FC<
             <span class="text-xs font-bold text-emerald-600">${escapeHtml(formatPrice(property.pricePerSession, property.currency))}</span>
             ${spacesHtml}
           </div>
+          ${orientationHtml}
+          ${gatesHtml}
           ${landmarkHtml}
           ${directionsHtml}
-          <button data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details mt-2 w-full py-1.5 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
+          <div class="flex items-center gap-1.5 pt-1">
+            <button data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details flex-1 py-1.5 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
+            ${googleMapsUrl ? `<a href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer" title="Walking route in Google Maps" class="p-1.5 rounded-lg border border-slate-200 text-blue-600 hover:bg-slate-50 text-xs">🚶</a>` : ''}
+          </div>
         </div>
       `);
 
@@ -750,6 +800,34 @@ export const StudentVerifiedPropertiesMap: React.FC<
                     "{property.directions}"
                   </p>
                 )}
+                {(() => {
+                  const proximity = walkingRouteService.getImmediateDualGateProximity(
+                    property.publicLatitude,
+                    property.publicLongitude
+                  );
+                  const orientation = getNearestLandmarkOrientation(
+                    property.publicLatitude,
+                    property.publicLongitude
+                  );
+                  return (
+                    <div className="mt-2 space-y-1">
+                      {orientation && (
+                        <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          <Compass className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                          <span className="truncate">{orientation.formattedDescription}</span>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-medium border border-emerald-200 dark:border-emerald-800">
+                          <span className="font-bold">Gate 1:</span> {proximity.gate1.displayText}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 font-medium border border-blue-200 dark:border-blue-800">
+                          <span className="font-bold">Gate 2:</span> {proximity.gate2.displayText}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="mt-3 flex items-center justify-between text-xs">
                   <span className="font-semibold text-slate-600 dark:text-slate-300">
                     {property.availableSpaces !== undefined ? `${property.availableSpaces} spaces available` : 'Available'}

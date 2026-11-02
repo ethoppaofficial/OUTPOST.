@@ -1,0 +1,5 @@
+# Supabase Project Configuration for OUTPOST
+VITE_SUPABASE_URL=https://bljscjzpycbzkubyyfrq.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_HV7e1Jd1qk15Eop2vaxxvg_wqW-U3On
+NEXT_PUBLIC_SUPABASE_URL=https://bljscjzpycbzkubyyfrq.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_HV7e1Jd1qk15Eop2vaxxvg_wqW-U3On
