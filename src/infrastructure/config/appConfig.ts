@@ -20,15 +20,6 @@ export interface AppConfig {
     url: string;
     anonKey: string;
   };
-  /**
-   * @deprecated Historical migration metadata. Firebase is archived and inactive.
-   */
-  firebase?: {
-    projectId: string;
-    authDomain: string;
-    firestoreDatabaseId: string;
-    storageBucket: string;
-  };
   isProduction: boolean;
   isTest: boolean;
   validationError?: string;
@@ -78,12 +69,6 @@ function validateConfiguration(): { config: AppConfig; error?: string } {
       supabase: {
         url: finalUrl,
         anonKey: finalAnonKey,
-      },
-      firebase: {
-        projectId: '',
-        authDomain: '',
-        firestoreDatabaseId: 'supabase-prod',
-        storageBucket: '',
       },
       isProduction,
       isTest,

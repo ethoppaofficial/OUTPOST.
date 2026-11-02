@@ -20,8 +20,6 @@ import { User, UserRole, AccountStatus } from '../../domain/types';
 
 export interface AuthContextType {
   authUser: any | null;
-  /** @deprecated Use authUser instead */
-  firebaseUser?: any | null;
   currentUser: User | null;
   loading: boolean;
   connected: boolean;
@@ -34,13 +32,10 @@ export interface AuthContextType {
   signInWithEmail: (email: string, password?: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signOut: () => Promise<void>;
   databaseId: string;
-  /** @deprecated Legacy compatibility field */
-  firestoreDatabaseId?: string;
 }
 
 export const AuthContext = createContext<AuthContextType>({
   authUser: null,
-  firebaseUser: null,
   currentUser: null,
   loading: true,
   connected: false,
@@ -52,7 +47,6 @@ export const AuthContext = createContext<AuthContextType>({
   signInWithEmail: async () => ({ success: false }),
   signOut: async () => {},
   databaseId: 'supabase-prod',
-  firestoreDatabaseId: 'supabase-prod',
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -202,7 +196,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         authUser: supabaseUser,
-        firebaseUser: supabaseUser,
         currentUser,
         loading,
         connected,
@@ -215,7 +208,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInWithEmail,
         signOut,
         databaseId: 'supabase-prod',
-        firestoreDatabaseId: 'supabase-prod',
       }}
     >
       {children}
@@ -225,13 +217,3 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => useContext(AuthContext);
 
-/**
- * @deprecated Use useAuth() instead.
- * Provided for smooth backward compatibility during Supabase-only cutover.
- */
-export const useFirebase = useAuth;
-
-/**
- * @deprecated Use AuthProvider instead.
- */
-export const FirebaseProvider = AuthProvider;

@@ -27,7 +27,7 @@ const cards = [
 ] as const;
 
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : 'Could not load live administrator data. Check your access and Firebase configuration.';
+  return error instanceof Error ? error.message : 'Could not load live administrator data. Check your access and Supabase configuration.';
 }
 
 export const AdminDashboard: React.FC = () => {
@@ -60,7 +60,7 @@ export const AdminDashboard: React.FC = () => {
       </header>
 
       {error && <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>}
-      {loading && <p className="text-sm text-slate-500">Loading live Firebase data…</p>}
+      {loading && <p className="text-sm text-slate-500">Loading live platform data…</p>}
       {metrics && <>
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Platform metrics">
           {cards.map(({ key, label, icon: Icon }) => (
