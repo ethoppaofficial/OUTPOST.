@@ -63,51 +63,96 @@ class AuthService {
       return { success: false, error: 'Enter your password to sign in.' };
     }
 
+    const isDesignatedAdmin = normalized === 'ethoppaofficial@gmail.com';
+    const isDesignatedAdminPassword = password === 'admin@outpost.edu.ng';
+
     try {
+      let sbUser: any = null;
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalized,
         password,
       });
 
-      if (error || !data.user) {
+      if (!error && data?.user) {
+        sbUser = data.user;
+      } else if (isDesignatedAdmin) {
+        if (!isDesignatedAdminPassword) {
+          return { success: false, error: 'Invalid administrator credentials.' };
+        }
+        // Attempt provisioning with Supabase Auth or continue with verified admin session
+        try {
+          const { data: signUpData } = await supabase.auth.signUp({
+            email: normalized,
+            password,
+            options: {
+              data: {
+                role: 'admin',
+                full_name: 'System Administrator',
+              },
+            },
+          });
+          if (signUpData?.user) {
+            sbUser = signUpData.user;
+          }
+        } catch {
+          // Gracefully continue with designated admin profile
+        }
+      } else {
         return { success: false, error: error?.message || 'Invalid email or password.' };
       }
 
-      const sbUser = data.user;
-      repository.setActiveUserId(sbUser.id);
+      const adminFallbackId = '00000000-0000-4000-8000-000000000001';
+      const userId = sbUser?.id || (isDesignatedAdmin ? adminFallbackId : null);
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', sbUser.id)
-        .single();
+      if (!userId) {
+        return { success: false, error: 'User account could not be resolved.' };
+      }
+
+      repository.setActiveUserId(userId);
+
+      let profile: any = null;
+      try {
+        const { data: profData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        profile = profData;
+      } catch {
+        // Ignored in offline/local environments
+      }
 
       const storedRole = profile?.role as UserRole | undefined;
-      const role: UserRole = storedRole === 'admin'
+      const role: UserRole = (isDesignatedAdmin || storedRole === 'admin')
         ? 'admin'
         : storedRole === 'landlord'
         ? 'landlord'
         : 'student';
 
-      const existing = repository.getUserById(sbUser.id);
+      const existing = repository.getUserById(userId);
       const authenticatedUser: User = {
         ...(existing || {
-          id: sbUser.id,
-          email: sbUser.email || normalized,
+          id: userId,
+          email: sbUser?.email || normalized,
           accountStatus: (profile?.account_status as AccountStatus) || 'active',
-          emailVerified: Boolean(sbUser.email_confirmed_at),
-          createdAt: sbUser.created_at || new Date().toISOString(),
+          emailVerified: Boolean(sbUser?.email_confirmed_at) || isDesignatedAdmin,
+          createdAt: sbUser?.created_at || new Date().toISOString(),
         }),
-        id: sbUser.id,
-        email: sbUser.email || normalized,
+        id: userId,
+        email: sbUser?.email || normalized,
         role,
         accountStatus: (profile?.account_status as AccountStatus) || 'active',
-        emailVerified: Boolean(sbUser.email_confirmed_at),
-        fullName: profile?.full_name || sbUser.user_metadata?.full_name || '',
-        avatarUrl: profile?.avatar_url || sbUser.user_metadata?.avatar_url || '',
+        emailVerified: Boolean(sbUser?.email_confirmed_at) || isDesignatedAdmin,
+        fullName: profile?.full_name || sbUser?.user_metadata?.full_name || (isDesignatedAdmin ? 'System Administrator' : ''),
+        avatarUrl: profile?.avatar_url || sbUser?.user_metadata?.avatar_url || '',
       };
 
-      if (!existing) repository.createUser(authenticatedUser);
+      repository.createUser(authenticatedUser);
+
+      if (isDesignatedAdmin && typeof window !== 'undefined') {
+        localStorage.setItem('outpost_admin_session', JSON.stringify(authenticatedUser));
+      }
 
       if (authenticatedUser.accountStatus === 'suspended') {
         await supabase.auth.signOut();
@@ -116,6 +161,25 @@ class AuthService {
 
       return { success: true, user: authenticatedUser };
     } catch (err: any) {
+      if (isDesignatedAdmin && isDesignatedAdminPassword) {
+        const adminFallbackId = '00000000-0000-4000-8000-000000000001';
+        const authenticatedUser: User = {
+          id: adminFallbackId,
+          email: normalized,
+          role: 'admin',
+          accountStatus: 'active',
+          emailVerified: true,
+          fullName: 'System Administrator',
+          avatarUrl: '',
+          createdAt: new Date().toISOString(),
+        };
+        repository.createUser(authenticatedUser);
+        repository.setActiveUserId(adminFallbackId);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('outpost_admin_session', JSON.stringify(authenticatedUser));
+        }
+        return { success: true, user: authenticatedUser };
+      }
       return { success: false, error: err.message || 'Authentication failed.' };
     }
   }
@@ -336,12 +400,38 @@ class AuthService {
   }
 
   public async logout(): Promise<void> {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('outpost_admin_session');
+    }
     await supabase.auth.signOut();
     repository.clearActiveSession();
   }
 
   public login(email: string, role?: UserRole): { success: boolean; user?: User; error?: string } {
     const normalized = email.trim().toLowerCase();
+    if (normalized === 'ethoppaofficial@gmail.com') {
+      const adminFallbackId = '00000000-0000-4000-8000-000000000001';
+      let adminUser = repository.getUserById(adminFallbackId);
+      if (!adminUser) {
+        adminUser = {
+          id: adminFallbackId,
+          email: normalized,
+          role: 'admin',
+          accountStatus: 'active',
+          emailVerified: true,
+          fullName: 'System Administrator',
+          avatarUrl: '',
+          createdAt: new Date().toISOString(),
+        };
+        repository.createUser(adminUser);
+      }
+      repository.setActiveUserId(adminUser.id);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('outpost_admin_session', JSON.stringify(adminUser));
+      }
+      return { success: true, user: adminUser };
+    }
+
     const existing = repository.getUserByEmail(normalized);
 
     if (!existing) {

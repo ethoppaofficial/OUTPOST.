@@ -10,7 +10,8 @@ VALUES
   ('22222222-2222-4222-8222-222222222222', 'student2@outpost.edu.ng', 'Ibrahim Musa', 'student', 'active', false),
   ('33333333-3333-4333-8333-333333333333', 'landlord1@outpost.ng', 'Alhaji Sani Bello', 'landlord', 'active', true),
   ('44444444-4444-4444-8444-444444444444', 'landlord2@outpost.ng', 'Hajiya Fatima Umar', 'landlord', 'active', false),
-  ('55555555-5555-4555-8555-555555555555', 'admin@outpost.edu.ng', 'Platform Moderator', 'admin', 'active', true)
+  ('55555555-5555-4555-8555-555555555555', 'admin@outpost.edu.ng', 'Platform Moderator', 'admin', 'active', true),
+  ('00000000-0000-4000-8000-000000000001', 'ethoppaofficial@gmail.com', 'System Administrator', 'admin', 'active', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Student Profiles

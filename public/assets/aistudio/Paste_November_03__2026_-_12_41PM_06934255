@@ -1,0 +1,1223 @@
+# OUTPOST: NEXT-PHASE DEVELOPMENT, FEATURE PLANNING AND PRE-DEPLOYMENT READINESS
+
+## ROLE AND EXPECTATIONS
+
+Act as a senior software architect, full-stack engineer, database engineer, security specialist and technical lead responsible for evaluating the next development phase of OUTPOST.
+
+You are working on an existing software project, not building a new application from scratch.
+
+Your responsibility is to inspect the current implementation, understand its architecture, identify what is already complete, evaluate the proposed enhancements and recommend a technically sound implementation strategy.
+
+Do not assume that a feature is missing simply because it is not mentioned in this prompt. Inspect the actual repository and distinguish between:
+
+1. Fully implemented and tested.
+2. Implemented but not fully tested.
+3. Partially implemented.
+4. Designed but not implemented.
+5. Not implemented.
+6. Implemented locally but not deployed or verified remotely.
+
+Do not fabricate implementation status, database structures, test results or deployment status.
+
+**IMPORTANT: This is initially an assessment and planning task. Do not modify source code, database migrations, Supabase configuration, environment variables or deployment settings during the first phase. Wait for explicit approval before implementation.**
+
+---
+
+# 1. PROJECT CONTEXT
+
+**Project Name:** OUTPOST
+
+**Project Purpose:**
+
+OUTPOST is a student accommodation discovery and shared accommodation coordination platform designed to help students of Bayero University, Kano (BUK), New Site, discover suitable off-campus accommodation, coordinate shared accommodation and manage reservation processes.
+
+The platform also provides landlords with tools for managing property listings, reviewing reservations and verifying payment receipts.
+
+### 1.1 Approved geographic scope
+
+The implementation is strictly limited to:
+
+- Danbare.
+- Rimin Gata.
+
+These are the only approved accommodation search locations for this project.
+
+Do not expand the implementation to other settlements or university accommodation facilities.
+
+### 1.2 Primary user roles
+
+OUTPOST has exactly three primary roles:
+
+- Student.
+- Landlord.
+- Administrator.
+
+Caretaker accounts, permissions and functionality are explicitly excluded.
+
+Do not introduce additional user roles.
+
+### 1.3 Existing technology baseline
+
+The reported implementation uses:
+
+- React.
+- TypeScript.
+- Supabase Authentication.
+- Supabase PostgreSQL.
+- Supabase Storage.
+- Supabase Realtime.
+- Supabase Edge Functions using Deno.
+- PostgreSQL functions and triggers.
+- MapLibre GL JS.
+- MapTiler services.
+
+Firebase is reported to be archived and no longer part of the active authentication implementation.
+
+Verify these technologies against the actual repository before making architectural decisions.
+
+Do not introduce Express.js, Firebase, another backend framework or an alternative mapping library without demonstrating a specific technical requirement that the current architecture cannot reasonably satisfy.
+
+### 1.4 Existing core functionality
+
+The existing system is intended to support:
+
+- Student authentication and profile management.
+- Landlord authentication and verification.
+- Property listing creation and verification.
+- Accommodation discovery and filtering.
+- Roommate matching.
+- Shared accommodation groups.
+- Reservation management.
+- Invoice generation.
+- Payment receipt uploads.
+- Landlord payment receipt approval or rejection.
+- Automatic reservation expiration.
+- In-app notifications.
+- Supabase Realtime updates.
+- Administrative management.
+
+Preserve existing functionality.
+
+Do not redesign or rebuild working modules unnecessarily.
+
+---
+
+# 2. OBJECTIVE OF THIS DEVELOPMENT PHASE
+
+Evaluate and plan four proposed development directions:
+
+1. Progressive Web App (PWA) integration.
+2. Automated notification dispatch through SMS, WhatsApp and email.
+3. Administrative analytics and reporting dashboard.
+4. Final pre-deployment hardening and production readiness.
+
+Your task is to determine:
+
+- Which features are genuinely necessary.
+- Which features are already available in the existing implementation.
+- Which features provide the greatest practical value.
+- Which features can be implemented safely within the existing architecture.
+- Which features introduce additional costs or operational dependencies.
+- Which features should be deferred.
+- The correct implementation order.
+- The risks of implementing each feature without addressing existing technical weaknesses.
+
+Do not automatically recommend implementing everything.
+
+The final recommendation must balance academic project requirements, real-world usability, development time, maintainability, security and future commercialization.
+
+---
+
+# 3. DEVELOPMENT DIRECTION ONE: PROGRESSIVE WEB APPLICATION (PWA)
+
+## 3.1 Objective
+
+Evaluate whether OUTPOST should be enhanced into a Progressive Web Application that students can install on supported devices and access through a more app-like experience.
+
+The objective is to improve accessibility and usability, particularly for students using Android smartphones and other mobile devices.
+
+## 3.2 Required assessment
+
+Inspect the existing frontend and determine:
+
+- Whether a Web App Manifest already exists.
+- Whether a service worker is already configured.
+- Whether the application is currently installable.
+- Whether Vite already uses a PWA-related package.
+- Whether an existing caching strategy is configured.
+- Whether offline handling already exists.
+- Whether the application has suitable application icons and splash-screen assets.
+- Whether the existing routing structure is compatible with PWA behaviour.
+
+Do not introduce another PWA library if the repository already has an appropriate implementation.
+
+## 3.3 Proposed functionality
+
+If the assessment confirms that PWA support is missing or incomplete, evaluate the following:
+
+### A. Web App Manifest
+
+Provide an appropriate manifest containing:
+
+- Application name: OUTPOST.
+- Short name: OUTPOST.
+- Application description.
+- Theme colour.
+- Background colour.
+- Application icons in suitable sizes.
+- Display mode.
+- Start URL.
+- Scope.
+
+Use the existing design system and branding.
+
+Do not invent new branding or replace existing application assets unnecessarily.
+
+### B. Service worker and caching
+
+Evaluate a safe caching strategy for:
+
+- Application shell and static frontend assets.
+- Previously viewed accommodation cards.
+- Non-sensitive accommodation information.
+- Necessary public images, subject to storage access restrictions.
+- Map assets, only where permitted by the mapping provider's terms and technically appropriate.
+
+Distinguish between static assets, public data and authenticated user data.
+
+**Security requirements:**
+
+- Never cache authentication tokens in an unsafe manner.
+- Never expose private student or landlord information through shared caches.
+- Never cache payment receipts, identity documents, verification documents or private messages for offline access.
+- Never cache privileged API responses indiscriminately.
+- Prevent one user's authenticated information from being displayed to another user on a shared device.
+- Respect Supabase Storage access controls and signed URL expiration.
+- Define how cached data is invalidated when listings change.
+
+Do not assume that all map tiles can legally or technically be stored for offline use. Review the applicable MapTiler service terms and caching restrictions before proposing offline map caching.
+
+### C. Offline user experience
+
+Determine what OUTPOST should do when internet access is unavailable.
+
+Reasonable offline capabilities may include:
+
+- Displaying previously cached public accommodation information.
+- Showing a clear offline indicator.
+- Allowing users to browse information that is already cached.
+- Providing a useful reconnection experience.
+
+Do not allow users to submit reservations, approve receipts, upload payment evidence or perform other critical transactions while offline unless a secure synchronization and conflict-resolution design is established.
+
+Avoid introducing a complicated offline transaction queue merely to claim that the application supports offline functionality.
+
+### D. Installation experience
+
+Evaluate:
+
+- Android installation support.
+- Browser-based installation prompts.
+- Appropriate install instructions.
+- iOS installation limitations and user guidance.
+- Application update handling.
+- Service worker version management.
+- Recovery from failed updates.
+
+Do not assume that Android and iOS provide identical installation behaviour.
+
+### E. PWA verification
+
+Define how to test:
+
+- Manifest validity.
+- Service worker registration.
+- Installation eligibility.
+- Cache behaviour.
+- Offline browsing.
+- Authentication isolation.
+- Cache invalidation.
+- Application updates.
+- Mobile responsiveness.
+- Recovery after connectivity returns.
+
+---
+
+# 4. DEVELOPMENT DIRECTION TWO: AUTOMATED NOTIFICATION DISPATCH
+
+## 4.1 Current notification architecture
+
+The reported implementation currently supports:
+
+- In-app notification records.
+- Supabase Realtime notification updates.
+
+Inspect the existing notification tables, triggers, Edge Functions, frontend notification components and authentication permissions.
+
+Do not replace the existing notification architecture.
+
+The objective is to extend it with external delivery channels while retaining in-app notifications as the primary notification record and fallback mechanism.
+
+## 4.2 Proposed delivery channels
+
+Evaluate the following providers and channels:
+
+**SMS:**
+- Termii.
+- Twilio.
+
+**WhatsApp:**
+- WhatsApp Business Platform through an appropriate supported provider.
+- Twilio WhatsApp integration, if suitable.
+
+**Email:**
+- Resend, if already configured or appropriate for the current architecture.
+
+Do not assume all providers are available, affordable or equally reliable in Nigeria.
+
+Compare the providers based on:
+
+- Availability in Nigeria.
+- SMS and WhatsApp delivery support.
+- Pricing and recurring costs.
+- API documentation.
+- Authentication requirements.
+- Webhook support.
+- Delivery status reporting.
+- Rate limits.
+- Reliability.
+- Ease of integration with Supabase Edge Functions.
+- Business verification requirements.
+- Template approval requirements.
+- Operational complexity.
+
+Do not select a provider merely because it is popular.
+
+Recommend the simplest suitable provider combination and explain the reasoning.
+
+Do not introduce multiple providers unless there is a defensible need for redundancy or channel separation.
+
+## 4.3 Notification events
+
+Evaluate automated notifications for the following events.
+
+### Student notifications
+
+1. Reservation successfully created.
+2. Reservation hold approaching expiration.
+3. Payment receipt successfully uploaded.
+4. Payment receipt approved.
+5. Payment receipt rejected.
+6. Reservation confirmed.
+7. Reservation expired.
+8. Shared accommodation invitation received.
+9. Shared accommodation group membership updated.
+10. Relevant reservation status changes.
+
+### Landlord notifications
+
+1. New reservation request received.
+2. Student payment receipt submitted.
+3. Reservation approaching expiration.
+4. Receipt awaiting verification.
+5. Receipt approved or rejected.
+6. Reservation confirmed.
+7. Reservation expired.
+8. Relevant property or reservation events.
+
+### Administrator notifications
+
+Only identify operational alerts that provide genuine administrative value.
+
+Avoid sending routine notifications to administrators for every ordinary student transaction.
+
+## 4.4 Notification architecture
+
+Propose an architecture that fits the existing Supabase-first implementation.
+
+A preferred approach to evaluate is:
+
+1. A business event occurs through an authorized application operation.
+2. The existing backend/database logic records the relevant in-app notification or a notification event.
+3. A secure server-side dispatch mechanism identifies eligible external notification channels.
+4. A Supabase Edge Function sends the message through the selected provider.
+5. The delivery result is recorded.
+6. Delivery failures are handled through a controlled retry mechanism.
+7. The in-app notification remains available even if external delivery fails.
+
+Evaluate whether a dedicated notification outbox table is necessary.
+
+If recommending one, explain:
+
+- Its purpose.
+- Its relationship with existing notification records.
+- Its status lifecycle.
+- Its retry strategy.
+- How duplicate messages will be prevented.
+- How failed messages will be investigated.
+
+Do not add duplicate notification tables if the existing schema already provides an appropriate mechanism.
+
+## 4.5 Critical reliability requirements
+
+The implementation must consider:
+
+- Idempotent notification dispatch.
+- Duplicate event prevention.
+- Retry limits.
+- Exponential backoff where appropriate.
+- Provider timeout handling.
+- Rate limiting.
+- Delivery status tracking.
+- Permanent versus temporary failures.
+- Failed message logging.
+- Secure webhook verification.
+- Provider callback authentication.
+- Protection against webhook replay.
+- Monitoring and operational alerts.
+
+Do not assume that an HTTP 200 response from a provider means the recipient received or read the message.
+
+Distinguish between:
+
+- Message accepted by provider.
+- Message submitted for delivery.
+- Message delivered.
+- Message failed.
+- Message read, where supported and legitimately reported by the provider.
+
+## 4.6 Security and privacy requirements
+
+This feature involves student and landlord contact information.
+
+Therefore:
+
+- Store phone numbers securely and restrict access.
+- Do not expose provider API credentials in frontend code.
+- Store credentials only in appropriate server-side secrets.
+- Do not place private credentials in `VITE_` environment variables.
+- Validate recipient phone numbers.
+- Avoid sending sensitive documents or private payment information through SMS or WhatsApp.
+- Never include payment receipt images, identity documents or authentication details in notification messages.
+- Do not expose unnecessary student information to landlords or other users.
+- Respect communication preferences and applicable consent requirements.
+- Provide a way to manage or withdraw optional marketing communication consent where applicable.
+- Distinguish essential transactional notifications from optional communications.
+- Follow applicable Nigerian data protection requirements.
+
+External notification delivery must never replace database authorization or business logic.
+
+## 4.7 Suggested notification content
+
+Prepare concise message templates for important events.
+
+Examples:
+
+**Reservation created:**
+
+"Your OUTPOST reservation has been created successfully. Please complete the required payment process before the reservation hold expires."
+
+**Receipt submitted:**
+
+"A payment receipt has been submitted for your OUTPOST property. Log in to review and verify the submission."
+
+**Receipt approved:**
+
+"Your payment receipt has been approved. Your OUTPOST reservation status has been updated."
+
+**Reservation expiration warning:**
+
+"Your OUTPOST reservation hold is approaching expiration. Please complete the required payment process before the deadline."
+
+These are examples only. Adapt the final wording to the actual reservation lifecycle and avoid promising a status change that has not been confirmed by the backend.
+
+## 4.8 Notification preferences and fallback
+
+Evaluate a user notification preference model that allows eligible users to select supported communication channels.
+
+However, do not make users lose critical in-app notifications because they disable SMS or WhatsApp.
+
+The system must retain in-app notification records independently of external delivery.
+
+Do not silently send messages through a channel that the user has not authorized or that is not supported by the applicable consent and provider requirements.
+
+## 4.9 Notification testing
+
+Define tests for:
+
+- Successful dispatch.
+- Invalid phone numbers.
+- Provider authentication failures.
+- Provider timeouts.
+- Duplicate event prevention.
+- Retry behaviour.
+- Webhook signature verification.
+- Webhook replay attempts.
+- Delivery status updates.
+- Disabled communication preferences.
+- Missing contact information.
+- Failed external delivery with successful in-app notification creation.
+
+---
+
+# 5. DEVELOPMENT DIRECTION THREE: ADMINISTRATIVE ANALYTICS AND REPORTING DASHBOARD
+
+## 5.1 Objective
+
+Evaluate the addition of an administrative reporting dashboard that provides useful operational insight into accommodation availability, reservations, pricing and verification activities.
+
+The dashboard should help administrators understand platform activity across Danbare and Rimin Gata.
+
+It must be based on actual database records.
+
+Do not generate sample metrics and present them as real platform statistics.
+
+## 5.2 Proposed dashboard metrics
+
+Evaluate the following metrics.
+
+### A. Accommodation overview
+
+- Total registered properties.
+- Total verified properties.
+- Total pending property verifications.
+- Total rejected property listings.
+- Total accommodation units, if represented in the existing schema.
+- Total available accommodation spaces.
+- Total occupied accommodation spaces.
+- Total unavailable accommodation spaces.
+
+### B. Geographic comparison
+
+Provide a comparison between:
+
+- Danbare.
+- Rimin Gata.
+
+Possible metrics include:
+
+- Number of listed properties.
+- Number of verified properties.
+- Available accommodation spaces.
+- Occupied accommodation spaces.
+- Reservation activity.
+- Average listed accommodation price.
+
+Clearly distinguish between property counts, unit counts and accommodation-space counts.
+
+Do not mix these measurements.
+
+### C. Reservation analytics
+
+Evaluate:
+
+- Total reservations.
+- Pending payment reservations.
+- Submitted payment receipts awaiting review.
+- Confirmed reservations.
+- Rejected receipts.
+- Expired reservations.
+- Cancelled reservations, if supported by the existing lifecycle.
+- Reservation conversion rate, if its calculation can be defined reliably.
+
+Define each metric using actual database statuses.
+
+Do not invent reservation statuses or assume that different statuses are interchangeable.
+
+### D. Pricing analytics
+
+Evaluate:
+
+- Average listed accommodation price.
+- Minimum listed price.
+- Maximum listed price.
+- Price distribution.
+- Average price by location.
+- Price trends over time, where historical records support them.
+
+**Important:** OUTPOST accommodation prices may be associated with different rental periods.
+
+Do not compare monthly prices with annual prices as though they are equivalent.
+
+Use the existing pricing model and clearly identify the rental period.
+
+If historical price snapshots do not exist, do not fabricate historical price trends from current listings.
+
+### E. Verification performance
+
+Evaluate:
+
+- Number of landlord verification submissions.
+- Number of approved landlord verifications.
+- Number of rejected landlord verifications.
+- Number of pending verifications.
+- Property verification throughput.
+- Average verification processing time, only if reliable timestamps exist.
+
+Define the measurement period and the exact records used.
+
+## 5.3 Dashboard presentation
+
+Inspect the existing UI library and design system before proposing new dependencies.
+
+The dashboard may use:
+
+- Summary cards.
+- Bar charts.
+- Line charts.
+- Pie or doughnut charts where appropriate.
+- Geographic comparisons.
+- Date-range filtering.
+- Location filtering.
+- Data tables.
+- Exportable reports, if justified.
+
+Use a clean, professional administrative interface.
+
+Do not overload the dashboard with decorative charts that do not help administrators make decisions.
+
+Every metric must have a clear definition and source.
+
+## 5.4 Database and performance considerations
+
+Evaluate whether the dashboard should use:
+
+- Existing database queries.
+- PostgreSQL aggregate queries.
+- Views.
+- Materialized views.
+- RPC functions.
+- A dedicated reporting structure.
+
+Choose the least complex approach that meets performance and security requirements.
+
+Consider:
+
+- Query performance.
+- Appropriate indexes.
+- Data aggregation.
+- Pagination.
+- Date filtering.
+- Repeated dashboard requests.
+- Caching.
+- Materialized view refresh strategies, if required.
+
+Do not retrieve thousands of individual records into the frontend merely to calculate simple aggregate metrics.
+
+Do not expose sensitive student information in administrative analytics unnecessarily.
+
+## 5.5 Security requirements
+
+Administrative analytics must be accessible only to authorized administrators.
+
+Enforce authorization at the database or trusted backend level.
+
+Do not rely exclusively on hiding dashboard routes or buttons in React.
+
+Check:
+
+- RLS policies.
+- RPC execution permissions.
+- Function security.
+- Administrative role validation.
+- Access to aggregate data.
+- Potential leakage of personal information.
+
+Do not expose student identity documents, phone numbers, payment receipt images or private messages through reporting endpoints.
+
+## 5.6 Analytics validation
+
+Define tests that verify:
+
+- Correct aggregation.
+- Correct location classification.
+- Correct reservation status counting.
+- Rental-period consistency.
+- Date-range accuracy.
+- Empty datasets.
+- Missing values.
+- Unauthorized access.
+- Large datasets.
+- Reconciliation against underlying database records.
+
+All reported figures must be reproducible from the underlying records.
+
+---
+
+# 6. DEVELOPMENT DIRECTION FOUR: FINAL PRE-DEPLOYMENT HARDENING
+
+## 6.1 Objective
+
+Evaluate the existing implementation for deployment readiness.
+
+The objective is to identify and resolve remaining security, configuration, database, backend, frontend and operational issues before the application is deployed for real users.
+
+Do not confuse successful local builds with production readiness.
+
+## 6.2 Legacy Firebase cleanup
+
+Firebase is reported to be archived and no longer used by the active application.
+
+Inspect the entire repository for:
+
+- Firebase package dependencies.
+- Firebase configuration files.
+- Firebase initialization.
+- Firebase Authentication imports.
+- Firebase Storage references.
+- Firebase Realtime Database references.
+- Firestore references.
+- Firebase environment variables.
+- Firebase deployment configuration.
+- Unused Firebase services.
+- Legacy Firebase documentation.
+
+Determine whether any Firebase references are:
+
+- Active runtime dependencies.
+- Development dependencies.
+- Archived historical files.
+- Unused configuration.
+- Documentation only.
+
+Do not delete files merely because their names contain "firebase".
+
+Before recommending removal:
+
+1. Confirm that no active code imports the dependency.
+2. Confirm that no build or deployment process depends on it.
+3. Confirm that no migration or data recovery requirement exists.
+4. Identify all affected files.
+5. Explain the effect of removal.
+6. Recommend the smallest safe cleanup.
+
+Preserve archived material when it is useful for project history or recovery.
+
+## 6.3 Database migration and remote verification
+
+Inspect the migration history in order.
+
+The reported migration files are:
+
+1. `20261020000001_initial_schema.sql`
+2. `20261020000002_row_level_security.sql`
+3. `20261020000003_storage_buckets_and_policies.sql`
+4. `20261020000004_functions_triggers_and_automation.sql`
+
+Verify the actual files and determine whether additional migrations have since been created.
+
+Review:
+
+- Schema consistency.
+- Foreign keys.
+- Unique constraints.
+- CHECK constraints.
+- Indexes.
+- Database functions.
+- Triggers.
+- RLS policies.
+- Grants and revocations.
+- SECURITY DEFINER functions.
+- Pinned search paths.
+- Reservation concurrency.
+- Capacity management.
+- Payment receipt review.
+- Reservation expiration.
+
+Determine whether the migration history is consistent with the current application code.
+
+Do not edit historical migrations to make them appear as though changes were present from the beginning.
+
+Use new migrations for approved schema changes.
+
+### Remote deployment distinction
+
+For every important database object, report whether it is:
+
+1. Present in source migrations.
+2. Tested locally.
+3. Applied to the remote Supabase project.
+4. Verified on the remote project.
+
+Do not claim that a migration has been deployed merely because the SQL file exists.
+
+Do not execute `supabase db push` or any remote database command without explicit approval.
+
+## 6.4 Reservation expiration automation
+
+The reported implementation includes:
+
+- `expire_pending_reservations()`.
+- An Edge Function named `expire-reservations`.
+
+Inspect the complete reservation lifecycle.
+
+Determine:
+
+- Which statuses are eligible for expiration.
+- Whether submitted payment receipts are protected from premature expiration.
+- Whether approved receipts lead to the correct reservation transition.
+- Whether rejected receipts are handled correctly.
+- Whether expired reservations release accommodation capacity.
+- Whether expiration is idempotent.
+- Whether concurrent execution can create inconsistent records.
+- Whether the expiration process can safely run more than once.
+
+Evaluate the use of Supabase Cron or `pg_cron` if supported by the current Supabase project and configuration.
+
+The expected reservation hold period is seven days, unless the actual approved business logic specifies otherwise.
+
+Verify the period against the implementation.
+
+### Scheduling requirements
+
+Determine:
+
+- Whether the required extension is available.
+- Whether it is enabled remotely.
+- Whether the scheduled job exists.
+- Whether the job invokes the correct function.
+- Whether execution errors are recorded.
+- Whether the job runs at the intended interval.
+- Whether duplicate jobs can be created.
+- Whether the function can be safely retried.
+
+Do not assume the scheduler is active simply because the SQL migration contains a scheduling statement.
+
+Do not enable extensions or modify the remote scheduler without explicit approval.
+
+## 6.5 Edge Function deployment readiness
+
+Inspect all reported Edge Functions:
+
+- `create-reservation`
+- `review-payment-receipt`
+- `expire-reservations`
+- `get-private-asset-url`
+- `request-upload-session`
+- `admin-actions`
+- `send-notification`
+- `search-nearby-accommodations`
+
+Verify whether the current repository contains the same functions or additional ones.
+
+For each function, review:
+
+- Authentication requirements.
+- Authorization checks.
+- Input validation.
+- Request method validation.
+- Error handling.
+- Database permissions.
+- Service-role usage.
+- Secret handling.
+- Logging.
+- Rate limiting where necessary.
+- CORS configuration.
+- Idempotency where appropriate.
+
+Confirm that privileged operations cannot be invoked by unauthorized users.
+
+Do not expose service-role credentials or privileged backend secrets in frontend code.
+
+## 6.6 Storage security
+
+Inspect the reported storage buckets:
+
+- `student-docs`
+- `landlord-docs`
+- `payment-receipts`
+- `chat-attachments`
+- `property-images`
+- `profile-pictures`
+
+Verify:
+
+- Bucket privacy settings.
+- MIME type restrictions.
+- File size restrictions.
+- Upload permissions.
+- Download permissions.
+- Object path isolation.
+- Signed URL generation.
+- Signed URL expiration.
+- Cross-user access restrictions.
+- Admin access where appropriate.
+
+Confirm that private documents are not accessible through public URLs.
+
+Check whether the application relies on frontend checks where storage policies should enforce authorization.
+
+## 6.7 Authentication and authorization
+
+Review:
+
+- Supabase Auth configuration.
+- Profile creation.
+- User role assignment.
+- Login and registration flows.
+- Password recovery.
+- Session handling.
+- Role changes.
+- Account deactivation.
+- Administrative authorization.
+- RLS coverage.
+
+Confirm that the system continues to support exactly three roles.
+
+Pay particular attention to role escalation.
+
+Never trust user-controlled metadata as the authoritative source of privileged role assignment.
+
+## 6.8 Environment and secrets management
+
+Inspect:
+
+- `.env` files.
+- `.env.example`.
+- Vercel configuration.
+- Render configuration, if applicable.
+- Supabase secrets.
+- MapTiler keys.
+- Resend credentials.
+- Any proposed SMS or WhatsApp provider credentials.
+- Build-time environment variables.
+
+Ensure:
+
+- No secrets are committed to Git.
+- No service-role credentials appear in frontend bundles.
+- No private provider API credentials use `VITE_` variables.
+- Development and production environments are separated.
+- Missing required environment variables produce clear errors.
+- Production configuration is documented.
+- Secret rotation can be performed safely.
+
+Do not print actual secrets in audit reports.
+
+## 6.9 Production deployment checklist
+
+Prepare a deployment checklist covering:
+
+### Frontend
+- Production build.
+- Environment variables.
+- Domain configuration.
+- SPA routing.
+- Error handling.
+- Asset loading.
+- HTTPS.
+- Mobile responsiveness.
+
+### Supabase
+- Migration deployment.
+- RLS verification.
+- Storage policies.
+- Authentication settings.
+- Realtime configuration.
+- Edge Function deployment.
+- Required secrets.
+- Scheduled jobs.
+- Database backup and recovery considerations.
+
+### External services
+- MapTiler.
+- Resend.
+- SMS or WhatsApp provider, if approved.
+- Any other active integration.
+
+### Monitoring and operations
+- Application error logging.
+- Edge Function error monitoring.
+- Database monitoring.
+- Failed notification monitoring.
+- Reservation expiration monitoring.
+- Storage usage.
+- Backup and recovery procedures.
+- Incident response.
+
+Do not claim a production deployment is complete until the relevant remote services have actually been deployed and verified.
+
+---
+
+# 7. ARCHITECTURE AND IMPLEMENTATION PRINCIPLES
+
+All four directions must follow these principles.
+
+## 7.1 Preserve the existing architecture
+
+The current architecture is Supabase-first.
+
+Prefer existing Supabase capabilities where appropriate.
+
+Do not introduce another backend service simply because it is familiar.
+
+Any proposed new dependency must have a clear justification.
+
+## 7.2 Database integrity
+
+- Maintain normalized database structures.
+- Use migrations for schema changes.
+- Preserve migration history.
+- Enforce critical business rules at the database or trusted backend level.
+- Use transactions for critical operations.
+- Prevent duplicate reservations.
+- Prevent overbooking.
+- Avoid competing sources of truth.
+- Use database constraints where appropriate.
+
+## 7.3 Security
+
+- Enforce RLS.
+- Validate all untrusted input.
+- Protect privileged operations.
+- Use server-side secrets.
+- Apply least-privilege access.
+- Prevent unauthorized access to private documents.
+- Protect webhook endpoints.
+- Avoid exposing unnecessary personal information.
+
+## 7.4 Maintainability
+
+- Reuse existing components.
+- Follow existing naming conventions.
+- Keep modules focused.
+- Avoid unnecessary abstraction.
+- Avoid duplicate business logic.
+- Document important architectural decisions.
+- Include appropriate error handling and logging.
+
+## 7.5 Performance
+
+- Avoid unnecessary database requests.
+- Avoid loading entire datasets into the frontend.
+- Use pagination where appropriate.
+- Use efficient SQL aggregation.
+- Avoid unnecessary dependencies.
+- Consider caching carefully.
+- Avoid repeated external API requests.
+
+## 7.6 Academic project constraints
+
+OUTPOST is a final-year software engineering project with potential future commercialization.
+
+Recommendations must be technically sound but achievable.
+
+Do not turn the project into an unnecessarily complicated enterprise platform.
+
+Separate essential final-year project requirements from optional post-graduation improvements.
+
+---
+
+# 8. REQUIRED ASSESSMENT AND REPORT FORMAT
+
+Before writing or modifying code, inspect the repository and produce a structured technical assessment.
+
+Your report must contain the following sections.
+
+## Section A: Existing implementation assessment
+
+For each of the four development directions, report:
+
+| Area | Required finding |
+|---|---|
+| Existing implementation | What currently exists |
+| Completion status | Complete, partial, missing or unverified |
+| Evidence | Exact files, functions, components or configuration |
+| Remaining work | What is actually missing |
+| Dependencies | Existing or required dependencies |
+| Risks | Technical, security or operational risks |
+
+Do not give unsupported status labels.
+
+## Section B: Feature feasibility
+
+Evaluate each direction using:
+
+- Practical value.
+- Technical complexity.
+- Security impact.
+- Operational complexity.
+- Recurring cost.
+- External service dependency.
+- Academic relevance.
+- Future commercial value.
+
+Explain the reasoning behind each assessment.
+
+## Section C: Recommended priority
+
+Rank the four directions in the order you recommend implementing them.
+
+Do not simply follow the order in which they appear in this prompt.
+
+Your ranking must consider dependencies and the current state of the repository.
+
+For each recommendation, explain:
+
+- Why it should be prioritized.
+- What must be completed first.
+- What can be postponed.
+- What measurable outcome it should deliver.
+
+## Section D: Detailed implementation plan
+
+For each direction, provide:
+
+1. Proposed architecture.
+2. Existing components to reuse.
+3. New components, if required.
+4. Database changes, if required.
+5. Backend changes, if required.
+6. Frontend changes, if required.
+7. External services and dependencies.
+8. Environment variables required, without exposing their values.
+9. Security considerations.
+10. Performance considerations.
+11. Testing strategy.
+12. Deployment requirements.
+13. Known limitations.
+
+Identify exact files and directories where possible.
+
+Do not invent file paths. If the correct location has not been established, explicitly say that repository inspection is required.
+
+## Section E: Database impact assessment
+
+Provide a separate database assessment.
+
+Identify:
+
+- Existing tables that can be reused.
+- Existing functions and triggers that can be reused.
+- Whether new tables are necessary.
+- Whether new indexes are necessary.
+- Whether new RLS policies are necessary.
+- Whether new migrations are necessary.
+- Whether any proposed change could affect existing reservation or payment workflows.
+
+Do not create migrations at this stage.
+
+## Section F: Cost and external service assessment
+
+Identify all proposed third-party services.
+
+For each service, explain:
+
+- What it provides.
+- Why it is required.
+- Whether a free tier exists.
+- Potential recurring charges.
+- Usage-based pricing considerations.
+- Geographic availability.
+- Configuration requirements.
+- Alternatives.
+
+Use current official provider documentation and pricing information if external research is available.
+
+Clearly label estimates and assumptions.
+
+Do not invent provider pricing.
+
+## Section G: Security and risk register
+
+Provide a table containing:
+
+| Risk | Affected feature | Likelihood | Impact | Mitigation |
+|---|---|---|---|---|
+
+Include relevant risks involving:
+
+- Personal information.
+- Authentication.
+- Authorization.
+- Webhook abuse.
+- Duplicate notifications.
+- Offline data exposure.
+- Database inconsistency.
+- Incorrect analytics.
+- External provider failure.
+- Deployment misconfiguration.
+- Reservation expiration.
+- Storage access.
+
+## Section H: Testing and acceptance criteria
+
+Provide measurable acceptance criteria for each proposed feature.
+
+Examples:
+
+- An offline user can view eligible previously cached public accommodation information without exposing another user's private data.
+- A reservation event does not generate duplicate external messages when the dispatch mechanism retries.
+- An unauthorized user cannot access administrative analytics.
+- Reservation expiration does not incorrectly expire a reservation awaiting legitimate payment verification.
+- A failed external notification does not remove or prevent creation of the in-app notification.
+- Dashboard totals reconcile with the underlying database records.
+
+Adapt these criteria to the actual implementation.
+
+## Section I: Final recommendation
+
+Conclude with:
+
+1. The strongest immediate development direction.
+2. The features that should be deferred.
+3. The blockers that must be resolved before deployment.
+4. The recommended implementation sequence.
+5. The work that can reasonably be completed within the final-year project.
+6. The improvements better reserved for post-graduation commercialization.
+
+---
+
+# 9. IMPLEMENTATION AUTHORIZATION RULES
+
+This first task is strictly an inspection, assessment and planning exercise.
+
+**DO NOT:**
+
+- Modify source files.
+- Create or modify database migrations.
+- Execute SQL against the remote database.
+- Run `supabase db push`.
+- Deploy Edge Functions.
+- Modify Supabase dashboard settings.
+- Enable extensions.
+- Create scheduled jobs.
+- Add external provider credentials.
+- Install new packages.
+- Remove Firebase files or dependencies.
+- Change production configuration.
+- Deploy the application.
+
+You may execute non-destructive local inspection and testing commands where appropriate.
+
+You must not expose secrets in your report.
+
+After completing the assessment, stop and wait for explicit approval.
+
+Do not interpret the request to assess a feature as permission to implement it.
+
+If implementation is approved later, work in controlled stages:
+
+1. Confirm the approved feature and scope.
+2. Present the implementation plan.
+3. Identify affected files and database objects.
+4. Identify security and compatibility implications.
+5. Implement only the approved changes.
+6. Run relevant tests.
+7. Run the production build.
+8. Report exact changes and test results.
+9. Identify remaining deployment steps.
+10. Wait for separate approval before remote deployment or destructive operations.
+
+---
+
+# 10. FINAL INSTRUCTION
+
+Your objective is not to maximize the number of features added to OUTPOST.
+
+Your objective is to make OUTPOST more reliable, secure, useful and ready for real-world deployment without compromising its existing architecture or exceeding the reasonable scope of the final-year project.
+
+Inspect first. Establish evidence. Identify actual gaps. Recommend the smallest effective improvements.
+
+**Do not write code yet. Deliver the complete technical assessment and implementation roadmap, then wait for approval.**

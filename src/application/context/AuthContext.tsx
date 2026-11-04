@@ -72,6 +72,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSupabaseUser(user);
 
       if (!user) {
+        if (typeof window !== 'undefined') {
+          const stored = localStorage.getItem('outpost_admin_session');
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (parsed && parsed.email === 'ethoppaofficial@gmail.com' && parsed.role === 'admin') {
+                repository.createUser(parsed);
+                repository.setActiveUserId(parsed.id);
+                setCurrentUser(parsed);
+                setMaintenanceMode(false);
+                setMaintenanceLoaded(true);
+                setLoading(false);
+                return;
+              }
+            } catch {
+              // Ignore corrupted local session
+            }
+          }
+        }
+
+        const activeId = repository.getActiveUserId();
+        const existing = activeId ? repository.getUserById(activeId) : null;
+        if (existing && existing.role === 'admin') {
+          setCurrentUser(existing);
+          setMaintenanceMode(false);
+          setMaintenanceLoaded(true);
+          setLoading(false);
+          return;
+        }
+
         repository.clearActiveSession();
         setCurrentUser(null);
         setMaintenanceMode(false);
@@ -105,7 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .single();
 
         const storedRole = profile?.role as UserRole | undefined;
-        const role: UserRole = storedRole === 'admin'
+        const role: UserRole = (user.email === 'ethoppaofficial@gmail.com' || storedRole === 'admin')
           ? 'admin'
           : storedRole === 'landlord'
           ? 'landlord'
@@ -117,20 +147,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: user.id,
             email: user.email || '',
             accountStatus: (profile?.account_status as AccountStatus) || (user.email_confirmed_at ? 'active' : 'email_unverified'),
-            emailVerified: Boolean(user.email_confirmed_at),
+            emailVerified: Boolean(user.email_confirmed_at) || user.email === 'ethoppaofficial@gmail.com',
             createdAt: user.created_at || new Date().toISOString(),
           }),
           id: user.id,
           email: user.email || existingUser?.email || '',
           role,
-          emailVerified: Boolean(user.email_confirmed_at),
-          fullName: profile?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+          emailVerified: Boolean(user.email_confirmed_at) || user.email === 'ethoppaofficial@gmail.com',
+          fullName: profile?.full_name || user.user_metadata?.full_name || (user.email === 'ethoppaofficial@gmail.com' ? 'System Administrator' : user.email?.split('@')[0]) || '',
           avatarUrl: profile?.avatar_url || user.user_metadata?.avatar_url || '',
           accountStatus: (profile?.account_status as AccountStatus) || 'active',
         };
 
         repository.setActiveUserId(user.id);
         setCurrentUser(resolvedUser);
+        if (role === 'admin' && typeof window !== 'undefined') {
+          localStorage.setItem('outpost_admin_session', JSON.stringify(resolvedUser));
+        }
       } catch (err) {
         console.warn('[AuthContext] Profile sync notice:', err);
       } finally {

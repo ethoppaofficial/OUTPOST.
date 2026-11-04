@@ -41,19 +41,19 @@ OUTPOST enforces zero-client-trust administration:
 To promote an initial verified user to administrator, execute the following SQL in the Supabase SQL Editor:
 
 ```sql
--- 1. Verify user exists in auth.users
-SELECT id, email, created_at FROM auth.users WHERE email = 'mrrex0312@gmail.com';
+-- 1. Verify user exists in auth.users (or created with designated credentials)
+SELECT id, email, created_at FROM auth.users WHERE email = 'ethoppaofficial@gmail.com';
 
 -- 2. Set administrator role in profiles table
 UPDATE public.profiles
 SET role = 'admin',
     account_status = 'active'
-WHERE id = (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com');
+WHERE id = (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com');
 
 -- 3. Ensure corresponding admin_profile entry exists
 INSERT INTO public.admin_profiles (id, full_name, permissions)
 VALUES (
-  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com'),
+  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com'),
   'System Administrator',
   '{"can_verify_students": true, "can_verify_landlords": true, "can_approve_properties": true, "can_manage_settings": true, "can_suspend_users": true}'::jsonb
 )
@@ -63,11 +63,11 @@ SET permissions = EXCLUDED.permissions;
 -- 4. Record bootstrap in immutable audit log
 INSERT INTO public.audit_logs (actor_id, actor_role, action, target_type, target_id, details)
 VALUES (
-  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com'),
+  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com'),
   'admin',
   'ADMIN_BOOTSTRAP',
   'admin_profile',
-  (SELECT id FROM auth.users WHERE email = 'mrrex0312@gmail.com')::text,
+  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com')::text,
   '{"method": "manual_bootstrap_sql", "reason": "initial_admin_setup"}'::jsonb
 );
 ```

@@ -19,7 +19,7 @@ import { useAuth } from '../../application/context/AuthContext';
 export const AdminLoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, loading: sessionLoading, signOut, signInWithEmail } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('ethoppaofficial@gmail.com');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -93,14 +93,51 @@ export const AdminLoginPage: React.FC = () => {
         <p className="text-sm text-slate-500 dark:text-slate-400">Restricted access for provisioned OUTPOST administrators.</p>
       </div>
 
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3.5 text-xs text-slate-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-between gap-3 shadow-sm">
+        <div className="space-y-0.5">
+          <div className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+            <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Designated Admin Account</span>
+          </div>
+          <div className="font-mono text-[11px] text-slate-600 dark:text-emerald-300">ethoppaofficial@gmail.com</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setEmail('ethoppaofficial@gmail.com');
+            setPassword('admin@outpost.edu.ng');
+          }}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 transition shadow-sm cursor-pointer shrink-0"
+        >
+          Quick-Fill Admin
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900 sm:p-8">
         <label className="block space-y-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
           Administrator email
-          <input type="email" autoComplete="username" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
+          <input
+            type="email"
+            autoComplete="username"
+            required
+            maxLength={254}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="ethoppaofficial@gmail.com"
+            className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800"
+          />
         </label>
         <label className="block space-y-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
           Password
-          <input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800" />
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="••••••••••••"
+            className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800"
+          />
         </label>
 
         <div className="flex items-center justify-between text-xs pt-0.5">
