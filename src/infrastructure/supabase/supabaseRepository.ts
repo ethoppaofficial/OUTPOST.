@@ -78,9 +78,69 @@ export class SupabaseRepository {
   private auditLogs: AuditLog[] = [];
 
   constructor() {
+    this.loadSeedProfiles();
     if (typeof window !== 'undefined') {
       this.init().catch((err) => console.warn('[SupabaseRepository] Initialization notice:', err));
     }
+  }
+
+  private loadSeedProfiles(): void {
+    this.users = [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        email: 'student1@outpost.edu.ng',
+        fullName: 'Amina Garba',
+        role: 'student',
+        accountStatus: 'active',
+        emailVerified: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        email: 'student2@outpost.edu.ng',
+        fullName: 'Ibrahim Musa',
+        role: 'student',
+        accountStatus: 'active',
+        emailVerified: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        email: 'landlord1@outpost.ng',
+        fullName: 'Alhaji Sani Bello',
+        role: 'landlord',
+        accountStatus: 'active',
+        emailVerified: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        email: 'landlord2@outpost.ng',
+        fullName: 'Hajiya Fatima Umar',
+        role: 'landlord',
+        accountStatus: 'active',
+        emailVerified: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        email: 'admin@outpost.edu.ng',
+        fullName: 'Platform Moderator',
+        role: 'admin',
+        accountStatus: 'active',
+        emailVerified: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        email: 'ethoppaofficial@gmail.com',
+        fullName: 'System Administrator',
+        role: 'admin',
+        accountStatus: 'active',
+        emailVerified: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
   }
 
   public async init(): Promise<void> {
@@ -240,7 +300,7 @@ export class SupabaseRepository {
     if (IS_PROD) {
       throw new Error('resetToSeed is not permitted in production runtime.');
     }
-    this.users = [];
+    this.loadSeedProfiles();
     this.studentProfiles = [];
     this.landlordProfiles = [];
     this.properties = [];
@@ -260,48 +320,12 @@ export class SupabaseRepository {
   }
 
   public getUserById(id: string): User | undefined {
-    const found = this.users.find((u) => u.id === id);
-    if (found) return found;
-
-    if (id === '00000000-0000-4000-8000-000000000001') {
-      const adminUser: User = {
-        id: '00000000-0000-4000-8000-000000000001',
-        email: 'ethoppaofficial@gmail.com',
-        role: 'admin',
-        accountStatus: 'active',
-        emailVerified: true,
-        fullName: 'System Administrator',
-        avatarUrl: '',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      };
-      this.users.push(adminUser);
-      return adminUser;
-    }
-
-    return undefined;
+    return this.users.find((u) => u.id === id);
   }
 
   public getUserByEmail(email: string): User | undefined {
     const normalized = email.trim().toLowerCase();
-    const found = this.users.find((u) => u.email.toLowerCase() === normalized);
-    if (found) return found;
-
-    if (normalized === 'ethoppaofficial@gmail.com') {
-      const adminUser: User = {
-        id: '00000000-0000-4000-8000-000000000001',
-        email: 'ethoppaofficial@gmail.com',
-        role: 'admin',
-        accountStatus: 'active',
-        emailVerified: true,
-        fullName: 'System Administrator',
-        avatarUrl: '',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      };
-      this.users.push(adminUser);
-      return adminUser;
-    }
-
-    return undefined;
+    return this.users.find((u) => u.email.toLowerCase() === normalized);
   }
 
   public createUser(user: User): User {
@@ -312,17 +336,16 @@ export class SupabaseRepository {
       this.users.push(user);
     }
 
+    // Profile role and account_status are authoritatively initialized by the database trigger (handle_new_user).
+    // The client only synchronizes mutable personal details.
     supabase
       .from('profiles')
-      .upsert({
-        id: user.id,
-        email: user.email,
+      .update({
         full_name: user.fullName || user.email.split('@')[0],
-        role: user.role,
-        account_status: user.accountStatus,
         avatar_url: user.avatarUrl || null,
         phone: user.phone || null,
       })
+      .eq('id', user.id)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] createUser sync warning:', error.message);
       });

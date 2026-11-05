@@ -29,7 +29,7 @@ interface ProtectedRouteProps {
  * Route protection higher-order component checking authentication, role permissions, and maintenance status.
  */
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, children }) => {
-  const { loading, currentUser, maintenanceMode, maintenanceLoaded } = useAuth();
+  const { loading, currentUser, profileStatus, profileError, maintenanceMode, maintenanceLoaded } = useAuth();
   const location = useLocation();
 
   if (loading || (currentUser?.role !== 'admin' && !maintenanceLoaded)) {
@@ -37,6 +37,29 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, ch
       <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
         <p className="text-sm text-slate-500 font-medium">Verifying authentication session...</p>
+      </div>
+    );
+  }
+
+  if (profileStatus === 'profile_pending') {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 text-center p-6">
+        <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Setting up your account profile...</h2>
+        <p className="text-sm text-slate-500 max-w-md">Your profile is being initialized in the database. Please wait a moment.</p>
+      </div>
+    );
+  }
+
+  if (profileStatus === 'profile_error') {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 text-center p-6">
+        <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+          <Wrench className="w-6 h-6" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Profile initialization error</h2>
+        <p className="text-sm text-slate-500 max-w-md">{profileError || 'Unable to retrieve your user profile. Please try logging in again.'}</p>
+        <Navigate to="/login" replace state={{ from: location.pathname }} />
       </div>
     );
   }
