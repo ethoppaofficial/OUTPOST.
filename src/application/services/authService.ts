@@ -236,7 +236,11 @@ class AuthService {
       });
 
       if (signUpError || !signUpData.user) {
-        return { success: false, error: signUpError?.message || 'Registration failed.' };
+        let msg = signUpError?.message || 'Registration failed.';
+        if (msg.toLowerCase().includes('error sending confirmation email')) {
+          msg = 'Unable to send confirmation email. Please disable "Confirm email" or verify SMTP settings in your Supabase Dashboard (Authentication > Providers > Email).';
+        }
+        return { success: false, error: msg };
       }
 
       const sbUser = signUpData.user;
@@ -314,7 +318,11 @@ class AuthService {
       });
 
       if (signUpError || !signUpData.user) {
-        return { success: false, error: signUpError?.message || 'Registration failed.' };
+        let msg = signUpError?.message || 'Registration failed.';
+        if (msg.toLowerCase().includes('error sending confirmation email')) {
+          msg = 'Unable to send confirmation email. Please disable "Confirm email" or verify SMTP settings in your Supabase Dashboard (Authentication > Providers > Email).';
+        }
+        return { success: false, error: msg };
       }
 
       const sbUser = signUpData.user;
