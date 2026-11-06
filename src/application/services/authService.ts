@@ -379,6 +379,50 @@ class AuthService {
     }
   }
 
+  public async resetPasswordWithOtp(
+    email: string,
+    token: string,
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanToken = token.trim();
+
+    if (!cleanEmail || !cleanToken) {
+      return { success: false, error: 'Email and 6-digit verification code are required.' };
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters long.' };
+    }
+
+    try {
+      const { data, error: otpError } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: 'recovery',
+      });
+
+      if (otpError || !data?.session) {
+        return {
+          success: false,
+          error: otpError?.message || 'Invalid or expired 6-digit reset code.',
+        };
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        return { success: false, error: updateError.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to verify reset code.' };
+    }
+  }
+
   public async resendVerificationEmail(): Promise<{ success: boolean; error?: string }> {
     const user = this.getCurrentUser();
     if (!user || !user.email) {
