@@ -35,7 +35,25 @@ export const ResetPasswordPage: React.FC = () => {
 
     async function checkRecoverySession() {
       try {
-        // 1. Check if Supabase client already has an active session
+        // 1. Check if URL hash indicates an error from Supabase (e.g. otp_expired)
+        const hash = window.location.hash;
+        if (hash.includes('error=') || hash.includes('error_code=')) {
+          const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+          const errorCode = hashParams.get('error_code');
+          const errorDesc = hashParams.get('error_description');
+          let humanMessage = errorDesc ? errorDesc.replace(/\+/g, ' ') : 'Email recovery link is invalid or has expired.';
+          if (errorCode === 'otp_expired') {
+            humanMessage = 'This password recovery link has expired or has already been used. Please request a fresh reset link below.';
+          }
+          if (isMounted) {
+            setError(humanMessage);
+            setHasValidSession(false);
+            setLoadingSession(false);
+          }
+          return;
+        }
+
+        // 2. Check if Supabase client already has an active session
         const { data: { session } } = await supabase.auth.getSession();
         if (session && isMounted) {
           setHasValidSession(true);
@@ -43,10 +61,8 @@ export const ResetPasswordPage: React.FC = () => {
           return;
         }
 
-        // 2. Check if URL contains hash parameters (#access_token=...&type=recovery)
-        const hash = window.location.hash;
+        // 3. Check if URL contains valid hash parameters (#access_token=...&type=recovery)
         if (hash.includes('access_token') || hash.includes('type=recovery')) {
-          // Supabase auto-parses hash fragments in onAuthStateChange
           if (isMounted) {
             setHasValidSession(true);
             setLoadingSession(false);

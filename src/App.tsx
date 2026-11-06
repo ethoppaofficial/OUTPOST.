@@ -79,6 +79,20 @@ const ProfileRouteRedirect: React.FC = () => {
   return <Navigate to="/student/profile" replace />;
 };
 
+const RecoveryHashHandler: React.FC = () => {
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (
+      (hash.includes('type=recovery') || hash.includes('otp_expired') || hash.includes('error=access_denied')) &&
+      window.location.pathname !== '/reset-password'
+    ) {
+      window.location.replace(`/reset-password${hash}`);
+    }
+  }, []);
+  return null;
+};
+
 export default function App() {
   if (configValidationError) {
     return <ConfigErrorScreen />;
@@ -88,6 +102,7 @@ export default function App() {
     <AuthProvider>
       <ThemeProvider>
         <BrowserRouter>
+          <RecoveryHashHandler />
           <AppShell>
             <Routes>
               {/* Public Routes */}
