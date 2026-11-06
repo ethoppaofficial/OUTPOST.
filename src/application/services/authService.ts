@@ -350,11 +350,32 @@ class AuthService {
   public async sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
     const normalized = email.trim().toLowerCase();
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(normalized);
+      const redirectUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/reset-password`
+        : undefined;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
+        redirectTo: redirectUrl,
+      });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to send password reset email.' };
+    }
+  }
+
+  public async updatePassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters long.' };
+    }
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to update password.' };
     }
   }
 

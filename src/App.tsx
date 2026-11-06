@@ -28,6 +28,7 @@ import { LoginPage } from './pages/public/LoginPage';
 import { AdminLoginPage } from './pages/public/AdminLoginPage';
 import { RegisterPage } from './pages/public/RegisterPage';
 import { ForgotPasswordPage } from './pages/public/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/public/ResetPasswordPage';
 import { UnauthorizedPage } from './pages/public/UnauthorizedPage';
 import { StudentHousingMapPage } from './pages/public/StudentHousingMapPage';
 
@@ -98,6 +99,7 @@ export default function App() {
               <Route path="/admin/login" element={<AdminLoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/unauthorized" element={<UnauthorizedPage />} />
               <Route path="/profile" element={<ProfileRouteRedirect />} />
 
