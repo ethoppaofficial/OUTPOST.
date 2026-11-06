@@ -84,16 +84,28 @@ function getRepositoryFallbackRecords(tableName: string): AdminRecord[] {
         created_at: lp.submittedAt || new Date().toISOString(),
       }));
     case 'student_verification_documents':
-      return repository.getUsers()
-        .flatMap((u) => repository.getStudentDocs(u.id))
-        .map((sd) => ({
-          id: sd.id,
-          student_id: sd.studentId,
-          document_type: sd.documentType,
-          status: sd.status,
-          verification_status: sd.status,
-          created_at: sd.uploadedAt,
-          storage_path: sd.documentUrl,
+      return repository.getAllStudentDocs().map((sd) => ({
+        id: sd.id,
+        student_id: sd.studentId,
+        document_type: sd.documentType,
+        status: sd.status,
+        verification_status: sd.status,
+        created_at: sd.uploadedAt,
+        storage_path: sd.documentUrl,
+        file_name: sd.fileName,
+      }));
+    case 'landlord_verification_submissions':
+      return repository
+        .getLandlordProfiles()
+        .filter((lp) => lp.documentUrl || lp.verificationStatus === 'pending')
+        .map((lp) => ({
+          id: `sub_${lp.userId}`,
+          landlord_id: lp.userId,
+          document_type: lp.idType || 'national_id',
+          status: lp.verificationStatus || 'pending',
+          storage_path: lp.documentUrl || '',
+          file_name: lp.documentUrl ? lp.documentUrl.split('/').pop() : 'landlord_document.pdf',
+          created_at: lp.submittedAt || new Date().toISOString(),
         }));
     case 'properties':
       return repository.getProperties().map((p) => ({
@@ -134,29 +146,53 @@ function getRepositoryFallbackRecords(tableName: string): AdminRecord[] {
   }
 }
 
+let lastAdminAuthWarning: string | null = null;
+
+export function getAdminAuthWarning(): string | null {
+  return lastAdminAuthWarning;
+}
+
 async function readSupabaseTable(tableName: string): Promise<AdminRecord[]> {
+  const fallback = getRepositoryFallbackRecords(tableName);
+
   try {
     const { data, error } = await supabase.from(tableName).select('*');
-    if (!error && data && data.length > 0) {
-      return data as AdminRecord[];
+    if (!error && Array.isArray(data)) {
+      if (data.length > 0) {
+        lastAdminAuthWarning = null;
+        // Merge Supabase remote records with any local-only records (deduplicate by id or user_id)
+        const remoteIds = new Set(data.map((item) => String(item.id || item.user_id || '')));
+        const localOnly = fallback.filter((item) => !remoteIds.has(String(item.id || item.user_id || '')));
+        return [...(data as AdminRecord[]), ...localOnly];
+      }
+      // If table returned empty array, return fallback if present
+      if (fallback.length > 0) {
+        return fallback;
+      }
+      return [];
     }
+
     if (error) {
       console.warn(`[Supabase Admin] Table read warning (${tableName}):`, error?.message);
+      if (error.message?.includes('permission denied') || error.message?.includes('violates row-level security')) {
+        lastAdminAuthWarning = 'Administrator RLS requires an authenticated administrator session in remote Supabase.';
+      }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn(`[Supabase Admin] Table read exception (${tableName}):`, err);
   }
 
-  // Gracefully fall back to local/in-memory records when Supabase returns empty (e.g. unauthenticated session or local mode)
-  return getRepositoryFallbackRecords(tableName);
+  // Gracefully fall back to local/in-memory records when Supabase returns error or unauthenticated
+  return fallback;
 }
 
 class AdminService {
   public async getDashboardData(): Promise<AdminDashboardData> {
-    const [profiles, landlordProfiles, studentDocs, properties, reservations, receipts, audit] = await Promise.all([
+    const [profiles, landlordProfiles, studentDocs, landlordSubmissions, properties, reservations, receipts, audit] = await Promise.all([
       readSupabaseTable('profiles'),
       readSupabaseTable('landlord_profiles'),
       readSupabaseTable('student_verification_documents'),
+      readSupabaseTable('landlord_verification_submissions'),
       readSupabaseTable('properties'),
       readSupabaseTable('reservations'),
       readSupabaseTable('payment_receipts'),
@@ -164,11 +200,16 @@ class AdminService {
     ]);
 
     const now = Date.now();
+    const pendingLandlordIds = new Set([
+      ...landlordProfiles.filter((item) => ['pending', 'not_started'].includes(item.verification_status)).map((item) => item.user_id || item.id),
+      ...landlordSubmissions.filter((item) => item.status === 'pending').map((item) => item.landlord_id),
+    ]);
+
     return {
       metrics: {
         totalStudents: profiles.filter((item) => item.role === 'student').length,
         totalLandlords: profiles.filter((item) => item.role === 'landlord').length,
-        pendingLandlordVerifications: landlordProfiles.filter((item) => ['pending', 'not_started'].includes(item.verification_status)).length,
+        pendingLandlordVerifications: pendingLandlordIds.size,
         pendingStudentVerifications: studentDocs.filter((item) => item.status === 'pending' || item.verification_status === 'pending').length,
         pendingPropertyVerifications: properties.filter((item) => item.approval_status === 'pending').length,
         activeProperties: properties.filter((item) => item.approval_status === 'approved' && item.is_active === true).length,
@@ -217,48 +258,129 @@ class AdminService {
   }
 
   public async getVerificationQueues(): Promise<{ students: AdminRecord[]; landlords: AdminRecord[] }> {
-    const [studentDocs, students, landlords, profiles] = await Promise.all([
+    const [studentDocs, students, landlords, landlordSubmissions, profiles] = await Promise.all([
       readSupabaseTable('student_verification_documents'),
       readSupabaseTable('student_profiles'),
       readSupabaseTable('landlord_profiles'),
+      readSupabaseTable('landlord_verification_submissions'),
       readSupabaseTable('profiles'),
     ]);
 
     const studentById = new Map<string, AdminRecord>(students.map((item) => [item.user_id, item]));
+    const landlordById = new Map<string, AdminRecord>(landlords.map((item) => [item.user_id, item]));
     const userById = new Map<string, AdminRecord>(profiles.map((item) => [item.id, item]));
 
-    return {
-      students: studentDocs.filter((item) => item.status === 'pending' || item.verification_status === 'pending').map((item) => {
-        const profile: AdminRecord = studentById.get(item.student_id) || { id: '' };
+    // Format student verification documents
+    const formattedStudents: AdminRecord[] = studentDocs
+      .filter((item) => item.status === 'pending' || item.verification_status === 'pending')
+      .map((item) => {
+        const studentProfile: AdminRecord = studentById.get(item.student_id) || { id: '' };
         const user: AdminRecord = userById.get(item.student_id) || { id: '' };
+
+        // Normalize DB document_type for UI display
+        const displayDocType =
+          item.document_type === 'student_id_card' || item.document_type === 'student_id'
+            ? 'Student ID Card'
+            : item.document_type === 'admission_letter'
+            ? 'Official Admission Letter'
+            : item.document_type === 'course_registration' || item.document_type === 'school_fees_receipt'
+            ? 'Course Registration / School Fees'
+            : item.document_type === 'nin_slip'
+            ? 'National Identity (NIN) Slip'
+            : item.document_type || 'Academic Identity Proof';
+
         return {
           ...item,
-          fullName: user.full_name || 'Student',
-          registrationNumber: profile.registration_number || '',
-          university: profile.institution || 'Bayero University Kano',
-          campus: profile.campus || 'New Campus',
-          programme: profile.department || '',
-          studyLevel: profile.study_level || '100L',
+          id: item.id,
+          studentId: item.student_id,
+          fullName: user.full_name || studentProfile.full_name || 'Student',
+          registrationNumber: studentProfile.registration_number || '',
+          university: studentProfile.institution || 'Bayero University Kano',
+          campus: studentProfile.campus || 'New Campus',
+          programme: studentProfile.department || '',
+          studyLevel: studentProfile.study_level || '100L',
           studentEmail: user.email || '',
           submittedAt: displayDate(item.created_at),
+          documentType: displayDocType,
           documentUrl: item.storage_path || item.file_url || item.document_url || '',
         };
-      }),
-      landlords: landlords.filter((item) => ['pending', 'not_started'].includes(item.verification_status)).map((item) => {
-        const user: AdminRecord = userById.get(item.user_id) || { id: '' };
-        return {
-          ...item,
-          userId: item.user_id,
-          legalName: user.full_name || item.company_name || 'Landlord',
-          businessName: item.company_name || '',
-          email: user.email || '',
-          idType: item.id_type || 'National ID / BVN',
-          idNumber: item.tax_id || item.id_number || item.idReference || '',
-          ownershipDocType: item.ownership_doc_type || item.ownershipDocType || (item.verification_status === 'not_started' ? 'Pending Document Upload' : 'Submitted Property Deed'),
-          submittedAt: displayDate(item.created_at),
-          documentUrl: item.document_url || item.id_document_url || item.proof_of_ownership_url || item.documentUrl || '',
-        };
-      }),
+      });
+
+    // Format landlord verification submissions
+    const processedLandlordIds = new Set<string>();
+    const formattedLandlords: AdminRecord[] = [];
+
+    // 1. Submissions from landlord_verification_submissions table
+    for (const sub of landlordSubmissions) {
+      if (sub.status && sub.status !== 'pending') continue;
+      const landlordId = sub.landlord_id;
+      processedLandlordIds.add(landlordId);
+
+      const landlordProfile: AdminRecord = landlordById.get(landlordId) || { id: '' };
+      const user: AdminRecord = userById.get(landlordId) || { id: '' };
+      const localProfile = repository.getLandlordProfile(landlordId);
+
+      const displayDocType =
+        sub.document_type === 'national_id'
+          ? 'National ID (NIN)'
+          : sub.document_type === 'passport'
+          ? 'International Passport'
+          : sub.document_type === 'voters_card'
+          ? "Voter's Card"
+          : sub.document_type === 'property_deed'
+          ? 'Property Deed / C of O'
+          : sub.document_type === 'utility_bill'
+          ? 'Utility Bill'
+          : sub.document_type === 'cac_certificate'
+          ? 'CAC Certificate'
+          : localProfile?.idType || sub.document_type || 'Identity & Ownership';
+
+      formattedLandlords.push({
+        ...sub,
+        id: sub.id,
+        submissionId: sub.id,
+        userId: landlordId,
+        legalName: user.full_name || localProfile?.legalName || landlordProfile.company_name || 'Landlord',
+        businessName: landlordProfile.company_name || localProfile?.businessName || '',
+        email: user.email || '',
+        idType: displayDocType,
+        idNumber: localProfile?.idReference || landlordProfile.tax_id || sub.id_number || 'Under Review',
+        ownershipDocType: (localProfile as any)?.ownershipDocType || (sub.document_type === 'property_deed' ? 'Property Deed' : 'Document Evidence'),
+        submittedAt: displayDate(sub.created_at || landlordProfile.created_at),
+        documentUrl: sub.storage_path || localProfile?.documentUrl || landlordProfile.document_url || '',
+        storage_path: sub.storage_path || localProfile?.documentUrl || '',
+      });
+    }
+
+    // 2. Pending landlords from landlord_profiles without a separate submission record
+    for (const lp of landlords) {
+      if (!['pending', 'not_started'].includes(lp.verification_status)) continue;
+      if (processedLandlordIds.has(lp.user_id)) continue;
+
+      const user: AdminRecord = userById.get(lp.user_id) || { id: '' };
+      const localProfile = repository.getLandlordProfile(lp.user_id);
+      const docUrl = lp.document_url || localProfile?.documentUrl || '';
+
+      formattedLandlords.push({
+        ...lp,
+        id: lp.id || lp.user_id,
+        submissionId: lp.id || lp.user_id,
+        userId: lp.user_id,
+        legalName: user.full_name || localProfile?.legalName || lp.company_name || 'Landlord',
+        businessName: lp.company_name || localProfile?.businessName || '',
+        email: user.email || '',
+        idType: localProfile?.idType || lp.id_type || 'National ID (NIN)',
+        idNumber: localProfile?.idReference || lp.tax_id || lp.id_number || 'Under Review',
+        ownershipDocType: (localProfile as any)?.ownershipDocType || (lp.verification_status === 'not_started' ? 'Pending Document Upload' : 'Submitted Property Deed'),
+        submittedAt: displayDate(lp.created_at || localProfile?.submittedAt),
+        documentUrl: docUrl,
+        storage_path: docUrl,
+      });
+    }
+
+    return {
+      students: formattedStudents,
+      landlords: formattedLandlords,
     };
   }
 

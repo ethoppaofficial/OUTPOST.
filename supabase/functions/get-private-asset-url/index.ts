@@ -142,8 +142,10 @@ serve(async (req) => {
       const { data: doc } = await adminClient
         .from('student_verification_documents')
         .select('student_id, storage_path')
-        .eq('id', recordId)
-        .single();
+        .or(`id.eq.${recordId},student_id.eq.${recordId}`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (!doc) {
         return new Response(JSON.stringify({ error: 'Document not found' }), {
@@ -165,8 +167,10 @@ serve(async (req) => {
       const { data: doc } = await adminClient
         .from('landlord_verification_submissions')
         .select('landlord_id, storage_path')
-        .eq('id', recordId)
-        .single();
+        .or(`id.eq.${recordId},landlord_id.eq.${recordId}`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (!doc) {
         return new Response(JSON.stringify({ error: 'Document not found' }), {

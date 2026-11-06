@@ -11,8 +11,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Building2, CheckCircle2, Clock3, FileCheck2, Receipt, ShieldCheck, Users } from 'lucide-react';
-import { adminService, AdminDashboardData } from '../../application/services/adminService';
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, Clock3, FileCheck2, Info, Receipt, ShieldCheck, Users } from 'lucide-react';
+import { adminService, AdminDashboardData, getAdminAuthWarning } from '../../application/services/adminService';
 
 const cards = [
   { key: 'totalStudents', label: 'Total students', icon: Users },
@@ -46,6 +46,7 @@ export const AdminDashboard: React.FC = () => {
     return () => { active = false; };
   }, []);
 
+  const authWarning = getAdminAuthWarning();
   const metrics = data?.metrics;
   const needsAction = metrics ? metrics.pendingLandlordVerifications + metrics.pendingStudentVerifications + metrics.pendingPropertyVerifications + metrics.pendingReceiptVerifications : 0;
   return (
@@ -58,6 +59,23 @@ export const AdminDashboard: React.FC = () => {
         </div>
         <Link to="/admin/verifications" className="inline-flex items-center gap-2 self-start rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500">Open review queue <ArrowRight className="h-4 w-4" /></Link>
       </header>
+
+      {authWarning && (
+        <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="flex items-start gap-2.5">
+            <Info className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div>
+              <p className="font-semibold text-sm">Remote Database Synchronization Notice</p>
+              <p className="mt-1 text-amber-700 dark:text-amber-300/90 leading-relaxed">
+                Supabase Row-Level Security restricts live PostgreSQL table reads to provisioned administrators. If you registered directly or don't see remote student/landlord counts yet, ensure your account (<span className="font-mono font-bold">ethoppaofficial@gmail.com</span>) has an active admin role by running this in your Supabase SQL Editor:
+              </p>
+              <code className="mt-2 block select-all rounded-lg bg-amber-100/90 p-2.5 font-mono text-xs text-amber-950 dark:bg-amber-900/60 dark:text-amber-200">
+                UPDATE public.profiles SET role = 'admin', account_status = 'active' WHERE email = 'ethoppaofficial@gmail.com';
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>}
       {loading && <p className="text-sm text-slate-500">Loading live platform data…</p>}

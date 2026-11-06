@@ -509,9 +509,13 @@ export class SupabaseRepository {
     );
   }
 
+  public getAllStudentDocs(): StudentVerificationDocument[] {
+    return [...this.studentDocs];
+  }
+
   public getStudentDocs(studentId?: string): StudentVerificationDocument[] {
-    const sid = studentId || this.activeUserId;
-    return this.studentDocs.filter((d) => d.studentId === sid);
+    if (!studentId) return [...this.studentDocs];
+    return this.studentDocs.filter((d) => d.studentId === studentId);
   }
 
   public addStudentDocument(docData: {
@@ -536,12 +540,21 @@ export class SupabaseRepository {
 
     this.studentDocs.unshift(newDoc);
 
+    // Map domain StudentDocumentType to database check constraint:
+    // ('student_id_card', 'admission_letter', 'nin_slip', 'course_registration')
+    const dbDocType =
+      newDoc.documentType === 'student_id'
+        ? 'student_id_card'
+        : newDoc.documentType === 'school_fees_receipt'
+        ? 'course_registration'
+        : newDoc.documentType;
+
     supabase
       .from('student_verification_documents')
       .insert({
         id: newDoc.id,
         student_id: newDoc.studentId,
-        document_type: newDoc.documentType,
+        document_type: dbDocType,
         storage_path: newDoc.documentUrl || `${newDoc.studentId}/${newDoc.id}/${newDoc.fileName}`,
         file_name: newDoc.fileName,
         file_size: newDoc.fileSize || 1024,
@@ -561,20 +574,21 @@ export class SupabaseRepository {
     reviewerId: string,
     rejectionReason?: string
   ): StudentVerificationDocument | undefined {
-    const doc = this.studentDocs.find((d) => d.id === docId);
-    if (!doc) return undefined;
-
-    doc.status = status;
-    doc.reviewerId = reviewerId;
-    doc.reviewedAt = new Date().toISOString();
-    doc.rejectionReason = rejectionReason;
+    let doc = this.studentDocs.find((d) => d.id === docId);
+    const nowIso = new Date().toISOString();
+    if (doc) {
+      doc.status = status;
+      doc.reviewerId = reviewerId;
+      doc.reviewedAt = nowIso;
+      doc.rejectionReason = rejectionReason;
+    }
 
     supabase
       .from('student_verification_documents')
       .update({
         status: status,
         reviewer_id: reviewerId,
-        reviewed_at: doc.reviewedAt,
+        reviewed_at: nowIso,
         rejection_reason: rejectionReason || null,
       })
       .eq('id', docId)
@@ -614,6 +628,35 @@ export class SupabaseRepository {
         if (error) console.warn('[SupabaseRepository] saveLandlordProfile warning:', error.message);
       });
 
+    // If verification document URL is attached, persist record to landlord_verification_submissions
+    const docUrl = profile.documentUrl || (profile as any).idDocumentUrl || (profile as any).proofOfOwnershipUrl;
+    if (docUrl) {
+      const rawType = String((profile as any).ownershipDocType || profile.idType || 'national_id').toLowerCase();
+      let dbDocType = 'national_id';
+      if (rawType.includes('passport')) dbDocType = 'passport';
+      else if (rawType.includes('voter')) dbDocType = 'voters_card';
+      else if (rawType.includes('deed') || rawType.includes('occupancy') || rawType.includes('assignment') || rawType.includes('allocation')) dbDocType = 'property_deed';
+      else if (rawType.includes('utility') || rawType.includes('bill') || rawType.includes('electricity') || rawType.includes('nepa')) dbDocType = 'utility_bill';
+      else if (rawType.includes('cac') || rawType.includes('business') || rawType.includes('corporate')) dbDocType = 'cac_certificate';
+
+      const fileName = docUrl.split('/').pop() || 'landlord_document.pdf';
+
+      supabase
+        .from('landlord_verification_submissions')
+        .insert({
+          landlord_id: profile.userId,
+          document_type: dbDocType,
+          storage_path: docUrl,
+          file_name: fileName,
+          file_size: 1048576,
+          content_type: 'application/pdf',
+          status: 'pending',
+        })
+        .then(({ error }) => {
+          if (error) console.warn('[SupabaseRepository] landlord_verification_submissions warning:', error.message);
+        });
+    }
+
     return profile;
   }
 
@@ -624,21 +667,39 @@ export class SupabaseRepository {
     notes?: string
   ): LandlordProfile | undefined {
     const profile = this.getLandlordProfile(userId);
-    if (!profile) return undefined;
+    const nowIso = new Date().toISOString();
+    if (profile) {
+      profile.verificationStatus = status;
+      profile.verifiedAt = nowIso;
+      profile.rejectionReason = notes;
+    }
 
-    profile.verificationStatus = status;
-    profile.verifiedAt = new Date().toISOString();
-
+    // Update landlord_profiles with correct column names (verified_by, verified_at)
     supabase
       .from('landlord_profiles')
       .update({
         verification_status: status,
-        reviewed_by: adminId,
-        reviewed_at: profile.verifiedAt,
+        verified_by: adminId,
+        verified_at: nowIso,
+        rejection_reason: notes || null,
       })
       .eq('user_id', userId)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] reviewLandlordVerification warning:', error.message);
+      });
+
+    // Also update landlord_verification_submissions
+    supabase
+      .from('landlord_verification_submissions')
+      .update({
+        status: status,
+        reviewer_id: adminId,
+        reviewed_at: nowIso,
+        rejection_reason: notes || null,
+      })
+      .eq('landlord_id', userId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] reviewLandlordVerification submissions warning:', error.message);
       });
 
     return profile;

@@ -11,9 +11,10 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle, Loader2 } from 'lucide-react';
-import { adminService, AdminRecord } from '../../application/services/adminService';
+import { CheckCircle2, ExternalLink, FileCheck2, ShieldCheck, XCircle, Loader2, Info } from 'lucide-react';
+import { adminService, AdminRecord, getAdminAuthWarning } from '../../application/services/adminService';
 import { storageService } from '../../application/services/storageService';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
 import { Modal } from '../../components/ui/Modal';
 
 type Kind = 'student' | 'landlord';
@@ -45,7 +46,7 @@ export const VerificationQueuePage: React.FC = () => {
   const [reason, setReason] = useState('');
 
   const handleOpenEvidence = async (item: AdminRecord, kind: Kind) => {
-    const id = kind === 'student' ? item.id : item.userId || item.id;
+    const id = kind === 'student' ? item.id : item.submissionId || item.id || item.userId;
     setOpeningEvidenceId(id);
     try {
       const signedUrl = await storageService.getPrivateAssetDownloadUrl(
@@ -54,10 +55,28 @@ export const VerificationQueuePage: React.FC = () => {
       );
       window.open(signedUrl, '_blank', 'noopener,noreferrer');
     } catch {
-      if (item.documentUrl) {
+      // Direct signed URL fallback via Supabase storage client if Edge Function is not yet deployed
+      try {
+        const bucket = kind === 'student' ? 'student-docs' : 'landlord-docs';
+        const rawPath = item.storage_path || item.documentUrl || '';
+        const cleanPath = rawPath.replace(/^[a-zA-Z0-9_-]+:\/\/[^\/]+\//, '');
+        if (cleanPath && !cleanPath.startsWith('http')) {
+          const { data: signedData, error: signErr } = await supabase.storage
+            .from(bucket)
+            .createSignedUrl(cleanPath, 900);
+          if (!signErr && signedData?.signedUrl) {
+            window.open(signedData.signedUrl, '_blank', 'noopener,noreferrer');
+            return;
+          }
+        }
+      } catch (directSignErr) {
+        console.warn('[Evidence View] Direct storage signed URL fallback notice:', directSignErr);
+      }
+
+      if (item.documentUrl && item.documentUrl.startsWith('http')) {
         window.open(item.documentUrl, '_blank', 'noopener,noreferrer');
       } else {
-        alert('Evidence document could not be retrieved.');
+        alert('Evidence document could not be retrieved. Please verify storage permissions or upload status.');
       }
     } finally {
       setOpeningEvidenceId(null);
@@ -95,10 +114,32 @@ export const VerificationQueuePage: React.FC = () => {
     }
   };
 
+  const authWarning = getAdminAuthWarning();
   const queue = activeTab === 'student' ? students : landlords;
   return (
     <div className="space-y-6">
-      <header><h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review live Student and Landlord submissions. Landlord identity verification is separate from property verification.</p></header>
+      <header>
+        <h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review live Student and Landlord submissions. Landlord identity verification is separate from property verification.</p>
+      </header>
+
+      {authWarning && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="flex items-start gap-2.5">
+            <Info className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div>
+              <p className="font-semibold">Remote Supabase Database Notice</p>
+              <p className="mt-0.5 text-amber-700 dark:text-amber-300/90">
+                To read live document submissions directly from remote PostgreSQL, make sure your account (<span className="font-mono font-semibold">ethoppaofficial@gmail.com</span>) has an active admin role in remote Supabase by executing in your Supabase SQL Editor:
+              </p>
+              <code className="mt-1.5 block select-all rounded bg-amber-100/80 px-2 py-1 font-mono text-[11px] text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                UPDATE public.profiles SET role = 'admin', account_status = 'active' WHERE email = 'ethoppaofficial@gmail.com';
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30">{error}</div>}
       {message && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30">{message}</div>}
       <div className="flex rounded-xl bg-slate-100 p-1 text-sm font-semibold dark:bg-slate-800">
