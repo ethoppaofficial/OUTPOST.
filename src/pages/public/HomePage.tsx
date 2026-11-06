@@ -91,14 +91,7 @@ export const HomePage: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-3 pt-2">
-            <Link to="/register" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500">
-              <UserPlus className="h-4 w-4" /> Create an account
-            </Link>
-            <Link to="/login" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
-              <LogIn className="h-4 w-4" /> Sign in
-            </Link>
-          </div>
+
         </div>
       </section>
 
