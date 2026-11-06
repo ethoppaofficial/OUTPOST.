@@ -43,32 +43,14 @@ export const ForgotPasswordPage: React.FC = () => {
 
       <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
         {sent ? (
-          <div className="text-center py-6 space-y-4">
+          <div className="text-center py-6 space-y-3">
             <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Recovery Email Dispatched</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                If an account is associated with <strong className="text-slate-700 dark:text-slate-300">{email}</strong>, a recovery link and code have been dispatched.
-              </p>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/60 text-left space-y-2">
-              <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                Did the magic link say &quot;Email link is invalid or has expired&quot;?
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Email security scanners often expire single-use links automatically. You can enter the 6-digit verification code directly instead.
-              </p>
-              <Link
-                to={`/reset-password?email=${encodeURIComponent(email)}&mode=code`}
-                className="inline-flex items-center justify-center w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition"
-              >
-                Enter 6-Digit Code Instead
-              </Link>
-            </div>
-
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Recovery Email Dispatched</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              If an account is associated with <strong>{email}</strong>, a password reset link has been dispatched to your inbox.
+            </p>
             <div className="pt-2">
-              <Link to="/login" className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white">
+              <Link to="/login" className="text-xs font-semibold text-emerald-600 hover:underline">
                 Back to Sign In
               </Link>
             </div>
@@ -97,9 +79,10 @@ export const ForgotPasswordPage: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md"
+              disabled={submitting}
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md disabled:opacity-50"
             >
-              Send Reset Link
+              {submitting ? 'Sending Link…' : 'Send Reset Link'}
             </button>
 
             <div className="text-center pt-2">
