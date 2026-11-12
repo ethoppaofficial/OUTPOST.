@@ -33,12 +33,14 @@ export const ResetPasswordPage: React.FC = () => {
 
     async function checkRecoverySession() {
       try {
-        const hash = window.location.hash;
+        const hash = window.location.hash || '';
+        const search = window.location.search || '';
 
-        // If URL hash indicates an error from Supabase
-        if (hash.includes('error=') || hash.includes('error_code=')) {
+        // If URL hash or search parameters indicate an error from Supabase
+        if (hash.includes('error=') || hash.includes('error_code=') || search.includes('error=') || search.includes('error_code=')) {
           const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
-          const errorDesc = hashParams.get('error_description');
+          const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
+          const errorDesc = hashParams.get('error_description') || searchParams.get('error_description');
           const humanMessage = errorDesc
             ? errorDesc.replace(/\+/g, ' ')
             : 'Email recovery link is invalid or has expired.';
@@ -58,8 +60,8 @@ export const ResetPasswordPage: React.FC = () => {
           return;
         }
 
-        // Check if URL contains valid hash parameters (#access_token=...&type=recovery)
-        if (hash.includes('access_token') || hash.includes('type=recovery')) {
+        // Check if URL contains valid hash or search parameters
+        if (hash.includes('access_token') || hash.includes('type=recovery') || search.includes('type=recovery') || search.includes('code=')) {
           if (isMounted) {
             setHasValidSession(true);
             setLoadingSession(false);

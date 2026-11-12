@@ -517,7 +517,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     );
   };
 
-  const publicPaths = ['/', '/properties', '/map', '/login', '/admin/login', '/register', '/forgot-password', '/unauthorized'];
+  const publicPaths = ['/', '/properties', '/map', '/login', '/admin/login', '/register', '/forgot-password', '/reset-password', '/unauthorized'];
   const isPublicRoute =
     publicPaths.includes(location.pathname) || location.pathname.startsWith('/properties/');
   const dashboardPath =

@@ -82,12 +82,24 @@ const ProfileRouteRedirect: React.FC = () => {
 const RecoveryHashHandler: React.FC = () => {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const hash = window.location.hash;
-    if (
-      (hash.includes('type=recovery') || hash.includes('otp_expired') || hash.includes('error=access_denied')) &&
-      window.location.pathname !== '/reset-password'
-    ) {
-      window.location.replace(`/reset-password${hash}`);
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+
+    const isRecoveryHash =
+      hash.includes('type=recovery') ||
+      hash.includes('access_token=') ||
+      hash.includes('error_code=') ||
+      hash.includes('otp_expired') ||
+      hash.includes('error=access_denied');
+
+    const isRecoveryQuery =
+      search.includes('type=recovery') ||
+      search.includes('error_code=') ||
+      search.includes('error=access_denied');
+
+    if ((isRecoveryHash || isRecoveryQuery) && window.location.pathname !== '/reset-password') {
+      const destination = `/reset-password${search}${hash}`;
+      window.location.replace(destination);
     }
   }, []);
   return null;
