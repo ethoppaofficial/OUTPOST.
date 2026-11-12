@@ -128,15 +128,7 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Browse accommodation</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Search current listings in Dambare and Rimin Gata.</p>
-        </div>
-        <Link to="/properties" className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
-          Browse listings <ArrowRight className="h-4 w-4" />
-        </Link>
-      </section>
+
     </div>
   );
 };
