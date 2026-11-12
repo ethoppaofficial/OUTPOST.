@@ -141,6 +141,211 @@ export class SupabaseRepository {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ];
+
+    this.studentProfiles = [
+      {
+        userId: '11111111-1111-4111-8111-111111111111',
+        fullName: 'Amina Garba',
+        email: 'student1@outpost.edu.ng',
+        university: 'Bayero University Kano',
+        campus: 'New Campus',
+        faculty: 'Faculty of Computer Science and Information Technology',
+        department: 'Software Engineering',
+        programme: 'B.Sc. Software Engineering',
+        studyLevel: '300 Level',
+        registrationNumber: 'CST/22/SWE/00142',
+        gender: 'female',
+        isProfileVerified: true,
+        verificationBadge: 'Verified Scholar',
+        budgetMax: 300000,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        userId: '22222222-2222-4222-8222-222222222222',
+        fullName: 'Ibrahim Musa',
+        email: 'student2@outpost.edu.ng',
+        university: 'Bayero University Kano',
+        campus: 'New Campus',
+        faculty: 'Faculty of Engineering',
+        department: 'Civil Engineering',
+        programme: 'B.Eng. Civil Engineering',
+        studyLevel: '400 Level',
+        registrationNumber: 'ENG/21/CVE/00088',
+        gender: 'male',
+        isProfileVerified: true,
+        verificationBadge: 'Verified Scholar',
+        budgetMax: 250000,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    this.landlordProfiles = [
+      {
+        userId: '33333333-3333-4333-8333-333333333333',
+        fullName: 'Alhaji Sani Bello',
+        businessName: 'Bello Danbare Executive Properties',
+        phone: '+234 803 123 4567',
+        verificationStatus: 'approved',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        userId: '44444444-4444-4444-8444-444444444444',
+        fullName: 'Hajiya Fatima Umar',
+        businessName: 'Umar Rimin Gata Lodge Suites',
+        phone: '+234 802 987 6543',
+        verificationStatus: 'approved',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    const seedGroupId = 'g1111111-1111-4111-8111-111111111111';
+    const seedGroup: AccommodationGroup = {
+      id: seedGroupId,
+      name: 'Danbare Tech Cohort',
+      description: 'BUK Computer Science & Engineering students pooling together for a vetted lodge in Danbare.',
+      ownerId: '11111111-1111-4111-8111-111111111111',
+      ownerName: 'Amina Garba',
+      leaderId: '11111111-1111-4111-8111-111111111111',
+      leaderName: 'Amina Garba',
+      adminIds: ['11111111-1111-4111-8111-111111111111'],
+      memberIds: ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'],
+      members: [
+        {
+          userId: '11111111-1111-4111-8111-111111111111',
+          name: 'Amina Garba',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          userId: '22222222-2222-4222-8222-222222222222',
+          name: 'Ibrahim Musa',
+          role: 'member',
+          status: 'active',
+          joinedAt: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+      maxCapacity: 4,
+      status: 'active',
+      visibility: 'discoverable',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    this.groups = [seedGroup];
+
+    this.conversations = [
+      {
+        id: 'c-group-danbare-tech',
+        type: 'group',
+        groupId: seedGroupId,
+        title: 'Danbare Tech Cohort (Cohort)',
+        name: 'Danbare Tech Cohort (Cohort)',
+        participantIds: ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'],
+        participants: [
+          { userId: '11111111-1111-4111-8111-111111111111', name: 'Amina Garba', role: 'student' },
+          { userId: '22222222-2222-4222-8222-222222222222', name: 'Ibrahim Musa', role: 'student' },
+        ],
+        createdBy: '11111111-1111-4111-8111-111111111111',
+        lastMessageText: 'Welcome to the cohort! Let us review the verified listings near Gate 2.',
+        lastMessageAt: '2026-01-02T10:00:00.000Z',
+        unreadCount: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T10:00:00.000Z',
+      },
+      {
+        id: 'c-direct-landlord-sani',
+        type: 'direct',
+        title: 'Alhaji Sani Bello (Landlord)',
+        name: 'Alhaji Sani Bello (Landlord)',
+        participantIds: ['11111111-1111-4111-8111-111111111111', '33333333-3333-4333-8333-333333333333'],
+        participants: [
+          { userId: '11111111-1111-4111-8111-111111111111', name: 'Amina Garba', role: 'student' },
+          { userId: '33333333-3333-4333-8333-333333333333', name: 'Alhaji Sani Bello', role: 'landlord' },
+        ],
+        createdBy: '11111111-1111-4111-8111-111111111111',
+        lastMessageText: 'Hello Amina, the property inspection for Danbare Lodge is scheduled for 3 PM.',
+        lastMessageAt: '2026-01-03T11:00:00.000Z',
+        unreadCount: 0,
+        createdAt: '2026-01-03T10:00:00.000Z',
+        updatedAt: '2026-01-03T11:00:00.000Z',
+      },
+      {
+        id: 'c-direct-admin-support',
+        type: 'direct',
+        title: 'Platform Moderator (Support)',
+        name: 'Platform Moderator (Support)',
+        participantIds: ['11111111-1111-4111-8111-111111111111', '55555555-5555-4555-8555-555555555555'],
+        participants: [
+          { userId: '11111111-1111-4111-8111-111111111111', name: 'Amina Garba', role: 'student' },
+          { userId: '55555555-5555-4555-8555-555555555555', name: 'Platform Moderator', role: 'admin' },
+        ],
+        createdBy: '55555555-5555-4555-8555-555555555555',
+        lastMessageText: 'Welcome to OUTPOST BUK. Let us know if you need help with verification or reservations.',
+        lastMessageAt: '2026-01-01T08:00:00.000Z',
+        unreadCount: 0,
+        createdAt: '2026-01-01T08:00:00.000Z',
+        updatedAt: '2026-01-01T08:00:00.000Z',
+      },
+    ];
+
+    this.messages = {
+      'c-group-danbare-tech': [
+        {
+          id: 'm-group-1',
+          conversationId: 'c-group-danbare-tech',
+          senderId: '11111111-1111-4111-8111-111111111111',
+          senderName: 'Amina Garba',
+          senderRole: 'student',
+          text: 'Hello Ibrahim! Thanks for joining the cohort.',
+          status: 'sent',
+          createdAt: '2026-01-02T09:50:00.000Z',
+        },
+        {
+          id: 'm-group-2',
+          conversationId: 'c-group-danbare-tech',
+          senderId: '22222222-2222-4222-8222-222222222222',
+          senderName: 'Ibrahim Musa',
+          senderRole: 'student',
+          text: 'Welcome to the cohort! Let us review the verified listings near Gate 2.',
+          status: 'sent',
+          createdAt: '2026-01-02T10:00:00.000Z',
+        },
+      ],
+      'c-direct-landlord-sani': [
+        {
+          id: 'm-sani-1',
+          conversationId: 'c-direct-landlord-sani',
+          senderId: '11111111-1111-4111-8111-111111111111',
+          senderName: 'Amina Garba',
+          senderRole: 'student',
+          text: 'Good day Alhaji, I am interested in viewing the 2-bedroom unit in Danbare.',
+          status: 'sent',
+          createdAt: '2026-01-03T10:00:00.000Z',
+        },
+        {
+          id: 'm-sani-2',
+          conversationId: 'c-direct-landlord-sani',
+          senderId: '33333333-3333-4333-8333-333333333333',
+          senderName: 'Alhaji Sani Bello',
+          senderRole: 'landlord',
+          text: 'Hello Amina, the property inspection for Danbare Lodge is scheduled for 3 PM.',
+          status: 'sent',
+          createdAt: '2026-01-03T11:00:00.000Z',
+        },
+      ],
+      'c-direct-admin-support': [
+        {
+          id: 'm-admin-1',
+          conversationId: 'c-direct-admin-support',
+          senderId: '55555555-5555-4555-8555-555555555555',
+          senderName: 'Platform Moderator',
+          senderRole: 'admin',
+          text: 'Welcome to OUTPOST BUK. Let us know if you need help with verification or reservations.',
+          status: 'sent',
+          createdAt: '2026-01-01T08:00:00.000Z',
+        },
+      ],
+    };
   }
 
   public async init(): Promise<void> {
@@ -266,12 +471,13 @@ export class SupabaseRepository {
           (payload) => {
             const row: any = payload.new;
             if (!row || !row.conversation_id) return;
+            const senderUser = this.getUserById(row.sender_id);
             const msg: ChatMessage = {
               id: row.id,
               conversationId: row.conversation_id,
               senderId: row.sender_id,
-              senderName: row.sender_name || 'User',
-              senderRole: 'student',
+              senderName: row.sender_name || senderUser?.fullName || 'User',
+              senderRole: (row.sender_role as any) || senderUser?.role || 'student',
               text: row.text || row.content || '',
               status: 'sent',
               createdAt: row.created_at,
@@ -291,7 +497,15 @@ export class SupabaseRepository {
             const currentList = this.messages[row.conversation_id] || [];
             if (!currentList.some((m) => m.id === msg.id)) {
               this.messages[row.conversation_id] = [...currentList, msg];
+              const conv = this.getConversationById(row.conversation_id);
+              if (conv) {
+                conv.lastMessageText = msg.text;
+                conv.lastMessageAt = msg.createdAt;
+                conv.updatedAt = msg.createdAt;
+              }
               appEventBus.publish('messageReceived', msg);
+              appEventBus.publish(`chat:${row.conversation_id}`, msg);
+              appEventBus.publish('conversationsUpdated', this.conversations);
             }
           }
         )
@@ -1034,6 +1248,64 @@ export class SupabaseRepository {
     return group;
   }
 
+  public syncGroupConversation(group: AccommodationGroup): Conversation {
+    let conv = this.conversations.find((c) => c.groupId === group.id);
+    const now = new Date().toISOString();
+    const participants: ConversationParticipant[] = group.members.map((m) => {
+      const u = this.getUserById(m.userId);
+      return {
+        userId: m.userId,
+        name: m.name || u?.fullName || 'Cohort Member',
+        role: (u?.role as any) || 'student',
+      };
+    });
+
+    if (conv) {
+      conv.title = `${group.name} (Cohort)`;
+      conv.name = `${group.name} (Cohort)`;
+      conv.participantIds = [...group.memberIds];
+      conv.participants = participants;
+      conv.updatedAt = now;
+    } else {
+      conv = {
+        id: crypto.randomUUID(),
+        type: 'group',
+        groupId: group.id,
+        title: `${group.name} (Cohort)`,
+        name: `${group.name} (Cohort)`,
+        participantIds: [...group.memberIds],
+        participants,
+        createdBy: group.leaderId,
+        unreadCount: 0,
+        createdAt: group.createdAt || now,
+        updatedAt: now,
+      };
+      this.conversations.unshift(conv);
+
+      supabase
+        .from('conversations')
+        .insert({
+          id: conv.id,
+          type: 'group',
+          title: conv.title,
+        })
+        .then(async ({ error }) => {
+          if (!error && conv) {
+            const inserts = conv.participantIds.map((uid) => ({
+              conversation_id: conv.id,
+              user_id: uid,
+            }));
+            if (inserts.length > 0) {
+              await supabase.from('conversation_participants').insert(inserts);
+            }
+          }
+        });
+    }
+
+    appEventBus.publish('conversationsUpdated', this.conversations);
+    return conv;
+  }
+
   public createGroup(
     name: string,
     description: string,
@@ -1073,6 +1345,7 @@ export class SupabaseRepository {
       updatedAt: now,
     };
     this.groups.unshift(group);
+    this.syncGroupConversation(group);
 
     supabase
       .from('accommodation_groups')
@@ -1109,6 +1382,7 @@ export class SupabaseRepository {
     group.name = trimmed;
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    this.syncGroupConversation(group);
     return { success: true, group };
   }
 
@@ -1179,6 +1453,7 @@ export class SupabaseRepository {
     group.adminIds = (group.adminIds || []).filter((id) => id !== targetUserId);
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    this.syncGroupConversation(group);
     return { success: true };
   }
 
@@ -1202,6 +1477,7 @@ export class SupabaseRepository {
     group.adminIds = (group.adminIds || []).filter((id) => id !== userId);
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    this.syncGroupConversation(group);
     return { success: true };
   }
 
@@ -1231,6 +1507,7 @@ export class SupabaseRepository {
     group.memberIds.push(userId);
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    this.syncGroupConversation(group);
     return { success: true };
   }
 

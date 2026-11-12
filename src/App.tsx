@@ -405,6 +405,14 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/landlord/chat/:conversationId"
+                element={
+                  <ProtectedRoute allowedRoles={['landlord']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Admin Routes */}
               <Route
@@ -521,6 +529,14 @@ export default function App() {
               />
               <Route
                 path="/admin/chat"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/chat/:conversationId"
                 element={
                   <ProtectedRoute allowedRoles={['admin']}>
                     <ChatPage />
