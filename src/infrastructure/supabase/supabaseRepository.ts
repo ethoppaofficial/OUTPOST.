@@ -165,6 +165,9 @@ export class SupabaseRepository {
           approval_status,
           is_published,
           is_active,
+          featured_image_url,
+          images,
+          amenities,
           created_at,
           updated_at,
           property_locations (
@@ -228,9 +231,11 @@ export class SupabaseRepository {
             billingPeriod: 'Academic Session (1 Year)',
             depositAmount: Number(row.caution_deposit || 30000),
             utilitiesIncluded: true,
-            amenities: ['Electricity', 'Water', 'Gated Security'],
+            amenities: Array.isArray(row.amenities) && row.amenities.length > 0 ? row.amenities : ['Electricity', 'Water', 'Gated Security'],
             houseRules: ['No loud music after 10PM'],
-            images: [],
+            images: Array.isArray(row.images) && row.images.length > 0
+              ? row.images
+              : (row.featured_image_url ? [row.featured_image_url] : []),
             totalCapacity: row.total_spaces || 10,
             availableSpaces: row.available_spaces || 8,
             verificationStatus: 'approved',
@@ -778,6 +783,9 @@ export class SupabaseRepository {
         caution_deposit: prop.depositAmount || 30000,
         total_spaces: prop.totalCapacity || 10,
         available_spaces: prop.availableSpaces || 8,
+        featured_image_url: prop.images?.[0] || null,
+        images: prop.images || [],
+        amenities: prop.amenities || [],
         approval_status: prop.verificationStatus || 'pending',
         is_published: prop.isActive ?? true,
       })
@@ -798,6 +806,9 @@ export class SupabaseRepository {
         description: prop.description,
         rental_fee_annual: prop.pricePerSession,
         caution_deposit: prop.depositAmount,
+        featured_image_url: prop.images?.[0] || null,
+        images: prop.images || [],
+        amenities: prop.amenities || [],
         updated_at: new Date().toISOString(),
       })
       .eq('id', prop.id)
