@@ -31,6 +31,7 @@ export const PropertyApprovalsPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [target, setTarget] = useState<ReviewTarget | null>(null);
   const [reason, setReason] = useState('');
+  const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
 
   const properties = !loadError && propertiesData ? propertiesData : [];
 
@@ -173,24 +174,41 @@ export const PropertyApprovalsPage: React.FC = () => {
                   </div>
                 )}
 
-                {Array.isArray(property.images) && property.images.length > 0 && (
+                {Array.isArray(property.images) && property.images.length > 0 ? (
                   <div className="flex gap-2 overflow-x-auto">
-                    {property.images.slice(0, 8).map((url: string, index: number) => (
-                      <a
-                        key={`${property.id}-${index}`}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="shrink-0"
-                      >
-                        <img
-                          src={url}
-                          alt={`Listing ${index + 1} for ${property.title || 'property'}`}
-                          className="h-20 w-28 rounded-lg object-cover"
-                        />
-                        <span className="sr-only">Open property photo {index + 1}</span>
-                      </a>
-                    ))}
+                    {property.images.slice(0, 8).map((url: string, index: number) => {
+                      const thumbKey = `${property.id}-${index}`;
+                      const isBad = !url || /^(data:|blob:)/i.test(url) || brokenThumbs[thumbKey];
+                      return isBad ? (
+                        <div
+                          key={thumbKey}
+                          className="h-20 w-28 shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center gap-1 text-[10px] text-slate-500"
+                        >
+                          <Building2 className="h-4 w-4 opacity-60" />
+                          <span>Unavailable</span>
+                        </div>
+                      ) : (
+                        <a
+                          key={thumbKey}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0"
+                        >
+                          <img
+                            src={url}
+                            alt={`Listing ${index + 1} for ${property.title || 'property'}`}
+                            onError={() => setBrokenThumbs((prev) => ({ ...prev, [thumbKey]: true }))}
+                            className="h-20 w-28 rounded-lg object-cover"
+                          />
+                          <span className="sr-only">Open property photo {index + 1}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-800 px-3 py-2 text-xs text-slate-500">
+                    No valid listing photos attached.
                   </div>
                 )}
 

@@ -11,12 +11,12 @@
  *     are actively evaluated during authentication lifecycle.
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../infrastructure/supabase/supabaseClient';
 import { authService } from '../services/authService';
 import { repository } from '../../infrastructure/repositories';
 import { configValidationError, BackendMode } from '../../infrastructure/config/appConfig';
-import { User, UserRole, AccountStatus } from '../../domain/types';
+import { User, UserRole, AccountStatus, LandlordProfile } from '../../domain/types';
 
 export type ProfileInitializationStatus =
   | 'loading'
@@ -28,6 +28,7 @@ export type ProfileInitializationStatus =
 export interface AuthContextType {
   authUser: any | null;
   currentUser: User | null;
+  landlordProfile: LandlordProfile | null;
   loading: boolean;
   profileStatus: ProfileInitializationStatus;
   profileError?: string;
@@ -37,6 +38,7 @@ export interface AuthContextType {
   backendMode: BackendMode;
   isConfigValid: boolean;
   validationError?: string;
+  refreshAuthProfile: () => Promise<void>;
   signInWithGoogle: (preferredRole?: UserRole) => Promise<{ success: boolean; user?: User; error?: string; role?: UserRole }>;
   signInWithEmail: (email: string, password?: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signOut: () => Promise<void>;
@@ -46,6 +48,7 @@ export interface AuthContextType {
 export const AuthContext = createContext<AuthContextType>({
   authUser: null,
   currentUser: null,
+  landlordProfile: null,
   loading: true,
   profileStatus: 'loading',
   connected: false,
@@ -53,6 +56,7 @@ export const AuthContext = createContext<AuthContextType>({
   maintenanceLoaded: true,
   backendMode: 'supabase',
   isConfigValid: true,
+  refreshAuthProfile: async () => {},
   signInWithGoogle: async () => ({ success: false }),
   signInWithEmail: async () => ({ success: false }),
   signOut: async () => {},
@@ -62,14 +66,218 @@ export const AuthContext = createContext<AuthContextType>({
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [landlordProfile, setLandlordProfile] = useState<LandlordProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [profileStatus, setProfileStatus] = useState<ProfileInitializationStatus>('loading');
   const [profileError, setProfileError] = useState<string | undefined>(undefined);
   const [connected, setConnected] = useState<boolean>(false);
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
   const [maintenanceLoaded, setMaintenanceLoaded] = useState<boolean>(true);
+  const mountedRef = useRef(true);
+  const syncSeqRef = useRef(0);
+
+  const syncSession = useCallback(async (session: any | null) => {
+    const seq = ++syncSeqRef.current;
+    const isStale = () => !mountedRef.current || seq !== syncSeqRef.current;
+    const user = session?.user ?? null;
+
+    if (isStale()) return;
+    setSupabaseUser(user);
+
+    if (!user) {
+      // Never restore stale local/in-memory accounts in browser runtime when Supabase has no active session.
+      repository.clearActiveSession();
+      setCurrentUser(null);
+      setLandlordProfile(null);
+      setProfileStatus('unauthenticated');
+      setProfileError(undefined);
+      setMaintenanceMode(false);
+      setMaintenanceLoaded(true);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    // Check maintenance status from Supabase platform_settings
+    try {
+      const { data: settings } = await supabase.from('platform_settings').select('*').limit(1).maybeSingle();
+      if (!isStale()) {
+        setMaintenanceMode(Boolean(settings && (settings as any).maintenance_mode === true));
+      }
+    } catch {
+      if (!isStale()) setMaintenanceMode(false);
+    } finally {
+      if (!isStale()) setMaintenanceLoaded(true);
+    }
+
+    // Fetch authoritative user profile from Supabase profiles table with bounded retries
+    try {
+      let profile: any = null;
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (isStale()) return;
+        if (data) {
+          profile = data;
+          break;
+        }
+        if (error) {
+          lastError = error;
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+        }
+      }
+
+      if (isStale()) return;
+
+      if (profile) {
+        const storedRole = profile.role as UserRole | undefined;
+        let validRole: UserRole | null = null;
+        if (storedRole === 'admin') validRole = 'admin';
+        else if (storedRole === 'landlord') validRole = 'landlord';
+        else if (storedRole === 'student') validRole = 'student';
+
+        if (!validRole) {
+          console.error('[AuthContext] Unrecognized role in database profile:', storedRole);
+          setProfileStatus('profile_error');
+          setProfileError('Account profile contains an invalid role specification.');
+          setCurrentUser(null);
+          setLandlordProfile(null);
+          return;
+        }
+
+        const resolvedStatus = (profile.account_status as AccountStatus) || 'active';
+
+        if (resolvedStatus === 'suspended') {
+          repository.clearActiveSession();
+          setProfileStatus('profile_error');
+          setProfileError('Your account has been suspended by an administrator.');
+          setCurrentUser(null);
+          setLandlordProfile(null);
+          return;
+        }
+
+        // Administrator privileges strictly require role === 'admin' AND account_status === 'active'.
+        if (validRole === 'admin' && resolvedStatus !== 'active') {
+          repository.clearActiveSession();
+          setProfileStatus('profile_error');
+          setProfileError('Administrator access requires an active account status in public.profiles.');
+          setCurrentUser(null);
+          setLandlordProfile(null);
+          return;
+        }
+
+        let resolvedLandlordProfile: LandlordProfile | null = null;
+        if (validRole === 'landlord') {
+          const { data: lp } = await supabase
+            .from('landlord_profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (isStale()) return;
+
+          if (lp) {
+            resolvedLandlordProfile = {
+              userId: lp.user_id,
+              legalName: profile.full_name || lp.company_name || 'Landlord',
+              businessName: lp.company_name || undefined,
+              phone: profile.phone || '',
+              contactAddress: lp.business_address || '',
+              idType: 'National ID (NIN)',
+              idReference: lp.tax_id || '',
+              verificationStatus: (lp.verification_status as any) || 'not_started',
+              rejectionReason: lp.rejection_reason || undefined,
+              verifiedAt: lp.verified_at || undefined,
+            };
+          }
+        }
+
+        const existingUser = repository.getUserById(user.id);
+        const resolvedUser: User = {
+          ...(existingUser || {
+            id: user.id,
+            email: user.email || profile.email || '',
+            accountStatus: resolvedStatus,
+            emailVerified: Boolean(user.email_confirmed_at),
+            createdAt: profile.created_at || user.created_at || new Date().toISOString(),
+          }),
+          id: user.id,
+          email: user.email || profile.email || existingUser?.email || '',
+          role: validRole,
+          accountStatus: resolvedStatus,
+          emailVerified: Boolean(user.email_confirmed_at),
+          fullName: profile.full_name || user.user_metadata?.full_name || '',
+          avatarUrl: profile.avatar_url || user.user_metadata?.avatar_url || '',
+          phone: profile.phone || existingUser?.phone,
+          landlordProfile: resolvedLandlordProfile || undefined,
+        };
+
+        repository.createUser(resolvedUser);
+        repository.setActiveUserId(user.id);
+        setCurrentUser(resolvedUser);
+        setLandlordProfile(resolvedLandlordProfile);
+        setProfileStatus('authenticated');
+        setProfileError(undefined);
+        return;
+      }
+
+      // Only allow in-memory repository user in non-browser Node unit tests (never in browser runtime)
+      if (typeof window === 'undefined') {
+        const localUser = repository.getUserById(user.id);
+        if (localUser) {
+          setCurrentUser(localUser);
+          setLandlordProfile(null);
+          setProfileStatus('authenticated');
+          setProfileError(undefined);
+          return;
+        }
+      }
+
+      // If database query failed with network/PostgREST error
+      if (lastError) {
+        console.error('[AuthContext] Error retrieving profile from database:', lastError);
+        setProfileStatus('profile_error');
+        setProfileError('Database communication error during profile verification.');
+        setCurrentUser(null);
+        setLandlordProfile(null);
+        return;
+      }
+
+      // If profile does not exist, mark pending. NEVER silently convert to student!
+      setProfileStatus('profile_pending');
+      setProfileError('Your account profile is currently being provisioned. Please stand by.');
+      setCurrentUser(null);
+      setLandlordProfile(null);
+    } catch (err: any) {
+      if (isStale()) return;
+      console.warn('[AuthContext] Profile sync notice:', err);
+      setProfileStatus('profile_error');
+      setProfileError(err?.message || 'Authentication profile error.');
+      setCurrentUser(null);
+      setLandlordProfile(null);
+    } finally {
+      if (!isStale()) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  const refreshAuthProfile = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
+    await syncSession(data?.session ?? null);
+  }, [syncSession]);
 
   useEffect(() => {
+    mountedRef.current = true;
     // 1. Verify Supabase connectivity
     setConnected(isSupabaseConfigured);
 
@@ -78,161 +286,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('[App Init] Supabase repository initialization notice:', err?.message || 'offline');
     });
 
-    // 3. Listen to Supabase Auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      const user = session?.user ?? null;
-      setSupabaseUser(user);
-
-      if (!user) {
-        // Never restore stale local/in-memory accounts in browser runtime when Supabase has no active session.
-        repository.clearActiveSession();
-        setCurrentUser(null);
-        setProfileStatus('unauthenticated');
-        setProfileError(undefined);
-        setMaintenanceMode(false);
-        setMaintenanceLoaded(true);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-
-      // Check maintenance status from Supabase platform_settings
-      try {
-        const { data: settings } = await supabase.from('platform_settings').select('*').limit(1).maybeSingle();
-        if (settings && (settings as any).maintenance_mode === true) {
-          setMaintenanceMode(true);
-        } else {
-          setMaintenanceMode(false);
+    // 3. Read current session immediately on mount so UI does not stay stuck or flash signed-out links
+    supabase.auth
+      .getSession()
+      .then(({ data }) => syncSession(data?.session ?? null))
+      .catch((err) => {
+        console.warn('[AuthContext] Initial getSession notice:', err?.message || err);
+        if (mountedRef.current) {
+          setProfileStatus('unauthenticated');
+          setLoading(false);
         }
-      } catch {
-        setMaintenanceMode(false);
-      } finally {
-        setMaintenanceLoaded(true);
-      }
+      });
 
-      // Fetch user profile from Supabase profiles table with bounded retries
-      try {
-        let profile: any = null;
-        let lastError: any = null;
-
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
-
-          if (data) {
-            profile = data;
-            break;
-          }
-          if (error) {
-            lastError = error;
-          }
-          if (attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
-          }
-        }
-
-        if (profile) {
-          const storedRole = profile.role as UserRole | undefined;
-          let validRole: UserRole | null = null;
-          if (storedRole === 'admin') validRole = 'admin';
-          else if (storedRole === 'landlord') validRole = 'landlord';
-          else if (storedRole === 'student') validRole = 'student';
-
-          if (!validRole) {
-            console.error('[AuthContext] Unrecognized role in database profile:', storedRole);
-            setProfileStatus('profile_error');
-            setProfileError('Account profile contains an invalid role specification.');
-            setCurrentUser(null);
-            return;
-          }
-
-          const resolvedStatus = (profile.account_status as AccountStatus) || 'active';
-
-          if (resolvedStatus === 'suspended') {
-            repository.clearActiveSession();
-            setProfileStatus('profile_error');
-            setProfileError('Your account has been suspended by an administrator.');
-            setCurrentUser(null);
-            return;
-          }
-
-          // Administrator privileges strictly require role === 'admin' AND account_status === 'active'.
-          if (validRole === 'admin' && resolvedStatus !== 'active') {
-            repository.clearActiveSession();
-            setProfileStatus('profile_error');
-            setProfileError('Administrator access requires an active account status in public.profiles.');
-            setCurrentUser(null);
-            return;
-          }
-
-          const existingUser = repository.getUserById(user.id);
-          const resolvedUser: User = {
-            ...(existingUser || {
-              id: user.id,
-              email: user.email || profile.email || '',
-              accountStatus: resolvedStatus,
-              emailVerified: Boolean(user.email_confirmed_at),
-              createdAt: profile.created_at || user.created_at || new Date().toISOString(),
-            }),
-            id: user.id,
-            email: user.email || profile.email || existingUser?.email || '',
-            role: validRole,
-            accountStatus: resolvedStatus,
-            emailVerified: Boolean(user.email_confirmed_at),
-            fullName: profile.full_name || user.user_metadata?.full_name || '',
-            avatarUrl: profile.avatar_url || user.user_metadata?.avatar_url || '',
-          };
-
-          repository.createUser(resolvedUser);
-          repository.setActiveUserId(user.id);
-          setCurrentUser(resolvedUser);
-          setProfileStatus('authenticated');
-          setProfileError(undefined);
-          return;
-        }
-
-        // Only allow in-memory repository user in non-browser Node unit tests (never in browser runtime)
-        if (typeof window === 'undefined') {
-          const localUser = repository.getUserById(user.id);
-          if (localUser) {
-            setCurrentUser(localUser);
-            setProfileStatus('authenticated');
-            setProfileError(undefined);
-            return;
-          }
-        }
-
-        // If database query failed with network/PostgREST error
-        if (lastError) {
-          console.error('[AuthContext] Error retrieving profile from database:', lastError);
-          setProfileStatus('profile_error');
-          setProfileError('Database communication error during profile verification.');
-          setCurrentUser(null);
-          return;
-        }
-
-        // If profile does not exist, mark pending. NEVER silently convert to student!
-        setProfileStatus('profile_pending');
-        setProfileError('Your account profile is currently being provisioned. Please stand by.');
-        setCurrentUser(null);
-      } catch (err: any) {
-        console.warn('[AuthContext] Profile sync notice:', err);
-        setProfileStatus('profile_error');
-        setProfileError(err?.message || 'Authentication profile error.');
-        setCurrentUser(null);
-      } finally {
-        setLoading(false);
-      }
+    // 4. Listen to Supabase Auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      void syncSession(session);
     });
 
     return () => {
+      mountedRef.current = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [syncSession]);
 
   const signInWithGoogle = async (preferredRole: UserRole = 'student') => {
     try {
@@ -259,9 +334,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     const res = await authService.loginWithSupabase(email, password);
     if (res.success && res.user) {
-      setCurrentUser(res.user);
+      await refreshAuthProfile();
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
     return res;
   };
 
@@ -277,7 +353,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       await authService.logout();
       setCurrentUser(null);
+      setLandlordProfile(null);
       setSupabaseUser(null);
+      setProfileStatus('unauthenticated');
+      setProfileError(undefined);
+      setLoading(false);
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -288,6 +368,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         authUser: supabaseUser,
         currentUser,
+        landlordProfile,
         loading,
         profileStatus,
         profileError,
@@ -297,6 +378,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         backendMode: 'supabase',
         isConfigValid: isSupabaseConfigured,
         validationError: configValidationError,
+        refreshAuthProfile,
         signInWithGoogle,
         signInWithEmail,
         signOut,

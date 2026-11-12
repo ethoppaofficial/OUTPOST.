@@ -12,9 +12,9 @@
  * - Optional relative proximity indicator with distance (km) and 8-point compass sector.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, Bed, CheckCircle2, Compass } from 'lucide-react';
+import { MapPin, Navigation, Bed, CheckCircle2, Compass, Building2 } from 'lucide-react';
 import { Property } from '../../domain/types';
 import { VerificationBadge, Badge } from './Badge';
 import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
@@ -48,6 +48,13 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   onMouseLeave,
   proximity,
 }) => {
+  const coverUrl = property.images[0] || '';
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [coverUrl]);
+
   return (
     <div
       onClick={() => onSelect?.(property.id)}
@@ -61,11 +68,19 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
     >
       {/* Image Header */}
       <div className="relative h-52 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-        <img
-          src={property.images[0] || 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=800&auto=format&fit=crop&q=80'}
-          alt={property.title}
-          className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-300"
-        />
+        {coverUrl && !imgError ? (
+          <img
+            src={coverUrl}
+            alt={property.title}
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-300"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
+            <Building2 className="w-10 h-10 opacity-60" />
+            <span className="text-[11px] font-medium">Property photo unavailable</span>
+          </div>
+        )}
 
         {/* Verification Pill */}
         <div className="absolute top-3 left-3 flex flex-col gap-1.5 items-start">

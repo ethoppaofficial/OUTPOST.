@@ -9,15 +9,14 @@
  * - Direct navigation to add new listings, adjust bedspace availability, and review payments.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, Receipt, ShieldCheck, Clock, Plus, Users, ArrowRight } from 'lucide-react';
-import { authService } from '../../application/services/authService';
+import { Building2, Receipt, ShieldCheck, Clock, Plus, Users, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
-import { verificationService } from '../../application/services/verificationService';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { VerificationBadge } from '../../components/ui/Badge';
 import { useAuth } from '../../application/context/AuthContext';
+import { Property } from '../../domain/types';
 
 /**
  * LandlordDashboard Component
@@ -26,23 +25,56 @@ import { useAuth } from '../../application/context/AuthContext';
  * and quick-action buttons for managing student accommodation listings.
  */
 export const LandlordDashboard: React.FC = () => {
-  const { currentUser } = useAuth();
-  const session = authService.getSession();
-  const profile = authService.getCurrentLandlordProfile();
-  const properties = propertyService.getLandlordProperties(session.user.id);
-  const receipts = reservationService.getLandlordReceipts(session.user.id);
+  const { currentUser, loading: authLoading, landlordProfile } = useAuth();
+  const landlordId = currentUser?.id;
+
+  const [properties, setProperties] = useState<Property[]>(() =>
+    landlordId ? propertyService.getLandlordProperties(landlordId) : []
+  );
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadPortfolio = useCallback(async () => {
+    if (authLoading) return;
+    if (!landlordId || landlordId === 'anonymous') {
+      setProperties([]);
+      setLoadingProps(false);
+      return;
+    }
+    setLoadingProps(true);
+    setLoadError(null);
+    try {
+      const fresh = await propertyService.refreshLandlordProperties(landlordId);
+      setProperties(fresh);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load landlord properties.');
+    } finally {
+      setLoadingProps(false);
+    }
+  }, [authLoading, landlordId]);
+
+  useEffect(() => {
+    void loadPortfolio();
+    const unsubscribe = propertyService.subscribeToProperties(() => {
+      if (landlordId) {
+        setProperties(propertyService.getLandlordProperties(landlordId));
+      }
+    });
+    return unsubscribe;
+  }, [loadPortfolio, landlordId]);
+
+  const receipts = landlordId ? reservationService.getLandlordReceipts(landlordId) : [];
   const pendingReceipts = receipts.filter((r) => r.status === 'pending_review');
 
   const totalSpaces = properties.reduce((acc, p) => acc + p.totalCapacity, 0);
   const availableSpaces = properties.reduce((acc, p) => acc + p.availableSpaces, 0);
 
-  const isVerified = profile?.verificationStatus === 'approved';
+  const verificationStatus = landlordProfile?.verificationStatus || 'not_started';
+  const isVerified = verificationStatus === 'approved';
 
   const rawFullName =
-    profile?.legalName ||
+    landlordProfile?.legalName ||
     currentUser?.fullName ||
-    session?.user?.fullName ||
-    session?.displayName ||
     currentUser?.email ||
     '';
 
@@ -59,7 +91,7 @@ export const LandlordDashboard: React.FC = () => {
     return firstWord || 'Host';
   };
 
-  const firstName = getFirstName(rawFullName || profile?.businessName || 'Host');
+  const firstName = getFirstName(rawFullName || landlordProfile?.businessName || 'Host');
 
   return (
     <div className="space-y-8">
@@ -70,10 +102,10 @@ export const LandlordDashboard: React.FC = () => {
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               Hello, {firstName}
             </h1>
-            <VerificationBadge type="landlord" status={profile?.verificationStatus || 'pending'} />
+            <VerificationBadge type="landlord" status={verificationStatus} />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {profile?.businessName ? `${profile.businessName} • ` : ''}
+            {landlordProfile?.businessName ? `${landlordProfile.businessName} • ` : ''}
             Accredited Property Host
           </p>
         </div>
@@ -89,6 +121,18 @@ export const LandlordDashboard: React.FC = () => {
         </div>
       </div>
 
+      {loadError && (
+        <div role="alert" className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+          <button type="button" onClick={() => void loadPortfolio()} className="font-bold underline shrink-0 cursor-pointer">
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Verification Notice */}
       {!isVerified && (
         <div className="p-5 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -98,10 +142,18 @@ export const LandlordDashboard: React.FC = () => {
             </div>
             <div>
               <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                Landlord Ownership Verification Pending
+                {verificationStatus === 'rejected'
+                  ? 'Landlord Verification Declined — Action Required'
+                  : verificationStatus === 'pending'
+                  ? 'Landlord Ownership Verification Pending'
+                  : 'Complete Landlord Identity Verification'}
               </h4>
               <p className="text-xs text-amber-700 dark:text-amber-300/80 max-w-xl mt-0.5">
-                Your government identity credentials are under platform review. Approved landlords receive the gold verified shield badge and direct student trust.
+                {verificationStatus === 'rejected' && landlordProfile?.rejectionReason
+                  ? `Rejection note: ${landlordProfile.rejectionReason}. Submit updated documentation to obtain verification.`
+                  : verificationStatus === 'pending'
+                  ? 'Your government identity credentials are under platform review. Approved landlords receive the gold verified shield badge.'
+                  : 'Upload your national ID and property ownership proof so administrators can verify your landlord account.'}
               </p>
             </div>
           </div>
@@ -110,7 +162,7 @@ export const LandlordDashboard: React.FC = () => {
             to="/landlord/verification"
             className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold whitespace-nowrap text-center"
           >
-            Manage Verification Docs
+            {verificationStatus === 'not_started' ? 'Submit Verification Docs' : 'Manage Verification Docs'}
           </Link>
         </div>
       )}
@@ -123,7 +175,7 @@ export const LandlordDashboard: React.FC = () => {
             <Building2 className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white">
-            {properties.length}
+            {loadingProps && properties.length === 0 ? <Loader2 className="w-5 h-5 animate-spin text-emerald-500" /> : properties.length}
           </div>
           <div className="text-[11px] text-slate-400">Accommodations managed</div>
         </div>
@@ -159,7 +211,7 @@ export const LandlordDashboard: React.FC = () => {
             <ShieldCheck className="w-4 h-4 text-purple-500" />
           </div>
           <div className="text-base font-bold text-slate-900 dark:text-white capitalize">
-            {profile?.verificationStatus || 'Pending'}
+            {verificationStatus.replaceAll('_', ' ')}
           </div>
           <div className="text-[11px] text-slate-400">Platform credential review</div>
         </div>

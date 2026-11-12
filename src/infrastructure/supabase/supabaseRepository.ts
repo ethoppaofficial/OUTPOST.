@@ -28,6 +28,7 @@ import {
   StudentDocumentType,
   VerificationReviewStatus,
   LandlordProfile,
+  HousingArea,
   Property,
   PropertyLocation,
   UnitOrRoom,
@@ -56,6 +57,7 @@ const IS_PROD = Boolean((import.meta as any)?.env?.PROD);
  */
 export class SupabaseRepository {
   private isLiveInitialized = false;
+  private propertiesInitPromise: Promise<void> | null = null;
   private activeUserId: string = '';
 
   // In-memory cache synced with Supabase PostgreSQL tables
@@ -350,118 +352,321 @@ export class SupabaseRepository {
     };
   }
 
-  public async init(): Promise<void> {
-    if (this.isLiveInitialized) return;
-    this.isLiveInitialized = true;
+  private sanitizeMediaUrls(urls: unknown, featuredUrl?: unknown): string[] {
+    const candidates: string[] = [];
+    if (Array.isArray(urls)) {
+      for (const item of urls) {
+        if (typeof item === 'string') candidates.push(item.trim());
+      }
+    }
+    if (typeof featuredUrl === 'string' && featuredUrl.trim()) {
+      candidates.push(featuredUrl.trim());
+    }
+    const seen = new Set<string>();
+    const valid: string[] = [];
+    for (const url of candidates) {
+      if (!url || /^(data:|blob:)/i.test(url)) continue;
+      if (!seen.has(url)) {
+        seen.add(url);
+        valid.push(url);
+      }
+    }
+    return valid;
+  }
 
-    try {
-      // 1. Fetch active properties from Supabase PostgreSQL
-      const { data: propsData, error: propsError } = await supabase
+  private extractPropertyImageStoragePath(url: string, landlordId: string, propertyId: string, idx: number): string {
+    const marker = '/storage/v1/object/public/property-images/';
+    const pos = url.indexOf(marker);
+    if (pos >= 0) {
+      return decodeURIComponent(url.slice(pos + marker.length).split('?')[0]);
+    }
+    return `${landlordId}/${propertyId}/photo_${idx + 1}.jpg`;
+  }
+
+  private mapSupabasePropertyRow(
+    row: any,
+    options?: { defaultActive?: boolean; landlordVerified?: boolean; landlordName?: string }
+  ): Property {
+    const loc = Array.isArray(row.property_locations)
+      ? row.property_locations[0]
+      : row.property_locations;
+    const rawArea = this.normalizeArea(row.area);
+    const area: HousingArea = rawArea === 'Rimin Gata' ? 'Rimin Gata' : 'Dambare';
+    const locationId = area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare';
+
+    const rooms: UnitOrRoom[] = (row.units || []).map((u: any) => {
+      const totalCap = Math.max(1, Number(u.capacity ?? 1));
+      const avail =
+        u.available_spaces !== null && u.available_spaces !== undefined
+          ? Math.max(0, Number(u.available_spaces))
+          : totalCap;
+      return {
+        id: u.id,
+        propertyId: row.id,
+        name: u.name,
+        type: u.unit_type || 'self_contained',
+        totalCapacity: totalCap,
+        availableSpaces: avail,
+        pricePerSession: Number(u.price_annual ?? row.rental_fee_annual ?? 250000),
+      };
+    });
+
+    const totalCapacity =
+      row.total_spaces !== null && row.total_spaces !== undefined
+        ? Math.max(0, Number(row.total_spaces))
+        : rooms.reduce((acc, r) => acc + r.totalCapacity, 0);
+
+    const availableSpaces =
+      row.available_spaces !== null && row.available_spaces !== undefined
+        ? Math.max(0, Number(row.available_spaces))
+        : rooms.reduce((acc, r) => acc + r.availableSpaces, 0);
+
+    const images = this.sanitizeMediaUrls(row.images, row.featured_image_url);
+    const titleStr = String(row.title || 'Student Accommodation');
+    const slug = titleStr.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || row.id;
+
+    const mappedLocation: PropertyLocation | undefined = loc
+      ? {
+          id: loc.id || row.id,
+          propertyId: row.id,
+          locationId,
+          area,
+          city: row.city || 'Kano',
+          state: row.state || 'Kano State',
+          country: row.country || 'Nigeria',
+          fullAddress: row.address || loc.formatted_address || '',
+          nearestLandmark: row.landmark || undefined,
+          latitude: typeof loc.latitude === 'number' ? loc.latitude : Number(loc.latitude),
+          longitude: typeof loc.longitude === 'number' ? loc.longitude : Number(loc.longitude),
+          publicLatitude: loc.public_latitude !== null && loc.public_latitude !== undefined ? Number(loc.public_latitude) : undefined,
+          publicLongitude: loc.public_longitude !== null && loc.public_longitude !== undefined ? Number(loc.public_longitude) : undefined,
+          geohash: '',
+          source: 'manual_pin',
+          precision: (loc.precision || 'nearby_building') as any,
+          verificationStatus:
+            loc.verification_status === 'approved'
+              ? 'verified'
+              : ((loc.verification_status || 'pending') as any),
+          locationVerificationStatus:
+            loc.verification_status === 'approved'
+              ? 'verified'
+              : ((loc.verification_status || 'pending') as any),
+          formattedAddress: loc.formatted_address || row.address || `${area}, Kano State`,
+          publicLocationLabel: `${area} Settlement`,
+          submittedBy: loc.submitted_by || row.landlord_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at || row.created_at,
+        }
+      : undefined;
+
+    return {
+      id: row.id,
+      locationId,
+      location: mappedLocation,
+      landlordId: row.landlord_id,
+      landlordName:
+        options?.landlordName ||
+        this.getUserById(row.landlord_id)?.fullName ||
+        'Property Host',
+      landlordVerified: Boolean(options?.landlordVerified),
+      title: titleStr,
+      slug,
+      description: row.description || '',
+      propertyType: (row.property_type || 'self_contained') as any,
+      accommodationType: 'off_campus' as any,
+      genderPolicy: 'mixed' as any,
+      address: row.address || loc?.formatted_address || `${area}, Kano State`,
+      nearestLandmark: row.landmark || undefined,
+      area,
+      city: row.city || 'Kano',
+      state: row.state || 'Kano State',
+      country: row.country || 'Nigeria',
+      neighbourhood: area,
+      campus: 'New Campus',
+      university: 'Bayero University Kano',
+      distanceKm: area === 'Rimin Gata' ? 1.1 : 0.6,
+      pricePerSession: Number(row.rental_fee_annual ?? 250000),
+      billingPeriod: 'Academic Session (1 Year)',
+      depositAmount: Number(row.caution_deposit ?? 0),
+      utilitiesIncluded: true,
+      amenities: Array.isArray(row.amenities) ? row.amenities : [],
+      houseRules: [],
+      images,
+      totalCapacity,
+      availableSpaces,
+      latitude: mappedLocation?.latitude,
+      longitude: mappedLocation?.longitude,
+      publicLatitude: mappedLocation?.publicLatitude,
+      publicLongitude: mappedLocation?.publicLongitude,
+      verificationStatus: (row.approval_status || 'pending') as any,
+      adminFeedback: row.rejection_reason || undefined,
+      isActive: row.is_published ?? options?.defaultActive ?? false,
+      rooms,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at || row.created_at,
+    };
+  }
+
+  private mergePropertiesIntoCache(nextProps: Property[], replaceApproved: boolean = false): void {
+    const incomingIds = new Set(nextProps.map((p) => p.id));
+    const retained = this.properties.filter((existing) => {
+      if (incomingIds.has(existing.id)) return false;
+      if (replaceApproved && existing.verificationStatus === 'approved') return false;
+      return true;
+    });
+    this.properties = [...nextProps, ...retained];
+    appEventBus.publish('propertiesUpdated', this.properties);
+  }
+
+  public async awaitPropertiesReady(): Promise<void> {
+    if (this.propertiesInitPromise) {
+      await this.propertiesInitPromise;
+    }
+  }
+
+  public async fetchApprovedPropertiesFromSupabase(): Promise<Property[]> {
+    const { data: propsData, error: propsError } = await supabase
+      .from('properties')
+      .select(`
+        id,
+        landlord_id,
+        title,
+        description,
+        address,
+        landmark,
+        area,
+        city,
+        state,
+        country,
+        property_type,
+        rental_fee_annual,
+        caution_deposit,
+        service_charge,
+        total_spaces,
+        available_spaces,
+        approval_status,
+        is_published,
+        rejection_reason,
+        featured_image_url,
+        images,
+        amenities,
+        created_at,
+        updated_at,
+        property_locations (
+          id,
+          property_id,
+          submitted_by,
+          latitude,
+          longitude,
+          public_latitude,
+          public_longitude,
+          precision,
+          verification_status,
+          formatted_address
+        ),
+        units (
+          id,
+          property_id,
+          name,
+          unit_type,
+          capacity,
+          available_spaces,
+          price_annual,
+          is_active
+        )
+      `)
+      .eq('is_published', true)
+      .eq('approval_status', 'approved');
+
+    if (propsError) {
+      throw new Error(`Could not load accommodation directory: ${propsError.message}`);
+    }
+
+    const mapped = (propsData || []).map((row: any) =>
+      this.mapSupabasePropertyRow(row, { defaultActive: true })
+    );
+    this.mergePropertiesIntoCache(mapped, true);
+    return mapped;
+  }
+
+  public async fetchLandlordPropertiesFromSupabase(landlordId: string): Promise<Property[]> {
+    if (!landlordId) return [];
+    const { data, error } = await supabase
+      .from('properties')
+      .select(`
+        id, landlord_id, title, description, address, landmark, area, city, state, country,
+        property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
+        available_spaces, approval_status, is_published, rejection_reason,
+        featured_image_url, images, amenities, created_at, updated_at,
+        property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
+        units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
+      `)
+      .eq('landlord_id', landlordId);
+
+    if (error) {
+      throw new Error(`Could not load landlord properties: ${error.message}`);
+    }
+
+    const { data: lp } = await supabase
+      .from('landlord_profiles')
+      .select('verification_status, company_name')
+      .eq('user_id', landlordId)
+      .maybeSingle();
+
+    const mapped = (data || []).map((row: any) =>
+      this.mapSupabasePropertyRow(row, {
+        defaultActive: false,
+        landlordVerified: lp?.verification_status === 'approved',
+        landlordName: lp?.company_name || this.getUserById(landlordId)?.fullName,
+      })
+    );
+    const otherProps = this.properties.filter((p) => p.landlordId !== landlordId);
+    this.properties = [...mapped, ...otherProps];
+    appEventBus.publish('propertiesUpdated', this.properties);
+    return mapped;
+  }
+
+  public async fetchPropertyByIdOrSlugFromSupabase(lookupKey: string): Promise<Property | null> {
+    if (!lookupKey) return null;
+    const isUuidLookup = this.isUuid(lookupKey);
+
+    if (isUuidLookup) {
+      const { data, error } = await supabase
         .from('properties')
         .select(`
-          id,
-          landlord_id,
-          title,
-          description,
-          property_type,
-          rental_fee_annual,
-          caution_deposit,
-          service_charge,
-          total_spaces,
-          available_spaces,
-          approval_status,
-          is_published,
-          featured_image_url,
-          images,
-          amenities,
-          created_at,
-          updated_at,
-          property_locations (
-            id,
-            property_id,
-            submitted_by,
-            latitude,
-            longitude,
-            public_latitude,
-            public_longitude,
-            precision,
-            verification_status,
-            formatted_address
-          ),
-          units (
-            id,
-            property_id,
-            name,
-            unit_type,
-            capacity,
-            available_spaces,
-            price_annual,
-            is_active
-          )
+          id, landlord_id, title, description, address, landmark, area, city, state, country,
+          property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
+          available_spaces, approval_status, is_published, rejection_reason,
+          featured_image_url, images, amenities, created_at, updated_at,
+          property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
+          units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
         `)
-        .eq('is_published', true)
-        .eq('approval_status', 'approved');
+        .eq('id', lookupKey)
+        .maybeSingle();
 
-      if (!propsError && propsData) {
-        this.properties = propsData.map((row: any) => {
-          const loc = row.property_locations?.[0];
-          const rooms: UnitOrRoom[] = (row.units || []).map((u: any) => ({
-            id: u.id,
-            propertyId: row.id,
-            name: u.name,
-            type: u.unit_type || 'self_contained',
-            totalCapacity: u.capacity || 1,
-            availableSpaces: u.available_spaces || 1,
-            pricePerSession: Number(u.price_annual || row.rental_fee_annual || 250000),
-          }));
-
-          return {
-            id: row.id,
-            locationId: loc?.id || row.id,
-            landlordId: row.landlord_id,
-            landlordName: 'Verified Property Manager',
-            landlordVerified: true,
-            title: row.title,
-            slug: row.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-            description: row.description || '',
-            propertyType: (row.property_type || 'self_contained') as any,
-            accommodationType: 'off_campus' as any,
-            genderPolicy: 'mixed' as any,
-            address: loc?.formatted_address || 'Near BUK Gate 2, Dambare, Kano',
-            city: 'Kano',
-            neighbourhood: 'Dambare',
-            campus: 'New Campus',
-            university: 'Bayero University Kano',
-            distanceKm: 0.8,
-            pricePerSession: Number(row.rental_fee_annual || 250000),
-            billingPeriod: 'Academic Session (1 Year)',
-            depositAmount: Number(row.caution_deposit || 30000),
-            utilitiesIncluded: true,
-            amenities: Array.isArray(row.amenities) && row.amenities.length > 0 ? row.amenities : ['Electricity', 'Water', 'Gated Security'],
-            houseRules: ['No loud music after 10PM'],
-            images: Array.isArray(row.images) && row.images.length > 0
-              ? row.images
-              : (row.featured_image_url ? [row.featured_image_url] : []),
-            totalCapacity: row.total_spaces || 10,
-            availableSpaces: row.available_spaces || 8,
-            verificationStatus: 'approved',
-            isActive: row.is_published ?? true,
-            rooms: rooms.length > 0 ? rooms : [
-              {
-                id: `unit-${row.id}-1`,
-                propertyId: row.id,
-                name: 'Deluxe Studio Block A-1',
-                type: 'self_contained',
-                totalCapacity: 1,
-                availableSpaces: 1,
-                pricePerSession: Number(row.rental_fee_annual || 250000),
-              },
-            ],
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
-        });
+      if (error) {
+        throw new Error(`Could not load property record: ${error.message}`);
       }
+      if (!data) return null;
+      const mapped = this.mapSupabasePropertyRow(data);
+      this.mergePropertiesIntoCache([mapped]);
+      return mapped;
+    }
+
+    const approved = await this.fetchApprovedPropertiesFromSupabase();
+    return approved.find((p) => p.slug === lookupKey || p.id === lookupKey) || null;
+  }
+
+  public async init(): Promise<void> {
+    if (this.propertiesInitPromise) return this.propertiesInitPromise;
+    this.isLiveInitialized = true;
+
+    this.propertiesInitPromise = (async () => {
+      try {
+        // 1. Fetch active properties from Supabase PostgreSQL
+        await this.fetchApprovedPropertiesFromSupabase().catch((err) => {
+          console.warn('[SupabaseRepository] Approved properties bootstrap notice:', err?.message || err);
+        });
 
       // 2. Setup Realtime subscription on messages & newly added conversation memberships
       supabase
@@ -521,18 +726,21 @@ export class SupabaseRepository {
         )
         .subscribe();
 
-      // 3. Hydrate authenticated user's conversations, messages & portfolio when a session exists
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user?.id) {
-        this.activeUserId = authData.user.id;
-        await Promise.all([
-          this.hydrateUserConversationsAndMessages(authData.user.id),
-          this.hydrateUserSessionContext(authData.user.id),
-        ]);
+        // 3. Hydrate authenticated user's conversations, messages & portfolio when a session exists
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          this.activeUserId = authData.user.id;
+          await Promise.all([
+            this.hydrateUserConversationsAndMessages(authData.user.id),
+            this.hydrateUserSessionContext(authData.user.id),
+          ]);
+        }
+      } catch (err) {
+        console.warn('[SupabaseRepository] Live initialization notice:', err);
       }
-    } catch (err) {
-      console.warn('[SupabaseRepository] Live initialization notice:', err);
-    }
+    })();
+
+    return this.propertiesInitPromise;
   }
 
   public resetToSeed(): void {
@@ -637,10 +845,10 @@ export class SupabaseRepository {
           supabase
             .from('properties')
             .select(`
-              id, landlord_id, title, description, property_type, rental_fee_annual,
-              caution_deposit, service_charge, total_spaces, available_spaces,
-              approval_status, is_published, featured_image_url, images, amenities,
-              created_at, updated_at,
+              id, landlord_id, title, description, address, landmark, area, city, state, country,
+              property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
+              available_spaces, approval_status, is_published, rejection_reason,
+              featured_image_url, images, amenities, created_at, updated_at,
               property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
               units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
             `)
@@ -654,55 +862,16 @@ export class SupabaseRepository {
         ]);
 
       if (Array.isArray(landlordProps) && landlordProps.length > 0) {
-        const mappedProps: Property[] = landlordProps.map((row: any) => {
-          const loc = row.property_locations?.[0];
-          const rooms: UnitOrRoom[] = (row.units || []).map((u: any) => ({
-            id: u.id,
-            propertyId: row.id,
-            name: u.name,
-            type: u.unit_type || 'self_contained',
-            totalCapacity: u.capacity || 1,
-            availableSpaces: u.available_spaces ?? u.capacity ?? 1,
-            pricePerSession: Number(u.price_annual || row.rental_fee_annual || 250000),
-          }));
-          return {
-            id: row.id,
-            locationId: loc?.id || row.id,
-            landlordId: row.landlord_id,
-            landlordName: this.getUserById(row.landlord_id)?.fullName || 'Property Host',
+        const mappedProps: Property[] = landlordProps.map((row: any) =>
+          this.mapSupabasePropertyRow(row, {
+            defaultActive: false,
             landlordVerified: landlordProf?.verification_status === 'approved',
-            title: row.title,
-            slug: row.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-            description: row.description || '',
-            propertyType: (row.property_type || 'self_contained') as any,
-            accommodationType: 'off_campus' as any,
-            genderPolicy: 'mixed' as any,
-            address: loc?.formatted_address || 'Near BUK Gate 2, Dambare, Kano',
-            city: 'Kano',
-            neighbourhood: 'Dambare',
-            campus: 'New Campus',
-            university: 'Bayero University Kano',
-            distanceKm: 0.8,
-            pricePerSession: Number(row.rental_fee_annual || 250000),
-            billingPeriod: 'Academic Session (1 Year)',
-            depositAmount: Number(row.caution_deposit || 30000),
-            utilitiesIncluded: true,
-            amenities: Array.isArray(row.amenities) ? row.amenities : [],
-            houseRules: ['No loud music after 10PM'],
-            images: Array.isArray(row.images) && row.images.length > 0
-              ? row.images
-              : (row.featured_image_url ? [row.featured_image_url] : []),
-            totalCapacity: row.total_spaces || 1,
-            availableSpaces: row.available_spaces ?? row.total_spaces ?? 1,
-            verificationStatus: (row.approval_status || 'pending') as any,
-            isActive: row.is_published ?? false,
-            rooms,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
-        });
+            landlordName: landlordProf?.company_name || this.getUserById(row.landlord_id)?.fullName,
+          })
+        );
         const existingOther = this.properties.filter((p) => p.landlordId !== userId);
         this.properties = [...mappedProps, ...existingOther];
+        appEventBus.publish('propertiesUpdated', this.properties);
       }
 
       if (Array.isArray(groupRows) && groupRows.length > 0) {
@@ -1423,8 +1592,21 @@ export class SupabaseRepository {
    * Awaited property submission for Landlord NewPropertyPage so DB/RLS failures surface cleanly to UI.
    */
   public async createPropertyPersisted(prop: Property): Promise<Property> {
+    if (!prop.landlordId || !this.isUuid(prop.landlordId)) {
+      throw new Error('Authenticated landlord account ID is required to submit a property listing.');
+    }
+
+    if (Array.isArray(prop.images) && prop.images.some((u) => /^(data:|blob:)/i.test(String(u || '')))) {
+      throw new Error('Temporary data: or blob: preview URLs cannot be saved. Please upload real image files.');
+    }
+
+    const cleanImages = this.sanitizeMediaUrls(prop.images);
+    if (cleanImages.length === 0) {
+      throw new Error('At least one uploaded property photo is required.');
+    }
+
     const validId = this.isUuid(prop.id) ? prop.id : crypto.randomUUID();
-    const normalizedProp: Property = { ...prop, id: validId };
+    const normalizedProp: Property = { ...prop, id: validId, images: cleanImages };
 
     const { error: propErr } = await supabase
       .from('properties')
@@ -1443,9 +1625,15 @@ export class SupabaseRepository {
         rental_fee_annual: Math.max(1, Number(normalizedProp.pricePerSession || 250000)),
         caution_deposit: Math.max(0, Number(normalizedProp.depositAmount || 0)),
         total_spaces: Math.max(1, Number(normalizedProp.totalCapacity || 1)),
-        available_spaces: Math.max(0, Math.min(Number(normalizedProp.availableSpaces ?? normalizedProp.totalCapacity ?? 1), Math.max(1, Number(normalizedProp.totalCapacity || 1)))),
-        featured_image_url: normalizedProp.images?.[0] || null,
-        images: normalizedProp.images || [],
+        available_spaces: Math.max(
+          0,
+          Math.min(
+            Number(normalizedProp.availableSpaces ?? normalizedProp.totalCapacity ?? 1),
+            Math.max(1, Number(normalizedProp.totalCapacity || 1))
+          )
+        ),
+        featured_image_url: cleanImages[0],
+        images: cleanImages,
         amenities: normalizedProp.amenities || [],
         approval_status: 'pending',
         is_published: false,
@@ -1468,15 +1656,74 @@ export class SupabaseRepository {
       }));
       const { error: unitsErr } = await supabase.from('units').insert(unitsToInsert);
       if (unitsErr) {
-        throw new Error(`Property created, but room inventory insert failed: ${unitsErr.message}`);
+        await supabase.from('properties').delete().eq('id', validId);
+        throw new Error(`Property room inventory insert failed: ${unitsErr.message}`);
       }
     }
 
-    if (normalizedProp.location && Number.isFinite(normalizedProp.location.latitude) && Number.isFinite(normalizedProp.location.longitude)) {
-      this.savePropertyLocation({ ...normalizedProp.location, propertyId: validId });
+    if (
+      normalizedProp.location &&
+      Number.isFinite(normalizedProp.location.latitude) &&
+      Number.isFinite(normalizedProp.location.longitude)
+    ) {
+      const loc = normalizedProp.location;
+      const { error: locErr } = await supabase
+        .from('property_locations')
+        .upsert(
+          {
+            property_id: validId,
+            submitted_by: loc.submittedBy || normalizedProp.landlordId,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            public_latitude: loc.publicLatitude ?? null,
+            public_longitude: loc.publicLongitude ?? null,
+            precision: loc.precision || 'nearby_building',
+            verification_status: 'pending',
+            formatted_address: loc.formattedAddress || normalizedProp.address || 'Kano State',
+          },
+          { onConflict: 'property_id' }
+        );
+      if (locErr) {
+        await supabase.from('properties').delete().eq('id', validId);
+        throw new Error(`Property location record failed: ${locErr.message}`);
+      }
+      this.savePropertyLocation({ ...loc, propertyId: validId });
+    }
+
+    // Persist relational property_images metadata rows (gracefully ignores missing table if Migration 08 not pushed remotely yet)
+    const imageRows = cleanImages.map((url, idx) => {
+      const storagePath = this.extractPropertyImageStoragePath(url, normalizedProp.landlordId, validId, idx);
+      const fileName = storagePath.split('/').pop() || `photo_${idx + 1}.jpg`;
+      return {
+        id: crypto.randomUUID(),
+        property_id: validId,
+        landlord_id: normalizedProp.landlordId,
+        storage_bucket: 'property-images',
+        storage_path: storagePath,
+        public_url: url,
+        file_name: fileName,
+        content_type: 'image/jpeg',
+        file_size: 1,
+        is_cover: idx === 0,
+        sort_order: idx,
+      };
+    });
+
+    const { error: imgsErr } = await supabase
+      .from('property_images')
+      .upsert(imageRows, { onConflict: 'property_id,storage_path' });
+    if (imgsErr) {
+      const code = String((imgsErr as any).code || '');
+      const msg = String(imgsErr.message || '').toLowerCase();
+      const missingTable = code === '42P01' || code === 'PGRST205' || msg.includes('property_images');
+      if (!missingTable) {
+        await supabase.from('properties').delete().eq('id', validId);
+        throw new Error(`Property image metadata insert failed: ${imgsErr.message}`);
+      }
     }
 
     this.properties.unshift(normalizedProp);
+    appEventBus.publish('propertiesUpdated', this.properties);
     return normalizedProp;
   }
 

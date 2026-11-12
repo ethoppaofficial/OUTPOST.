@@ -24,16 +24,19 @@ import { validateUploadFile, STUDENT_DOCUMENT_UPLOAD_RULES } from '../../applica
 import { normalizeError } from '../../application/utils/errorUtils';
 import { useAuth } from '../../application/context/AuthContext';
 
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
+
 export const StudentVerificationPage: React.FC = () => {
-  const { currentUser } = useAuth();
-  const session = authService.getSession();
-  const studentId = currentUser?.id || session.user.id;
-  const studentName = currentUser?.fullName || session.displayName || 'Student';
-  const student = authService.getCurrentStudentProfile();
+  const { currentUser, loading: authLoading } = useAuth();
+  const studentId = currentUser?.id;
+  const studentName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'Student';
+  const cachedStudent = authService.getCurrentStudentProfile();
 
   const [documents, setDocuments] = useState<StudentVerificationDocument[]>(() =>
-    verificationService.getStudentDocuments(studentId)
+    studentId ? verificationService.getStudentDocuments(studentId) : []
   );
+  const [liveVerified, setLiveVerified] = useState<boolean>(Boolean(cachedStudent?.isProfileVerified));
+  const [liveRegNumber, setLiveRegNumber] = useState<string>(cachedStudent?.registrationNumber || '');
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -45,6 +48,7 @@ export const StudentVerificationPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
 
   const refreshDocuments = useCallback(async () => {
+    if (authLoading) return;
     if (!studentId || studentId === 'anonymous') {
       setLoadingDocs(false);
       return;
@@ -52,15 +56,25 @@ export const StudentVerificationPage: React.FC = () => {
     setLoadingDocs(true);
     setLoadError(null);
     try {
-      const liveDocs = await verificationService.loadStudentDocuments(studentId);
+      const [liveDocs, { data: spRow }, { data: profRow }] = await Promise.all([
+        verificationService.loadStudentDocuments(studentId),
+        supabase.from('student_profiles').select('is_profile_verified, registration_number').eq('user_id', studentId).maybeSingle(),
+        supabase.from('profiles').select('is_verified').eq('id', studentId).maybeSingle(),
+      ]);
       setDocuments(liveDocs);
+      if (spRow || profRow) {
+        setLiveVerified(Boolean(spRow?.is_profile_verified || profRow?.is_verified));
+      }
+      if (spRow?.registration_number) {
+        setLiveRegNumber(spRow.registration_number);
+      }
     } catch (err: unknown) {
       const normalized = normalizeError(err, 'Could not load uploaded verification documents.');
       setLoadError(normalized.userMessage);
     } finally {
       setLoadingDocs(false);
     }
-  }, [studentId]);
+  }, [authLoading, studentId]);
 
   useEffect(() => {
     void refreshDocuments();
@@ -86,9 +100,14 @@ export const StudentVerificationPage: React.FC = () => {
     e.preventDefault();
     setError(null);
 
+    if (!studentId || studentId === 'anonymous') {
+      setError('Your authenticated student session is missing. Please sign in again.');
+      return;
+    }
+
     const check = validateUploadFile(file, STUDENT_DOCUMENT_UPLOAD_RULES);
     if (!check.isValid || !file) {
-      setError(check.error || 'Please select an authentic document file (JPEG, PNG, or PDF, max 5 MB).');
+      setError(check.error || 'Please select an authentic document file (JPEG, PNG, WebP, or PDF, max 5 MB).');
       return;
     }
 
@@ -108,7 +127,7 @@ export const StudentVerificationPage: React.FC = () => {
 
       const res = await verificationService.uploadStudentDocument({
         studentId,
-        studentName: student?.fullName || studentName,
+        studentName: cachedStudent?.fullName || studentName,
         documentType,
         fileName: uploadRes.fileName,
         fileSize: uploadRes.fileSize,
@@ -134,7 +153,7 @@ export const StudentVerificationPage: React.FC = () => {
     }
   };
 
-  const isProfileVerified = student?.isProfileVerified;
+  const isProfileVerified = liveVerified;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -143,7 +162,7 @@ export const StudentVerificationPage: React.FC = () => {
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Student Identity Verification
           </h1>
-          <VerificationBadge type="student" status={!!isProfileVerified} />
+          <VerificationBadge type="student" status={isProfileVerified} />
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Upload authentic proof of active university enrolment to obtain your verified student badge.
@@ -156,11 +175,11 @@ export const StudentVerificationPage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Enrolled Student:</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{student?.fullName}</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{cachedStudent?.fullName || studentName}</span>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Registration No:</span>
-            <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{student?.registrationNumber}</span>
+            <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{liveRegNumber || 'Not supplied'}</span>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Badge Status:</span>
@@ -201,7 +220,7 @@ export const StudentVerificationPage: React.FC = () => {
             <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-6 text-center hover:border-emerald-500 transition cursor-pointer relative bg-slate-50/50 dark:bg-slate-800/50">
               <input
                 type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
+                accept=".pdf,.png,.jpg,.jpeg,.webp"
                 onChange={handleFileChange}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />

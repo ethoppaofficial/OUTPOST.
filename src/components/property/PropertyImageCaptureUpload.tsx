@@ -9,12 +9,15 @@ import {
   Star,
   RefreshCw,
   X,
-  Sparkles,
   SwitchCamera,
   Plus,
   Info
 } from 'lucide-react';
 import { storageService } from '../../application/services/storageService';
+import {
+  validateUploadFile,
+  PROPERTY_IMAGE_UPLOAD_RULES,
+} from '../../application/utils/uploadValidation';
 
 export interface PropertyImageCaptureUploadProps {
   images: string[];
@@ -25,28 +28,12 @@ export interface PropertyImageCaptureUploadProps {
   propertyId?: string;
 }
 
-// Curated authentic off-campus student accommodation sample photos (BUK Kano context)
-const SAMPLE_STUDENT_HOUSING_PHOTOS = [
-  {
-    label: 'Exterior & Gated Entrance',
-    url: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=1000&auto=format&fit=crop&q=80',
-  },
-  {
-    label: 'Student Bedroom Interior',
-    url: 'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?w=1000&auto=format&fit=crop&q=80',
-  },
-  {
-    label: 'Study Desk & Personal Space',
-    url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000&auto=format&fit=crop&q=80',
-  },
-  {
-    label: 'En-suite Bathroom & Water Facility',
-    url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=1000&auto=format&fit=crop&q=80',
-  },
-  {
-    label: 'Kitchenette & Common Corridor',
-    url: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=1000&auto=format&fit=crop&q=80',
-  },
+const PHOTO_ROLE_LABELS = [
+  'Exterior & Gated Entrance',
+  'Student Bedroom Interior',
+  'Study Desk & Personal Space',
+  'Bathroom & Water Facility',
+  'Common Corridor / Compound',
 ];
 
 export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProps> = ({
@@ -149,6 +136,10 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
   // Snap photo from the live video element
   const handleCaptureSnapshot = async () => {
     if (!videoRef.current) return;
+    if (!landlordId || landlordId === 'anonymous' || landlordId === 'landlord') {
+      setCameraError('An authenticated landlord session is required before capturing and uploading photos.');
+      return;
+    }
     if (images.length + capturedInSession.length >= maxImages) {
       setCameraError(`Maximum limit of ${maxImages} photos reached.`);
       return;
@@ -169,21 +160,38 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
       // Draw current video frame to canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Convert to blob and upload through storage service
+      // Convert to blob and upload through Supabase storage (never store data: URLs)
       canvas.toBlob(
         async (blob) => {
-          if (!blob) return;
+          if (!blob) {
+            setCameraError('Could not capture photo frame. Please try again or upload a file.');
+            return;
+          }
           const fileName = `camera_photo_${Date.now()}.jpg`;
+          const capturedFile = new File([blob], fileName, { type: 'image/jpeg' });
+          const check = validateUploadFile(capturedFile, PROPERTY_IMAGE_UPLOAD_RULES);
+          if (!check.isValid) {
+            setCameraError(check.error || 'Captured photo failed validation.');
+            return;
+          }
           try {
-            const uploadRes = await storageService.uploadPropertyImage(blob, landlordId || 'landlord', propertyId || 'draft');
+            setIsUploading(true);
+            const uploadRes = await storageService.uploadPropertyImage(
+              capturedFile,
+              landlordId,
+              propertyId || crypto.randomUUID()
+            );
             const newUrl = uploadRes.url;
             setCapturedInSession((prev) => [...prev, newUrl]);
             onChange([...images, newUrl]);
+            setCameraError(null);
+            setUploadError(null);
           } catch (err: any) {
-            // Fallback to data URL
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            setCapturedInSession((prev) => [...prev, dataUrl]);
-            onChange([...images, dataUrl]);
+            const msg = err?.message || 'Failed to upload captured photo to Supabase Storage.';
+            setCameraError(msg);
+            setUploadError(msg);
+          } finally {
+            setIsUploading(false);
           }
         },
         'image/jpeg',
@@ -203,6 +211,10 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
     setIsUploading(true);
 
     try {
+      if (!landlordId || landlordId === 'anonymous' || landlordId === 'landlord') {
+        throw new Error('An authenticated landlord account is required before uploading property photos.');
+      }
+
       const remainingSlots = maxImages - images.length;
       if (remainingSlots <= 0) {
         setUploadError(`You have already added the maximum of ${maxImages} photos.`);
@@ -214,27 +226,24 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
       const newUrls: string[] = [];
 
       for (const file of filesToUpload) {
-        if (!file.type.startsWith('image/')) {
-          continue;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-          throw new Error(`"${file.name}" exceeds the 5MB maximum file size limit.`);
+        const check = validateUploadFile(file, PROPERTY_IMAGE_UPLOAD_RULES);
+        if (!check.isValid) {
+          throw new Error(check.error || `"${file.name}" is not a supported image (JPEG, PNG, or WebP, max 10 MB).`);
         }
 
-        try {
-          const uploadRes = await storageService.uploadPropertyImage(file, landlordId || 'landlord', propertyId || 'draft');
-          newUrls.push(uploadRes.url);
-        } catch {
-          // Fallback to local Object URL for instant preview
-          newUrls.push(URL.createObjectURL(file));
-        }
+        const uploadRes = await storageService.uploadPropertyImage(
+          file,
+          landlordId,
+          propertyId || crypto.randomUUID()
+        );
+        newUrls.push(uploadRes.url);
       }
 
       if (newUrls.length > 0) {
         onChange([...images, ...newUrls]);
       }
     } catch (err: any) {
-      setUploadError(err.message || 'Failed to upload image(s).');
+      setUploadError(err.message || 'Failed to upload image(s) to Supabase Storage.');
     } finally {
       setIsUploading(false);
       // Reset input value so same files can be re-selected if deleted
@@ -242,30 +251,33 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
     }
   };
 
-  // Load sample student hostel photos
-  const handleLoadSamplePhotos = () => {
-    const sampleUrls = SAMPLE_STUDENT_HOUSING_PHOTOS.slice(0, maxImages).map((p) => p.url);
-    onChange(sampleUrls);
-    setUploadError(null);
-  };
-
-  // Add manual URL
+  // Add manual URL (never allows data: or blob: URLs)
   const handleAddManualUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualUrl.trim()) return;
+    const trimmed = manualUrl.trim();
+    if (!trimmed) return;
+    if (/^(data:|blob:)/i.test(trimmed) || !/^https?:\/\//i.test(trimmed)) {
+      setUploadError('Please enter a valid http(s) image URL or upload the image directly. Temporary data or blob URLs are forbidden.');
+      return;
+    }
     if (images.length >= maxImages) {
       setUploadError(`Maximum of ${maxImages} photos reached.`);
       return;
     }
-    onChange([...images, manualUrl.trim()]);
+    setUploadError(null);
+    onChange([...images, trimmed]);
     setManualUrl('');
     setShowUrlInput(false);
   };
 
-  // Remove photo
+  // Remove photo and best-effort clean up public Supabase storage object if applicable
   const handleRemovePhoto = (indexToRemove: number) => {
+    const removedUrl = images[indexToRemove];
     const updated = images.filter((_, idx) => idx !== indexToRemove);
     onChange(updated);
+    if (removedUrl) {
+      void storageService.deletePublicMediaAsset('property-images', removedUrl);
+    }
   };
 
   // Make cover photo (move to index 0)
@@ -315,17 +327,6 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
             (exterior entrance, bed space, study area, and washroom).
           </p>
         </div>
-
-        {/* Quick Demo Button */}
-        <button
-          type="button"
-          onClick={handleLoadSamplePhotos}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-xs font-medium transition self-start sm:self-auto cursor-pointer"
-          title="Instantly populate with 5 genuine student accommodation sample photos"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          <span>Load 5 Sample Hostel Photos</span>
-        </button>
       </div>
 
       {/* Action Buttons: Take Camera Photo & Upload Photos */}
@@ -398,7 +399,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/jpg"
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
         multiple
         onChange={handleFilesSelected}
         className="hidden"
@@ -406,7 +407,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
       <input
         ref={mobileCameraInputRef}
         type="file"
-        accept="image/*"
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
         capture="environment"
         multiple
         onChange={handleFilesSelected}
@@ -415,7 +416,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
 
       {/* Error notification */}
       {uploadError && (
-        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+        <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span>{uploadError}</span>
         </div>
@@ -435,7 +436,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
             {images.map((imgUrl, index) => {
               const isCover = index === 0;
               const suggestedLabel =
-                SAMPLE_STUDENT_HOUSING_PHOTOS[index]?.label || `Accommodation Photo ${index + 1}`;
+                PHOTO_ROLE_LABELS[index] || `Accommodation Photo ${index + 1}`;
 
               return (
                 <div

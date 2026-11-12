@@ -14,7 +14,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Search, Navigation, AlertTriangle, MapPin, Loader2, X, Compass, Shield } from 'lucide-react';
-import { authService } from '../../application/services/authService';
+import { useAuth } from '../../application/context/AuthContext';
 import { propertyService } from '../../application/services/propertyService';
 import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
 import { LandlordPinPlacementMapModal, PinLocationValue } from '../../components/map/LandlordPinPlacementMapModal';
@@ -26,8 +26,8 @@ import { requestCurrentDevicePosition, GeolocationErrorResult } from '../../appl
 import { appConfig } from '../../infrastructure/config/appConfig';
 
 export const NewPropertyPage: React.FC = () => {
-  const session = authService.getSession();
-  const profile = authService.getCurrentLandlordProfile();
+  const { currentUser, loading: authLoading, landlordProfile } = useAuth();
+  const landlordId = currentUser?.id;
   const navigate = useNavigate();
 
   const [title, setTitle] = useState('');
@@ -82,11 +82,7 @@ export const NewPropertyPage: React.FC = () => {
     'Study Desk & Chair',
   ]);
 
-  const [images, setImages] = useState<string[]>([
-    'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=1000&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?w=1000&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000&auto=format&fit=crop&q=80',
-  ]);
+  const [images, setImages] = useState<string[]>([]);
   const [rules, setRules] = useState('No smoking inside building\nVisitors must depart before 10pm\nQuiet hours 11pm - 6am');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -242,6 +238,11 @@ export const NewPropertyPage: React.FC = () => {
     e.preventDefault();
     setError(null);
 
+    if (!landlordId || landlordId === 'anonymous' || currentUser?.role !== 'landlord') {
+      setError('An active authenticated landlord session is required to submit a property.');
+      return;
+    }
+
     if (!title.trim()) {
       setError('Please provide property title.');
       return;
@@ -253,7 +254,12 @@ export const NewPropertyPage: React.FC = () => {
     }
 
     if (images.length < 3) {
-      setError('Please provide at least 3 photos (and up to 5 photos) for property verification.');
+      setError('Please upload at least 3 real property photos (and up to 5 photos) before submitting.');
+      return;
+    }
+
+    if (images.some((url) => !url || /^(data:|blob:)/i.test(url))) {
+      setError('Temporary local preview URLs (data/blob) cannot be saved. Please remove and re-upload your photos.');
       return;
     }
 
@@ -275,9 +281,13 @@ export const NewPropertyPage: React.FC = () => {
     try {
       await propertyService.createPropertyPersisted({
         id: propertyDraftId,
-        landlordId: session.user.id,
-        landlordName: profile?.legalName || profile?.businessName || session.displayName,
-        landlordVerified: profile?.verificationStatus === 'approved',
+        landlordId,
+        landlordName:
+          landlordProfile?.legalName ||
+          landlordProfile?.businessName ||
+          currentUser.fullName ||
+          currentUser.email,
+        landlordVerified: landlordProfile?.verificationStatus === 'approved',
         title: title.trim(),
         description: description.trim() || 'Modern student accommodation located in prime campus neighbourhood with essential amenities.',
         propertyType,
@@ -335,7 +345,7 @@ export const NewPropertyPage: React.FC = () => {
           publicLongitude: undefined,
           publicLocationLabel: locationData.publicLocationLabel,
           formattedAddress: address.trim(),
-          submittedBy: session.user.id,
+          submittedBy: landlordId,
           submittedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -362,6 +372,15 @@ export const NewPropertyPage: React.FC = () => {
       setSubmitting(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="max-w-3xl mx-auto p-10 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+        <span>Verifying landlord session…</span>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -886,7 +905,7 @@ export const NewPropertyPage: React.FC = () => {
               onChange={setImages}
               minImages={3}
               maxImages={5}
-              landlordId={session.user.id}
+              landlordId={landlordId || ''}
               propertyId={propertyDraftId}
             />
           </div>

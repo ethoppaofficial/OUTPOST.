@@ -31,12 +31,13 @@ import {
 } from 'lucide-react';
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
-import { authService } from '../../application/services/authService';
+import { useAuth } from '../../application/context/AuthContext';
 import { ImageGallery } from '../../components/ui/ImageGallery';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PropertyMap } from '../../components/map/PropertyMap';
+import { Property } from '../../domain/types';
 import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
 import {
   calculateDualGateProximity,
@@ -53,12 +54,14 @@ export const PropertyDetailPage: React.FC = () => {
   const { id, propertyId } = useParams<{ id?: string; propertyId?: string }>();
   const lookupKey = propertyId || id || '';
   const navigate = useNavigate();
-  const session = authService.getSession();
+  const { currentUser } = useAuth();
 
-  const property =
+  const [property, setProperty] = useState<Property | undefined>(() =>
     propertyService.getPropertyBySlug(lookupKey) ||
-    propertyService.getPropertyById(lookupKey);
-
+    propertyService.getPropertyById(lookupKey)
+  );
+  const [loading, setLoading] = useState(!property);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string>(
     property?.rooms[0]?.id || ''
   );
@@ -70,35 +73,56 @@ export const PropertyDetailPage: React.FC = () => {
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  if (!property) {
-    return (
-      <EmptyState
-        title="Property Not Found"
-        description="The accommodation you are looking for may have been archived or does not exist."
-        actionText="Back to Properties"
-        onAction={() => navigate('/properties')}
-      />
-    );
-  }
+  const loadProperty = React.useCallback(async () => {
+    if (!lookupKey) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const found = await propertyService.fetchPropertyByIdOrSlug(lookupKey);
+      setProperty(found);
+      if (found?.rooms?.[0]?.id) {
+        setSelectedUnitId((prev) => prev || found.rooms[0].id);
+      }
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load property details from Supabase.');
+    } finally {
+      setLoading(false);
+    }
+  }, [lookupKey]);
 
-  const propLat = property.location?.publicLatitude ?? property.location?.latitude;
-  const propLon = property.location?.publicLongitude ?? property.location?.longitude;
+  useEffect(() => {
+    void loadProperty();
+    const unsubscribe = propertyService.subscribeToProperties(() => {
+      const updated =
+        propertyService.getPropertyBySlug(lookupKey) ||
+        propertyService.getPropertyById(lookupKey);
+      if (updated) {
+        setProperty(updated);
+      }
+    });
+    return unsubscribe;
+  }, [loadProperty, lookupKey]);
+
+  const propLat = property?.location?.publicLatitude ?? property?.location?.latitude;
+  const propLon = property?.location?.publicLongitude ?? property?.location?.longitude;
   const hasCoordinates = typeof propLat === 'number' && typeof propLon === 'number';
 
-  // Dual-gate proximity state initialized with immediate straight-line distance
+  // Dual-gate proximity state initialized cleanly regardless of loading state
   const [dualProximity, setDualProximity] = useState<DualGateProximity | null>(() => {
     if (!hasCoordinates) return null;
-    return getImmediateDualGateProximity(propLat, propLon);
+    return getImmediateDualGateProximity(propLat!, propLon!);
   });
-
-  // Dynamic landmark orientation relative to nearest reference landmark
-  const landmarkOrientation = hasCoordinates
-    ? getNearestLandmarkOrientation(propLat, propLon)
-    : null;
 
   // Asynchronously compute true pedestrian walking routes to Gate 1 and Gate 2
   useEffect(() => {
-    if (!hasCoordinates) return;
+    if (!hasCoordinates || typeof propLat !== 'number' || typeof propLon !== 'number') {
+      setDualProximity(null);
+      return;
+    }
+    setDualProximity(getImmediateDualGateProximity(propLat, propLon));
     let isCancelled = false;
 
     calculateDualGateProximity(propLat, propLon)
@@ -116,22 +140,78 @@ export const PropertyDetailPage: React.FC = () => {
     };
   }, [propLat, propLon, hasCoordinates]);
 
+  if (loading && !property) {
+    return (
+      <div className="max-w-5xl mx-auto p-12 text-center space-y-3 text-slate-500">
+        <div className="w-8 h-8 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin mx-auto" />
+        <p className="text-xs font-medium">Loading accommodation details…</p>
+      </div>
+    );
+  }
+
+  if (loadError && !property) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900 rounded-3xl space-y-3">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+        <h2 className="text-base font-bold text-rose-900 dark:text-rose-200">Could Not Load Property</h2>
+        <p className="text-xs text-rose-700 dark:text-rose-300">{loadError}</p>
+        <div className="flex justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => void loadProperty()}
+            className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-500 cursor-pointer"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/properties')}
+            className="px-4 py-2 rounded-xl border border-rose-300 text-rose-700 dark:text-rose-200 text-xs font-semibold cursor-pointer"
+          >
+            Back to Properties
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!property) {
+    return (
+      <EmptyState
+        title="Property Not Found"
+        description="The accommodation you are looking for may have been archived or does not exist."
+        actionText="Back to Properties"
+        onAction={() => navigate('/properties')}
+      />
+    );
+  }
+
+  // Dynamic landmark orientation relative to nearest reference landmark
+  const landmarkOrientation = hasCoordinates && typeof propLat === 'number' && typeof propLon === 'number'
+    ? getNearestLandmarkOrientation(propLat, propLon)
+    : null;
+
   const selectedRoom = property.rooms.find((r) => r.id === selectedUnitId) || property.rooms[0];
 
   const handleConfirmReservation = () => {
     setErrorMsg(null);
-    if (!session || !session.user) {
+    if (!currentUser) {
       navigate('/login');
       return;
     }
 
-    if (session.user.role !== 'student') {
+    if (currentUser.role !== 'student') {
       setErrorMsg('Only registered students can reserve accommodation holds.');
       return;
     }
 
+    if (!selectedRoom) {
+      setErrorMsg('This listing has no active room inventory units configured yet.');
+      return;
+    }
+
     const result = reservationService.createReservation(
-      session.user.id,
+      currentUser.id,
       property.id,
       selectedRoom.id
     );
@@ -500,7 +580,7 @@ export const PropertyDetailPage: React.FC = () => {
             <div className="flex items-baseline justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
               <div>
                 <span className="text-2xl font-black text-slate-900 dark:text-white">
-                  ₦{selectedRoom.pricePerSession.toLocaleString()}
+                  ₦{(selectedRoom?.pricePerSession ?? property.pricePerSession).toLocaleString()}
                 </span>
                 <span className="text-xs text-slate-500 ml-1">/ {property.billingPeriod}</span>
               </div>
@@ -511,7 +591,7 @@ export const PropertyDetailPage: React.FC = () => {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-slate-600 dark:text-slate-400">
                 <span>Selected Unit:</span>
-                <span className="font-semibold text-slate-900 dark:text-white">{selectedRoom.name}</span>
+                <span className="font-semibold text-slate-900 dark:text-white">{selectedRoom?.name || property.accommodationType}</span>
               </div>
               <div className="flex justify-between text-slate-600 dark:text-slate-400">
                 <span>Cautionary Deposit:</span>
@@ -533,7 +613,7 @@ export const PropertyDetailPage: React.FC = () => {
             </div>
 
             {/* Action Button */}
-            {selectedRoom.availableSpaces > 0 ? (
+            {(selectedRoom?.availableSpaces ?? property.availableSpaces) > 0 && selectedRoom ? (
               <button
                 onClick={() => setReserveModalOpen(true)}
                 className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition shadow-md flex items-center justify-center gap-2"
@@ -569,8 +649,8 @@ export const PropertyDetailPage: React.FC = () => {
 
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-1.5 font-medium">
             <div className="text-sm font-bold text-slate-900 dark:text-white">{property.title}</div>
-            <div className="text-slate-500">{selectedRoom.name} ({selectedRoom.type})</div>
-            <div className="text-emerald-600 font-bold">₦{selectedRoom.pricePerSession.toLocaleString()} / session</div>
+            <div className="text-slate-500">{selectedRoom?.name || property.accommodationType} ({selectedRoom?.type || property.propertyType})</div>
+            <div className="text-emerald-600 font-bold">₦{(selectedRoom?.pricePerSession ?? property.pricePerSession).toLocaleString()} / session</div>
           </div>
 
           <ul className="space-y-1.5 text-slate-500 dark:text-slate-400 text-[11px] list-disc list-inside">

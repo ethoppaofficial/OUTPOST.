@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, ShieldCheck, MapPin, ArrowRight, Users, Building, UserPlus, LogIn } from 'lucide-react';
+import { Search, ShieldCheck, ArrowRight, Users, Building, AlertCircle, Loader2, Upload } from 'lucide-react';
+import { useAuth } from '../../application/context/AuthContext';
 
 export const HomePage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCampus, setSelectedCampus] = useState('All');
   const navigate = useNavigate();
+  const { currentUser, loading, profileStatus, profileError, landlordProfile, signOut, refreshAuthProfile } = useAuth();
 
   const campuses = [
     { label: 'Both case-study areas', value: 'All' },
@@ -21,6 +23,140 @@ export const HomePage: React.FC = () => {
     navigate(`/properties?${params.toString()}`);
   };
 
+  const renderAuthBanner = () => {
+    if (loading || profileStatus === 'profile_pending') {
+      return (
+        <div className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/70 px-3.5 py-2 text-xs text-slate-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+          <span>{profileStatus === 'profile_pending' ? 'Finalizing your OUTPOST account profile…' : 'Checking active session…'}</span>
+        </div>
+      );
+    }
+
+    if (profileStatus === 'profile_error') {
+      return (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/40 bg-rose-950/50 p-4 text-xs text-rose-200">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+            <span>{profileError || 'We could not load your OUTPOST account profile.'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void refreshAuthProfile()}
+              className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="rounded-lg border border-rose-400/50 px-3 py-1.5 font-semibold text-rose-200 hover:bg-rose-900/50"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentUser?.role === 'student') {
+      return (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            to="/student/dashboard"
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+          >
+            Open Student Dashboard <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+          <Link
+            to="/student/verification"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500 transition"
+          >
+            <Upload className="h-3.5 w-3.5 text-emerald-400" />
+            Matric Verification
+          </Link>
+          <Link
+            to="/student/reservations"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500 transition"
+          >
+            My Reservations
+          </Link>
+        </div>
+      );
+    }
+
+    if (currentUser?.role === 'landlord') {
+      const verifStatus = landlordProfile?.verificationStatus || 'not_started';
+      return (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              to="/landlord/dashboard"
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+            >
+              Open Landlord Hub <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+            <Link
+              to="/landlord/properties/new"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500 transition"
+            >
+              Post Property Listing
+            </Link>
+            <Link
+              to="/landlord/verification"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-amber-400 transition"
+            >
+              Verification: <span className="capitalize">{verifStatus.replace('_', ' ')}</span>
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentUser?.role === 'admin') {
+      return (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            to="/admin/dashboard"
+            className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-500 transition"
+          >
+            Open Admin Console <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+          <Link
+            to="/admin/verifications"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-purple-400 transition"
+          >
+            Verification Queue
+          </Link>
+          <Link
+            to="/admin/properties"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-purple-400 transition"
+          >
+            Property Approvals
+          </Link>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Link
+          to="/register"
+          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+        >
+          Create Student or Landlord Account <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        <Link
+          to="/login"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 transition"
+        >
+          Sign in
+        </Link>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-12 sm:space-y-16">
       {/* Hero Section */}
@@ -31,8 +167,12 @@ export const HomePage: React.FC = () => {
           </h1>
 
           <p className="text-slate-300 text-base sm:text-lg leading-relaxed max-w-2xl font-normal">
-            Explore housing options, learn about the listing review process, and manage your search in one place. Create an account to use student or landlord features.
+            {currentUser
+              ? `Signed in as ${currentUser.fullName || currentUser.email} (${currentUser.role}). Explore verified listings, manage your reviews, or track activity around Bayero University Kano.`
+              : 'Explore verified housing options, learn about the listing review process, and manage your off-campus search around Bayero University Kano.'}
           </p>
+
+          {renderAuthBanner()}
 
           {/* Search Box */}
           <form

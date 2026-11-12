@@ -37,11 +37,16 @@ export interface AdminMetrics {
   totalStudents: number;
   totalLandlords: number;
   totalAdministrators: number;
+  totalNonAdminUsers: number;
   totalUploadedStudentDocuments: number;
   totalLandlordVerificationSubmissions: number;
   totalPaymentReceipts: number;
   pendingStudentVerifications: number;
   pendingLandlordVerifications: number;
+  approvedLandlordVerifications: number;
+  rejectedLandlordVerifications: number;
+  totalProperties: number;
+  approvedProperties: number;
   pendingPropertyVerifications: number;
   activeProperties: number;
   activeReservations: number;
@@ -110,11 +115,16 @@ export const ADMIN_METRICS_METADATA: readonly AdminMetricDefinition[] = [
   { key: 'totalStudents', label: 'Registered students', sourceTable: 'public.profiles', filterDescription: "role = 'student'" },
   { key: 'totalLandlords', label: 'Registered landlords', sourceTable: 'public.profiles', filterDescription: "role = 'landlord'" },
   { key: 'totalAdministrators', label: 'Administrators', sourceTable: 'public.profiles', filterDescription: "role = 'admin'" },
+  { key: 'totalNonAdminUsers', label: 'Non-admin users', sourceTable: 'public.profiles', filterDescription: "role IN ('student', 'landlord')" },
   { key: 'totalUploadedStudentDocuments', label: 'Student documents uploaded', sourceTable: 'public.student_verification_documents', filterDescription: 'All student document metadata records' },
   { key: 'totalLandlordVerificationSubmissions', label: 'Landlord files uploaded', sourceTable: 'public.landlord_verification_submissions', filterDescription: 'All landlord verification submission records' },
   { key: 'totalPaymentReceipts', label: 'Payment receipts uploaded', sourceTable: 'public.payment_receipts', filterDescription: 'All uploaded payment receipt records' },
   { key: 'pendingStudentVerifications', label: 'Student checks pending', sourceTable: 'public.student_verification_documents', filterDescription: "status = 'pending'" },
   { key: 'pendingLandlordVerifications', label: 'Landlord checks pending', sourceTable: 'landlord_verification_submissions / landlord_profiles', filterDescription: "Distinct landlords with pending submission or verification_status = 'pending'" },
+  { key: 'approvedLandlordVerifications', label: 'Approved landlords', sourceTable: 'public.landlord_profiles', filterDescription: "verification_status = 'approved'" },
+  { key: 'rejectedLandlordVerifications', label: 'Rejected landlords', sourceTable: 'public.landlord_profiles', filterDescription: "verification_status = 'rejected'" },
+  { key: 'totalProperties', label: 'Total submitted properties', sourceTable: 'public.properties', filterDescription: 'All property listings across review states' },
+  { key: 'approvedProperties', label: 'Approved properties', sourceTable: 'public.properties', filterDescription: "approval_status = 'approved'" },
   { key: 'pendingPropertyVerifications', label: 'Property reviews pending', sourceTable: 'public.properties', filterDescription: "approval_status = 'pending'" },
   { key: 'activeProperties', label: 'Active published properties', sourceTable: 'public.properties', filterDescription: "approval_status = 'approved' AND is_published = true" },
   { key: 'activeReservations', label: 'Active reservations', sourceTable: 'public.reservations', filterDescription: "status IN ('pending_payment', 'payment_submitted', 'confirmed') AND hold_expires_at > now()" },
@@ -273,16 +283,77 @@ export function createAdminService(deps?: { client?: any }) {
 
     const { data: rpcData, error: rpcError } = await client.rpc('admin_get_dashboard_metrics');
     if (!rpcError && rpcData && typeof rpcData === 'object') {
+      const hasExtendedKeys =
+        rpcData.totalNonAdminUsers !== undefined &&
+        rpcData.approvedLandlordVerifications !== undefined &&
+        rpcData.rejectedLandlordVerifications !== undefined &&
+        rpcData.totalProperties !== undefined &&
+        rpcData.approvedProperties !== undefined;
+
+      if (hasExtendedKeys) {
+        return {
+          totalUsers: Number(rpcData.totalUsers ?? 0),
+          totalStudents: Number(rpcData.totalStudents ?? 0),
+          totalLandlords: Number(rpcData.totalLandlords ?? 0),
+          totalAdministrators: Number(rpcData.totalAdministrators ?? 0),
+          totalNonAdminUsers: Number(rpcData.totalNonAdminUsers ?? 0),
+          totalUploadedStudentDocuments: Number(rpcData.totalUploadedStudentDocuments ?? 0),
+          totalLandlordVerificationSubmissions: Number(rpcData.totalLandlordVerificationSubmissions ?? 0),
+          totalPaymentReceipts: Number(rpcData.totalPaymentReceipts ?? 0),
+          pendingStudentVerifications: Number(rpcData.pendingStudentVerifications ?? 0),
+          pendingLandlordVerifications: Number(rpcData.pendingLandlordVerifications ?? 0),
+          approvedLandlordVerifications: Number(rpcData.approvedLandlordVerifications ?? 0),
+          rejectedLandlordVerifications: Number(rpcData.rejectedLandlordVerifications ?? 0),
+          totalProperties: Number(rpcData.totalProperties ?? 0),
+          approvedProperties: Number(rpcData.approvedProperties ?? 0),
+          pendingPropertyVerifications: Number(rpcData.pendingPropertyVerifications ?? 0),
+          activeProperties: Number(rpcData.activeProperties ?? 0),
+          activeReservations: Number(rpcData.activeReservations ?? 0),
+          pendingReceiptVerifications: Number(rpcData.pendingReceiptVerifications ?? 0),
+          expiredReservations: Number(rpcData.expiredReservations ?? 0),
+        };
+      }
+
+      // Supplement missing extended keys via head-only DB counts if Migration 08 RPC is not yet pushed remotely
+      const [
+        totalNonAdminUsers,
+        approvedLandlordVerifications,
+        rejectedLandlordVerifications,
+        totalProperties,
+        approvedProperties,
+      ] = await Promise.all([
+        rpcData.totalNonAdminUsers !== undefined
+          ? Promise.resolve(Number(rpcData.totalNonAdminUsers))
+          : countHead('profiles', (q) => q.in('role', ['student', 'landlord'])),
+        rpcData.approvedLandlordVerifications !== undefined
+          ? Promise.resolve(Number(rpcData.approvedLandlordVerifications))
+          : countHead('landlord_profiles', (q) => q.eq('verification_status', 'approved')),
+        rpcData.rejectedLandlordVerifications !== undefined
+          ? Promise.resolve(Number(rpcData.rejectedLandlordVerifications))
+          : countHead('landlord_profiles', (q) => q.eq('verification_status', 'rejected')),
+        rpcData.totalProperties !== undefined
+          ? Promise.resolve(Number(rpcData.totalProperties))
+          : countHead('properties'),
+        rpcData.approvedProperties !== undefined
+          ? Promise.resolve(Number(rpcData.approvedProperties))
+          : countHead('properties', (q) => q.eq('approval_status', 'approved')),
+      ]);
+
       return {
         totalUsers: Number(rpcData.totalUsers ?? 0),
         totalStudents: Number(rpcData.totalStudents ?? 0),
         totalLandlords: Number(rpcData.totalLandlords ?? 0),
         totalAdministrators: Number(rpcData.totalAdministrators ?? 0),
+        totalNonAdminUsers,
         totalUploadedStudentDocuments: Number(rpcData.totalUploadedStudentDocuments ?? 0),
         totalLandlordVerificationSubmissions: Number(rpcData.totalLandlordVerificationSubmissions ?? 0),
         totalPaymentReceipts: Number(rpcData.totalPaymentReceipts ?? 0),
         pendingStudentVerifications: Number(rpcData.pendingStudentVerifications ?? 0),
         pendingLandlordVerifications: Number(rpcData.pendingLandlordVerifications ?? 0),
+        approvedLandlordVerifications,
+        rejectedLandlordVerifications,
+        totalProperties,
+        approvedProperties,
         pendingPropertyVerifications: Number(rpcData.pendingPropertyVerifications ?? 0),
         activeProperties: Number(rpcData.activeProperties ?? 0),
         activeReservations: Number(rpcData.activeReservations ?? 0),
@@ -302,12 +373,17 @@ export function createAdminService(deps?: { client?: any }) {
       totalStudents,
       totalLandlords,
       totalAdministrators,
+      totalNonAdminUsers,
       totalUploadedStudentDocuments,
       totalLandlordVerificationSubmissions,
       totalPaymentReceipts,
       pendingStudentVerifications,
       pendingLandlordSubmissions,
       pendingLandlordProfiles,
+      approvedLandlordVerifications,
+      rejectedLandlordVerifications,
+      totalProperties,
+      approvedProperties,
       pendingPropertyVerifications,
       activeProperties,
       activeReservations,
@@ -319,12 +395,17 @@ export function createAdminService(deps?: { client?: any }) {
       countHead('profiles', (q) => q.eq('role', 'student')),
       countHead('profiles', (q) => q.eq('role', 'landlord')),
       countHead('profiles', (q) => q.eq('role', 'admin')),
+      countHead('profiles', (q) => q.in('role', ['student', 'landlord'])),
       countHead('student_verification_documents'),
       countHead('landlord_verification_submissions'),
       countHead('payment_receipts'),
       countHead('student_verification_documents', (q) => q.eq('status', 'pending')),
       countHead('landlord_verification_submissions', (q) => q.eq('status', 'pending')),
       countHead('landlord_profiles', (q) => q.eq('verification_status', 'pending')),
+      countHead('landlord_profiles', (q) => q.eq('verification_status', 'approved')),
+      countHead('landlord_profiles', (q) => q.eq('verification_status', 'rejected')),
+      countHead('properties'),
+      countHead('properties', (q) => q.eq('approval_status', 'approved')),
       countHead('properties', (q) => q.eq('approval_status', 'pending')),
       countHead('properties', (q) => q.eq('approval_status', 'approved').eq('is_published', true)),
       countHead('reservations', (q) => q.in('status', ['pending_payment', 'payment_submitted', 'confirmed']).gt('hold_expires_at', nowIso)),
@@ -338,11 +419,16 @@ export function createAdminService(deps?: { client?: any }) {
       totalStudents,
       totalLandlords,
       totalAdministrators,
+      totalNonAdminUsers,
       totalUploadedStudentDocuments,
       totalLandlordVerificationSubmissions,
       totalPaymentReceipts,
       pendingStudentVerifications,
       pendingLandlordVerifications: Math.max(pendingLandlordSubmissions, pendingLandlordProfiles),
+      approvedLandlordVerifications,
+      rejectedLandlordVerifications,
+      totalProperties,
+      approvedProperties,
       pendingPropertyVerifications,
       activeProperties,
       activeReservations,

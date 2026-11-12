@@ -12,22 +12,19 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
-import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
 import { storageService } from '../../application/services/storageService';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
-import { validateUploadFile } from '../../application/utils/uploadValidation';
+import { validateUploadFile, LANDLORD_DOCUMENT_UPLOAD_RULES } from '../../application/utils/uploadValidation';
 import { normalizeError } from '../../application/utils/errorUtils';
 import { useAuth } from '../../application/context/AuthContext';
 import { LandlordProfile, VerificationReviewStatus } from '../../domain/types';
 
 export const LandlordVerificationPage: React.FC = () => {
-  const { currentUser } = useAuth();
-  const session = authService.getSession();
-  const landlordId = currentUser?.id || session.user.id;
-  const cachedProfile = authService.getCurrentLandlordProfile();
+  const { currentUser, loading: authLoading, landlordProfile, refreshAuthProfile } = useAuth();
+  const landlordId = currentUser?.id;
 
-  const [liveProfile, setLiveProfile] = useState<LandlordProfile | null>(cachedProfile || null);
+  const [liveProfile, setLiveProfile] = useState<LandlordProfile | null>(landlordProfile || null);
   const [submissions, setSubmissions] = useState<Array<{
     id: string;
     documentType: string;
@@ -39,8 +36,8 @@ export const LandlordVerificationPage: React.FC = () => {
   const [loadingState, setLoadingState] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [legalName, setLegalName] = useState(cachedProfile?.legalName || currentUser?.fullName || session.displayName);
-  const [businessName, setBusinessName] = useState(cachedProfile?.businessName || '');
+  const [legalName, setLegalName] = useState(currentUser?.fullName || landlordProfile?.legalName || '');
+  const [businessName, setBusinessName] = useState(landlordProfile?.businessName || '');
   const [idType, setIdType] = useState('NIN');
   const [idNumber, setIdNumber] = useState('');
   const [ownershipDocType, setOwnershipDocType] = useState('Electricity Utility Bill');
@@ -48,9 +45,25 @@ export const LandlordVerificationPage: React.FC = () => {
   const [fileName, setFileName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [submittedNotice, setSubmittedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser?.fullName && !legalName) {
+      setLegalName(currentUser.fullName);
+    }
+    if (landlordProfile) {
+      setLiveProfile((prev) => prev || landlordProfile);
+      if (landlordProfile.businessName && !businessName) {
+        setBusinessName(landlordProfile.businessName);
+      }
+      if (landlordProfile.idReference && !idNumber) {
+        setIdNumber(landlordProfile.idReference);
+      }
+    }
+  }, [currentUser?.fullName, landlordProfile]);
 
   const loadVerification = useCallback(async () => {
+    if (authLoading) return;
     if (!landlordId || landlordId === 'anonymous') {
       setLoadingState(false);
       return;
@@ -62,6 +75,9 @@ export const LandlordVerificationPage: React.FC = () => {
       if (state.profile) {
         setLiveProfile(state.profile);
         if (state.profile.businessName) setBusinessName(state.profile.businessName);
+        if (!legalName && (currentUser?.fullName || state.profile.legalName)) {
+          setLegalName(currentUser?.fullName || state.profile.legalName);
+        }
       }
       setSubmissions(state.submissions);
     } catch (err: unknown) {
@@ -70,23 +86,19 @@ export const LandlordVerificationPage: React.FC = () => {
     } finally {
       setLoadingState(false);
     }
-  }, [landlordId]);
+  }, [authLoading, landlordId, currentUser?.fullName]);
 
   useEffect(() => {
     void loadVerification();
   }, [loadVerification]);
 
-  const status = liveProfile?.verificationStatus || 'not_started';
+  const status = liveProfile?.verificationStatus || landlordProfile?.verificationStatus || 'not_started';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
-      const check = validateUploadFile(selected, {
-        maxSizeMB: 10,
-        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
-        allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.pdf'],
-      });
+      const check = validateUploadFile(selected, LANDLORD_DOCUMENT_UPLOAD_RULES);
       if (!check.isValid) {
         setError(check.error!);
         setFile(null);
@@ -101,14 +113,21 @@ export const LandlordVerificationPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSubmittedNotice(null);
+
+    if (!landlordId || landlordId === 'anonymous') {
+      setError('Your authenticated landlord session is missing. Please sign in again.');
+      return;
+    }
 
     if (!legalName.trim() || !idNumber.trim()) {
       setError('Please provide your full legal name and official ID number.');
       return;
     }
 
-    if (!file) {
-      setError('Please select an authentic identification or ownership document file (JPEG, PNG, or PDF, max 10 MB).');
+    const check = validateUploadFile(file, LANDLORD_DOCUMENT_UPLOAD_RULES);
+    if (!check.isValid || !file) {
+      setError(check.error || 'Please select an authentic identification or ownership document file (JPEG, PNG, WebP, or PDF, max 10 MB).');
       return;
     }
 
@@ -119,7 +138,7 @@ export const LandlordVerificationPage: React.FC = () => {
       const uploadRes = await storageService.uploadLandlordDocument(
         landlordId,
         file,
-        fileName || file.name
+        check.sanitizedFileName || fileName || file.name
       );
 
       if (!uploadRes || !uploadRes.path) {
@@ -141,10 +160,10 @@ export const LandlordVerificationPage: React.FC = () => {
       });
 
       if (res && res.success) {
-        setSubmitted(true);
+        setSubmittedNotice('Verification documents uploaded and queued for administrator review.');
         setFile(null);
         setFileName('');
-        await loadVerification();
+        await Promise.all([loadVerification(), refreshAuthProfile()]);
       } else {
         setError('Failed to submit verification request.');
       }
@@ -196,7 +215,12 @@ export const LandlordVerificationPage: React.FC = () => {
         </div>
       )}
 
-      {status === 'approved' ? (
+      {authLoading || (loadingState && !liveProfile && !landlordProfile) ? (
+        <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center gap-2 text-xs text-slate-500">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+          <span>Loading your landlord verification profile…</span>
+        </div>
+      ) : status === 'approved' ? (
         <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-emerald-200 dark:border-emerald-900 shadow-sm space-y-3">
           <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
           <h2 className="text-base font-bold text-slate-900 dark:text-white">
@@ -208,18 +232,26 @@ export const LandlordVerificationPage: React.FC = () => {
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-6 text-xs">
-          {submitted ? (
-            <div className="text-center py-8 space-y-3">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Verification Documents Submitted!
-              </h3>
-              <p className="text-xs text-slate-500">
-                Our accreditation team reviews submissions within 24 hours. You can track progress right here.
-              </p>
+          {submittedNotice && (
+            <div role="status" className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200 flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{submittedNotice}</span>
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+          )}
+
+          {status === 'pending' && (
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Verification Under Administrator Review</p>
+                <p className="mt-0.5 text-[11px] opacity-90">
+                  Our accreditation team is reviewing your credentials. You may upload an updated document below if needed.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
                   Full Legal Name (as on Government ID)
@@ -297,13 +329,13 @@ export const LandlordVerificationPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
-                  Upload Document Scan / Photo (JPEG, PNG, or PDF, max 10 MB)
+                  Upload Document Scan / Photo (JPEG, PNG, WebP, or PDF, max 10 MB)
                 </label>
                 <input
                   type="file"
                   required
                   disabled={submitting}
-                  accept=".jpg,.jpeg,.png,.pdf"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf"
                   onChange={handleFileChange}
                   className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
                 />
@@ -332,7 +364,6 @@ export const LandlordVerificationPage: React.FC = () => {
                 )}
               </button>
             </form>
-          )}
         </div>
       )}
       {submissions.length > 0 && (

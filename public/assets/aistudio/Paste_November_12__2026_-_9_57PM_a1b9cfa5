@@ -1,0 +1,809 @@
+# OUTPOST: END-TO-END SYSTEM DATA FLOW, FILE STORAGE, VERIFICATION, PROPERTY MEDIA, AUTHENTICATION STATE AND ADMINISTRATIVE DATA CONSISTENCY REMEDIATION
+
+## ROLE AND OBJECTIVE
+
+Act as a senior software architect, Supabase database engineer, security engineer and experienced React/TypeScript developer.
+
+You are working on **OUTPOST**, a student accommodation discovery and shared accommodation coordination platform for Bayero University Kano (BUK), New Site.
+
+The system is intended to serve three primary user roles:
+
+1. Student
+2. Landlord
+3. Administrator
+
+The implementation scope is strictly limited to off-campus accommodation in Danbare and Rimin Gata, Kano State. Do not introduce caretaker functionality or expand the project's scope.
+
+Your task is to investigate and correct the system's broken end-to-end data flow, particularly document uploads, multimedia storage, property visibility, administrator verification, authentication-dependent homepage rendering and administrative user statistics.
+
+This is an existing application. Do not rebuild it, replace its architecture or introduce unnecessary dependencies.
+
+**The objective is to make the existing system function reliably from registration through data submission, storage, retrieval, administrative review and display.**
+
+---
+
+# PART 1: CURRENT PROBLEMS REQUIRING INVESTIGATION
+
+The following problems have been reported during system usage.
+
+### 1. Uploaded verification documents are not reaching administrators
+
+When users submit verification documents, the administrator does not receive or see the submitted documents in the administration console.
+
+This affects the document submission and verification process for users, including landlord verification and any other existing verification workflows.
+
+Expected behaviour:
+
+- A user submits the required verification information.
+- The application uploads the actual document to Supabase Storage.
+- The application saves the corresponding metadata and ownership information in PostgreSQL.
+- The verification submission is associated with the correct authenticated user.
+- The administrator can see the pending verification submission in the administration console.
+- The administrator can securely retrieve and view the submitted document.
+- The administrator can approve or reject the submission.
+- The user can see the verification status and any rejection reason.
+- The system retains an appropriate record of the review decision.
+
+Investigate why the current process fails. Do not assume the problem is simply an absent administrator notification. The actual upload, database insertion, relationship, retrieval and permissions must all be examined.
+
+### 2. Students cannot see uploaded properties or apartments
+
+Landlords may create or upload accommodation listings, but students cannot see the properties or their associated images.
+
+Expected behaviour:
+
+- Landlords submit property information.
+- Property images are uploaded to Supabase Storage.
+- Property records and image metadata are saved in PostgreSQL.
+- Listings undergo the existing administrative verification process where required.
+- Approved and available properties appear in student accommodation discovery.
+- Students can open property details and view their associated images.
+- Unapproved, rejected, unavailable or otherwise restricted listings must follow the existing publication rules.
+- Property images must remain associated with the correct property.
+
+Investigate the complete listing pipeline, including property creation, image upload, database relationships, approval status, retrieval queries, RLS and frontend rendering.
+
+Do not simply remove approval restrictions to make properties visible.
+
+### 3. The system appears unable to persist uploaded multimedia
+
+Investigate whether OUTPOST currently has correctly configured and functioning storage infrastructure for:
+
+- Landlord verification documents.
+- Student verification documents, if supported by the existing requirements.
+- Property and apartment images.
+- Profile pictures.
+- Other existing supported attachments, such as chat attachments.
+
+The application must distinguish between actual binary file storage and database metadata.
+
+**Required architecture:**
+
+Supabase Storage:
+- Stores the actual uploaded files.
+- Uses appropriate private or public access rules.
+- Applies file type and file size restrictions.
+- Organizes files using predictable, secure storage paths.
+
+Supabase PostgreSQL:
+- Stores file metadata.
+- Stores the storage bucket name and object path.
+- Records the associated user, property or verification submission.
+- Stores timestamps, document types, review statuses and other required relationships.
+- Enables authorized users to retrieve the correct files.
+
+Do not store large binary documents or images directly in ordinary PostgreSQL columns.
+
+Inspect the existing six reported storage buckets before creating anything. The previously reported buckets are:
+
+- student-docs
+- landlord-docs
+- payment-receipts
+- chat-attachments
+- property-images
+- profile-pictures
+
+These names are a reported baseline, not proof that the buckets currently exist remotely or have correct policies. Verify their actual definitions and usage.
+
+Do not create duplicate buckets or duplicate metadata tables if equivalent structures already exist.
+
+### 4. Homepage authentication state is incorrect
+
+After a user registers or signs in successfully, the homepage still displays the public **Create Account** and **Log In** buttons.
+
+Expected behaviour:
+
+When unauthenticated:
+- Show the existing public navigation.
+- Show the Create Account and Log In actions.
+
+When authenticated as a student:
+- Reflect the authenticated session.
+- Show the appropriate student navigation and account actions.
+- Do not continue presenting the user as a visitor.
+
+When authenticated as a landlord:
+- Show the appropriate landlord navigation and account actions.
+- Reflect the landlord's actual verification status.
+- Do not show public registration and login actions as if the user were logged out.
+
+When authenticated as an administrator:
+- Show the appropriate administrator navigation.
+
+Additional requirements:
+- Correctly handle initial session restoration.
+- Avoid showing public buttons briefly while an existing authenticated session is being restored.
+- Update the interface immediately after successful sign-in and sign-out.
+- Handle expired sessions and failed authentication.
+- Ensure navigation reflects the current authenticated account rather than stale React state.
+- Avoid full-page reloads unless the existing architecture requires them.
+
+Inspect AuthContext, authentication services, routing, homepage components, navigation components and session listeners.
+
+Do not introduce a second authentication state management system.
+
+### 5. Administrator dashboard statistics are inaccurate
+
+The number of successfully registered students and landlords must correlate with the actual registered accounts in the database.
+
+Expected behaviour:
+
+- Total registered students must reflect the actual number of student accounts.
+- Total registered landlords must reflect the actual number of landlord accounts.
+- Total registered users must reconcile with the relevant student and landlord counts, with administrators reported separately where appropriate.
+- Pending landlord verification must not be confused with successful registration.
+- Rejected or unverified landlords must not disappear from registration statistics merely because they have not completed verification.
+- Duplicate profiles must not inflate the figures.
+- Failed or incomplete registration attempts must not be counted as successfully registered accounts.
+- Dashboard figures must refresh appropriately when new accounts are created or relevant account states change.
+
+Use the authoritative database records rather than manually maintained frontend counters.
+
+Investigate the existing dashboard queries and aggregation logic before modifying them.
+
+Define precisely what each statistic represents. Registration counts and verification counts are different metrics.
+
+---
+
+# PART 2: MANDATORY ARCHITECTURE AND REPOSITORY INSPECTION
+
+Before changing anything, inspect the actual current repository.
+
+Do not rely on previous reports, assumptions or old architecture descriptions without verifying them against the current source code.
+
+The reported implementation baseline includes:
+
+- React and TypeScript.
+- Supabase Authentication.
+- Supabase PostgreSQL.
+- Supabase Storage.
+- Supabase Realtime.
+- Supabase Edge Functions using Deno.
+- PostgreSQL functions and triggers.
+- MapLibre GL JS and MapTiler for mapping.
+- Vercel frontend hosting and Render as a previously proposed backend hosting option.
+
+Do not assume that an Express backend exists. Verify the actual architecture.
+
+Inspect at least the following areas:
+
+**Authentication**
+- `src/application/context/AuthContext.tsx`
+- `src/application/services/authService.ts`
+- Authentication-related repositories.
+- Student and landlord registration components.
+- Login components.
+- Protected routes.
+- Homepage navigation and header components.
+
+**Supabase integration**
+- Supabase client configuration.
+- `src/infrastructure/supabase/supabaseRepository.ts`
+- Storage services and upload utilities.
+- Database access services.
+- Existing Edge Functions.
+- Realtime subscriptions.
+
+**Database**
+- All current migration files in chronological order.
+- `profiles`.
+- `student_profiles`.
+- `landlord_profiles`.
+- Properties and accommodation-related tables.
+- Verification-related tables.
+- Property image or media tables.
+- Payment and receipt tables where relevant.
+- Audit logs.
+- Existing storage policies.
+- Existing RLS policies.
+- Relevant database functions and triggers.
+
+**Application interfaces**
+- Student dashboard.
+- Landlord dashboard.
+- Administrator dashboard.
+- Verification submission interfaces.
+- Administrator verification review interfaces.
+- Property listing creation forms.
+- Property detail pages.
+- Student property discovery pages.
+- Homepage and navigation.
+
+**Testing and configuration**
+- Existing test suites.
+- Environment variable definitions.
+- Supabase configuration.
+- Storage bucket definitions.
+- Existing deployment documentation.
+
+Do not create a new service or abstraction before establishing whether an existing one already performs the required task.
+
+---
+
+# PART 3: ESTABLISH THE REAL STORAGE AND DATABASE ARCHITECTURE
+
+Determine whether the application currently has a functioning end-to-end file storage architecture.
+
+For every existing upload workflow, trace:
+
+1. Where the user selects a file.
+2. How the file is validated.
+3. Which upload service receives it.
+4. Which Supabase Storage bucket is used.
+5. Which object path is generated.
+6. Whether the upload actually succeeds.
+7. Whether PostgreSQL metadata is inserted.
+8. Whether the metadata is linked to the correct user or property.
+9. Whether RLS permits the intended database operation.
+10. Whether Storage policies permit the intended upload and retrieval.
+11. How authorized users retrieve the file.
+12. How the frontend displays the file.
+
+Identify broken, missing or disconnected stages.
+
+Produce a clear diagnosis for each workflow.
+
+Do not report that a file is stored merely because a file picker or upload progress indicator exists.
+
+Do not report that a storage bucket works merely because its name appears in a migration.
+
+Differentiate:
+
+- Defined in source code.
+- Created in a local database.
+- Applied to the remote Supabase project.
+- Successfully tested against remote storage.
+- Successfully retrieved by an authorized user.
+
+If remote Supabase access is unavailable, explicitly report that remote functionality remains unverified.
+
+---
+
+# PART 4: IMPLEMENT A RELIABLE DOCUMENT VERIFICATION PIPELINE
+
+After identifying the existing design, implement the smallest safe correction that establishes a reliable document submission and administrator review workflow.
+
+### User submission
+
+When an authenticated user submits verification documents:
+
+1. Validate the file before upload.
+2. Validate allowed MIME types and file extensions.
+3. Apply appropriate file size limits.
+4. Generate a unique, predictable storage object path.
+5. Associate the path with the authenticated user's ID.
+6. Upload the file to the correct private bucket.
+7. Confirm that the upload succeeded.
+8. Save the file metadata and verification submission in PostgreSQL.
+9. Associate the submission with the correct user and verification type.
+10. Set the appropriate initial review status.
+11. Provide a clear success or failure response.
+
+Do not mark a verification submission as successfully completed when the file upload or database insertion fails.
+
+Where upload and metadata insertion cannot be performed as one database transaction, implement safe failure handling and cleanup.
+
+For example, if file upload succeeds but metadata insertion fails, avoid leaving an untracked file indefinitely. Implement an appropriate cleanup or reconciliation strategy without risking deletion of valid existing documents.
+
+### Administrator review
+
+The administrator console must provide:
+
+- A list of pending verification submissions.
+- The submitting user's relevant account information.
+- Verification type.
+- Submission date.
+- Review status.
+- Secure document viewing or downloading.
+- Approval action.
+- Rejection action.
+- Required rejection reason where appropriate.
+- Reviewer identity and review timestamp.
+- A clear history of the decision.
+
+Administrators must retrieve private documents through an authorized mechanism.
+
+Use short-lived signed URLs or an appropriately secured Edge Function where necessary.
+
+Never make private verification documents publicly accessible merely to simplify document previews.
+
+Ensure that only authorized administrators can review verification submissions.
+
+### User feedback
+
+Users must be able to see:
+
+- Not submitted.
+- Submitted and pending review.
+- Approved.
+- Rejected.
+- Rejection reason, where applicable.
+
+Do not allow users to change their own verification status through frontend requests.
+
+---
+
+# PART 5: IMPLEMENT A RELIABLE PROPERTY AND MULTIMEDIA PIPELINE
+
+Investigate and correct the property listing and image upload process.
+
+### Landlord property submission
+
+The process should:
+
+1. Validate property details.
+2. Validate uploaded property images.
+3. Upload image files to the existing property image bucket.
+4. Save the image object paths and metadata in PostgreSQL.
+5. Associate every image with the correct property.
+6. Maintain the existing landlord ownership relationship.
+7. Apply the correct property publication and approval status.
+8. Display a clear submission result.
+
+### Student property discovery
+
+Students should retrieve properties through database queries that respect:
+
+- Existing approval rules.
+- Availability.
+- Location restrictions.
+- Existing accommodation filters.
+- RLS.
+- Relevant property status.
+
+The implementation must display associated property images correctly.
+
+If images are stored privately, implement appropriate signed URL retrieval. If property images are intentionally public, verify that the existing access design supports that decision without exposing private documents.
+
+### Multimedia handling
+
+Use the existing storage architecture where possible.
+
+Ensure:
+
+- Unique filenames or object paths.
+- Correct ownership relationships.
+- MIME type validation.
+- File size limits.
+- Safe file retrieval.
+- Graceful handling of missing or deleted files.
+- Image loading states.
+- Image error fallbacks.
+- No exposure of service-role credentials.
+
+Do not store file contents as Base64 strings inside PostgreSQL records.
+
+Do not expose private storage paths or signed URLs in ways that bypass authorization.
+
+---
+
+# PART 6: FIX AUTHENTICATION-DEPENDENT HOMEPAGE RENDERING
+
+Correct the homepage and navigation state using the existing AuthContext.
+
+Required behaviour:
+
+| Authentication state | Expected interface |
+|---|---|
+| Unauthenticated | Public navigation and login/register actions |
+| Student | Student navigation and account actions |
+| Landlord | Landlord navigation and verification-aware account actions |
+| Administrator | Administrator navigation |
+
+Implement a clear loading or session-initialization state.
+
+Do not interpret a temporary missing profile as proof that the user is a student.
+
+This is particularly important because OUTPOST has an already reported defect in which landlord registrations are incorrectly resolved as student accounts.
+
+Investigate the previous landlord registration defect alongside this work.
+
+Preserve the security principle that:
+
+- The database profile is authoritative for the assigned account role.
+- User-editable authentication metadata must not independently grant protected roles.
+- Public registration must never grant administrator privileges.
+- Landlord verification remains separate from landlord registration.
+- Missing profile records must produce a controlled initialization or error state, not an invented student role.
+
+Inspect the previously reported RLS issue in `20261020000002_row_level_security.sql`, the `handle_new_user()` trigger and the frontend profile creation flow.
+
+Verify their current implementation before deciding what to modify.
+
+Do not blindly apply the previously proposed Migration 06. Determine the smallest secure correction based on the actual current code and database schema.
+
+---
+
+# PART 7: CORRECT ADMINISTRATOR REGISTRATION STATISTICS
+
+Make dashboard statistics database-driven and consistent.
+
+Inspect how the current dashboard obtains its figures.
+
+Implement reliable aggregation using the existing PostgreSQL architecture.
+
+Avoid downloading entire tables and counting records in React if a suitable database aggregation can be performed securely.
+
+Where necessary, implement a secure PostgreSQL function or RPC for dashboard statistics.
+
+The function must:
+
+- Restrict access to authorized administrators.
+- Count distinct registered accounts.
+- Use authoritative profile roles.
+- Handle missing or inconsistent profile records appropriately.
+- Avoid double-counting.
+- Distinguish registered accounts from verified accounts.
+- Return clearly defined metrics.
+- Avoid exposing personal user information unnecessarily.
+
+At minimum, assess these metrics:
+
+1. Total registered students.
+2. Total registered landlords.
+3. Total administrators, if displayed.
+4. Total registered non-administrator users.
+5. Pending landlord verifications.
+6. Approved landlord verifications.
+7. Rejected landlord verifications.
+8. Total properties.
+9. Approved properties.
+10. Pending property approvals.
+
+Only add metrics supported by the actual schema and relevant to the existing dashboard.
+
+Do not introduce misleading counts.
+
+If the system supports account deletion or incomplete profile creation, define how these records affect the metrics.
+
+Test that creating one student account increases the student count by exactly one and creating one landlord account increases the landlord count by exactly one, without double-counting.
+
+---
+
+# PART 8: DATABASE, STORAGE AND SECURITY REQUIREMENTS
+
+Security is mandatory.
+
+Inspect and preserve the existing RLS architecture.
+
+For every relevant table, determine:
+
+- Who can SELECT.
+- Who can INSERT.
+- Who can UPDATE.
+- Who can DELETE.
+- Whether the policy is restricted by authenticated user ID.
+- Whether administrators have the intended access.
+- Whether landlords can access only their own records.
+- Whether students can access only permitted public accommodation data.
+
+For Storage, inspect:
+
+- Bucket existence and visibility.
+- MIME restrictions.
+- File size limits.
+- INSERT policies.
+- SELECT policies.
+- UPDATE policies.
+- DELETE policies.
+- Folder ownership enforcement.
+- Access to private verification documents.
+- Access to property images.
+
+Do not assume that a private bucket is secure merely because it is marked private. Its policies must also be correct.
+
+Never use the Supabase service-role key in frontend code.
+
+Never trust frontend role checks as the only security boundary.
+
+Never allow students or landlords to retrieve another user's private verification documents.
+
+Never allow users to approve their own verification submissions.
+
+Never allow an unverified landlord to perform operations reserved for verified landlords.
+
+Use server-side validation and database enforcement for sensitive operations.
+
+Do not weaken RLS simply to make a failed query return data.
+
+---
+
+# PART 9: IMPLEMENTATION RULES AND SCOPE CONTROL
+
+You are authorized to inspect the repository and implement the necessary local source-code corrections, tests and new migration files directly related to the problems described in this task.
+
+However, the following rules are mandatory:
+
+1. Inspect before modifying.
+2. Preserve existing working functionality.
+3. Make the smallest practical changes.
+4. Do not rebuild the application.
+5. Do not introduce an alternative database or storage provider.
+6. Do not introduce unnecessary packages.
+7. Do not modify unrelated features, components, pages or services.
+8. Do not redesign the application's entire UI.
+9. Do not rename existing database tables or columns without a demonstrated necessity.
+10. Do not delete existing migrations.
+11. Do not rewrite migration history.
+12. Do not execute destructive SQL.
+13. Do not modify production or remote Supabase data.
+14. Do not deploy Edge Functions or migrations to the remote project.
+15. Do not change live Supabase dashboard settings.
+16. Do not expose API keys, service-role credentials or secrets.
+17. Do not create duplicate tables, buckets, triggers or services.
+18. Do not remove existing functionality to make tests pass.
+19. Do not introduce caretaker roles or functionality.
+20. Keep accommodation listings restricted to Danbare and Rimin Gata.
+
+All database changes must be implemented through new, appropriately ordered migration files.
+
+Before creating a migration, inspect the complete existing migration history and confirm that the proposed objects or policies do not already exist.
+
+For any existing production data, preserve records and relationships.
+
+If a required change would involve destructive data modification, remote configuration or an architectural decision that cannot safely be made from the repository, stop and request approval. Do not improvise.
+
+### Protect unrelated features
+
+Treat this instruction as a strict change boundary.
+
+Before modifying any file, identify why it must change and which reported defect it addresses.
+
+Do not modify unrelated:
+
+- Mapping functionality.
+- Roommate matching.
+- Shared accommodation groups.
+- Reservation logic.
+- Invoicing.
+- Payment processing.
+- Notifications.
+- General styling.
+- Other dashboards.
+- Existing business rules.
+
+A shared component may be modified only when the correction genuinely requires it. Preserve its existing behaviour for all unaffected users and workflows.
+
+---
+
+# PART 10: TESTING AND VERIFICATION
+
+Do not consider the work complete because the application compiles.
+
+Add or update tests for the actual defects.
+
+### Authentication tests
+
+- Unauthenticated homepage displays login and registration actions.
+- Authenticated student sees student navigation.
+- Authenticated landlord sees landlord navigation.
+- Authenticated administrator sees administrator navigation.
+- Session restoration correctly updates the homepage.
+- Sign-out restores the public navigation.
+- Missing profiles do not silently become student accounts.
+- Existing landlord registration behaviour is preserved or corrected.
+- Public registration cannot create administrator accounts.
+
+### Verification document tests
+
+- Valid document uploads successfully.
+- Invalid MIME types are rejected.
+- Oversized files are rejected.
+- Upload failure does not create a false successful submission.
+- Metadata insertion failure is handled safely.
+- A successful submission appears in the administrator queue.
+- Unauthorized users cannot retrieve private documents.
+- Administrators can retrieve authorized documents.
+- Approval updates the correct record.
+- Rejection records a reason.
+- Users can see their updated verification status.
+
+### Property and image tests
+
+- Landlord can submit a property.
+- Property images upload successfully.
+- Image metadata references the correct property.
+- Students can see approved and available properties.
+- Students can view associated images.
+- Unapproved properties remain restricted according to existing rules.
+- Unauthorized users cannot modify another landlord's listings.
+- Missing images do not break property pages.
+
+### Administrative statistics tests
+
+- New student registration increments the student count correctly.
+- New landlord registration increments the landlord count correctly.
+- Total user counts reconcile with their defined categories.
+- Verification statuses are counted separately.
+- Duplicate or missing profile records do not inflate figures.
+- Dashboard aggregation is restricted to administrators.
+
+### General quality checks
+
+Run the project's existing:
+
+- Lint checks.
+- TypeScript checks.
+- Unit tests.
+- Integration tests.
+- Production build.
+
+Where possible, test RLS, Storage policies and PostgreSQL functions against a local Supabase environment or actual PostgreSQL test environment.
+
+Clearly distinguish mocked tests from genuine database integration tests.
+
+Do not claim remote functionality has been tested if it has not.
+
+---
+
+# PART 11: REQUIRED EXECUTION AND REPORTING PROCESS
+
+Work in the following order to avoid wasting time and creating unnecessary changes.
+
+### Stage 1: Focused repository audit
+
+Inspect only the components and database objects relevant to the reported problems.
+
+Identify the actual causes of:
+
+- Verification documents not reaching administrators.
+- Property images and listings not appearing for students.
+- Multimedia persistence failures.
+- Incorrect homepage authentication state.
+- Inaccurate administrator statistics.
+- Any related landlord role initialization defect.
+
+Provide evidence using exact filenames, functions, line numbers and database objects.
+
+### Stage 2: Root cause and change plan
+
+For each defect, report:
+
+- Root cause.
+- Affected component.
+- Database or storage dependency.
+- Security implications.
+- Smallest safe correction.
+- Whether a migration is required.
+- Expected test coverage.
+
+Identify shared root causes so that one correction can resolve multiple symptoms.
+
+Do not create multiple fixes for the same underlying problem.
+
+### Stage 3: Targeted implementation
+
+Implement the approved-scope local changes.
+
+Prioritize:
+
+1. Database and Storage connectivity and policy correctness.
+2. Reliable document upload and metadata persistence.
+3. Administrator document retrieval and review.
+4. Property image persistence and student retrieval.
+5. Authentication-dependent homepage state.
+6. Accurate administrator statistics.
+
+If a prerequisite is broken, fix that prerequisite before changing dependent UI components.
+
+### Stage 4: Testing
+
+Run relevant tests after each major correction.
+
+Then run the complete existing regression suite.
+
+Do not suppress failures or weaken assertions to obtain a passing result.
+
+### Stage 5: Final engineering report
+
+Provide a concise but technically complete report containing:
+
+**A. Root causes**
+- What was actually broken.
+- Why it was broken.
+- How the defects interacted.
+
+**B. Files modified**
+- Exact file paths.
+- What changed.
+- Why each change was necessary.
+
+**C. Database changes**
+- New migration filenames.
+- Tables, policies, triggers or functions affected.
+- Whether the changes are local-only or remotely applied.
+
+**D. Storage changes**
+- Buckets reused or modified.
+- Bucket policies.
+- Upload and retrieval behaviour.
+- Metadata relationships.
+
+**E. Authentication changes**
+- Session handling.
+- Role resolution.
+- Homepage rendering.
+
+**F. Administrator dashboard**
+- Corrected statistics.
+- Metric definitions.
+- Database aggregation approach.
+
+**G. Testing results**
+- Tests executed.
+- Tests passed.
+- Tests failed.
+- Mocked versus actual database integration coverage.
+
+**H. Outstanding work**
+- Remote Supabase migrations not applied.
+- Storage buckets or policies not verified remotely.
+- Edge Functions not deployed.
+- Environment variables still required.
+- Manual dashboard configuration, if any.
+- Anything that still requires administrator action.
+
+**I. Scope protection**
+- Confirm which unrelated features were left untouched.
+- Identify any shared components that had to be modified and explain why.
+
+---
+
+# FINAL ACCEPTANCE CRITERIA
+
+Do not declare this task complete unless the following conditions are satisfied in the tested environment:
+
+1. Student registration creates the correct student account and profile.
+2. Landlord registration creates the correct landlord account and profile.
+3. Administrator privileges remain protected.
+4. Users can upload their required verification documents.
+5. Actual files persist in the correct Supabase Storage buckets.
+6. Corresponding PostgreSQL metadata and relationships are saved.
+7. Administrators can see and securely retrieve submitted verification documents.
+8. Administrators can approve or reject verification submissions.
+9. Users can see their verification status and rejection reasons.
+10. Landlords can upload property images.
+11. Property images persist and remain linked to their correct properties.
+12. Students can retrieve approved property listings and view their images.
+13. Homepage navigation reflects the actual authenticated session and account role.
+14. Public login and registration actions are not incorrectly displayed to authenticated users.
+15. Administrator registration statistics reconcile with authoritative database records.
+16. Existing unrelated functionality remains intact.
+17. Relevant security and regression tests pass.
+18. No unapproved remote deployment or destructive database operation has occurred.
+
+**Important:** If remote Supabase configuration is not available, do not pretend these criteria have been verified remotely. Complete the local implementation, explain exactly what remains, and provide a safe deployment and verification checklist.
+
+## FINAL INSTRUCTION
+
+Do not take shortcuts. Do not fix symptoms while leaving their underlying causes untouched.
+
+Do not assume that OUTPOST lacks a database or storage simply because uploaded content is not visible. Establish whether the infrastructure is absent, incorrectly configured, disconnected from the frontend, blocked by RLS, or failing during retrieval.
+
+Find the shared causes, correct the affected data flows, preserve the existing architecture and protect all unrelated functionality.
+
+The required outcome is a reliable, secure and consistent end-to-end system, not merely a collection of UI fixes.
+
+Begin with Stage 1 and proceed through the stages within the stated permissions. If you encounter a change requiring destructive action, remote access, or a decision outside this authorization, stop that specific operation and request approval. Do not block unrelated safe local work.
+
+Do not declare success without evidence.

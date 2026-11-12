@@ -23,6 +23,7 @@ import {
   LocationSource,
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
+import { appEventBus } from '../../infrastructure/events/eventBus';
 import { encodeGeohash, computePublicCoordinates, AREA_CENTERS, CompassSector } from '../../domain/geoUtils';
 import { appConfig } from '../../infrastructure/config/appConfig';
 
@@ -166,6 +167,42 @@ class PropertyService {
     }
 
     return list;
+  }
+
+  public subscribeToProperties(callback: (properties: Property[]) => void): () => void {
+    return appEventBus.subscribe('propertiesUpdated', callback);
+  }
+
+  public async ensurePropertiesLoaded(): Promise<void> {
+    if (typeof (repository as any).awaitPropertiesReady === 'function') {
+      await (repository as any).awaitPropertiesReady();
+    }
+  }
+
+  public async refreshApprovedProperties(): Promise<Property[]> {
+    if (typeof (repository as any).fetchApprovedPropertiesFromSupabase === 'function') {
+      return (repository as any).fetchApprovedPropertiesFromSupabase();
+    }
+    return this.searchProperties({ onlyApproved: true });
+  }
+
+  public async refreshLandlordProperties(landlordId: string): Promise<Property[]> {
+    if (typeof (repository as any).fetchLandlordPropertiesFromSupabase === 'function') {
+      return (repository as any).fetchLandlordPropertiesFromSupabase(landlordId);
+    }
+    return this.getLandlordProperties(landlordId);
+  }
+
+  public async fetchPropertyByIdOrSlug(lookupKey: string): Promise<Property | undefined> {
+    await this.ensurePropertiesLoaded();
+    const cached = this.getPropertyBySlug(lookupKey) || this.getPropertyById(lookupKey);
+    if (cached) return cached;
+
+    if (typeof (repository as any).fetchPropertyByIdOrSlugFromSupabase === 'function') {
+      const remote = await (repository as any).fetchPropertyByIdOrSlugFromSupabase(lookupKey);
+      if (remote) return remote;
+    }
+    return this.getPropertyBySlug(lookupKey) || this.getPropertyById(lookupKey);
   }
 
   public getPropertyById(id: string): Property | undefined {

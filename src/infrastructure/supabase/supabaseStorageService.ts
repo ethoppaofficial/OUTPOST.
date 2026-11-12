@@ -38,28 +38,56 @@ export class SupabaseStorageService {
     return clean || `file_${Date.now()}`;
   }
 
-  private validateFileSize(size: number, maxBytes: number, label: string): void {
-    if (size > maxBytes) {
+  private validateUploadPayload(
+    file: File | Blob,
+    maxBytes: number,
+    allowedMimeTypes: string[],
+    label: string,
+    defaultMime: string
+  ): string {
+    if (!file || typeof file.size !== 'number' || file.size <= 0) {
+      throw new Error(`${label} is empty (0 bytes). Please select a valid file.`);
+    }
+    if (file.size > maxBytes) {
       const maxMb = Math.round(maxBytes / (1024 * 1024));
       throw new Error(`${label} exceeds maximum allowed size of ${maxMb}MB.`);
     }
+    const rawType = (file.type || defaultMime).toLowerCase();
+    const normalizedType = rawType === 'image/jpg' ? 'image/jpeg' : rawType;
+    if (!allowedMimeTypes.includes(normalizedType)) {
+      throw new Error(`${label} has unsupported file type (${file.type || 'unknown'}).`);
+    }
+    return normalizedType;
+  }
+
+  private assertValidOwnerId(id: string | undefined, label: string): string {
+    const clean = (id || '').trim();
+    if (!clean || clean === 'anonymous' || clean === 'landlord' || clean === 'student') {
+      throw new Error(`Authenticated ${label} ID is required before uploading files.`);
+    }
+    return clean;
   }
 
   /**
-   * Upload Student Verification Document to private bucket 'student-docs'
-  /**
-   * Upload Student Verification Document to private bucket 'student-docs'
+   * Upload Student Verification Document to private bucket 'student-docs' (max 5 MB).
    */
   async uploadStudentDocument(
     arg1: File | Blob | string,
     arg2: string | File | Blob,
     arg3: string = 'document.pdf',
-    arg4?: string
+    _arg4?: string
   ): Promise<SupabaseFileUploadResult> {
     const file = (typeof arg1 === 'string' ? arg2 : arg1) as File | Blob;
-    const studentId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const rawStudentId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const studentId = this.assertValidOwnerId(rawStudentId, 'student');
     const originalName = typeof arg1 === 'string' && typeof arg3 === 'string' ? arg3 : (file as File).name || 'document.pdf';
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Student document');
+    const contentType = this.validateUploadPayload(
+      file,
+      5 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+      'Student document',
+      'application/pdf'
+    );
     const cleanName = this.sanitizeFileName(originalName);
     const docId = crypto.randomUUID();
     const storagePath = `${studentId}/${docId}/${cleanName}`;
@@ -67,7 +95,7 @@ export class SupabaseStorageService {
     const { error } = await supabase.storage
       .from('student-docs')
       .upload(storagePath, file, {
-        contentType: file.type || 'application/pdf',
+        contentType,
         upsert: false,
       });
 
@@ -80,23 +108,30 @@ export class SupabaseStorageService {
       path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'application/pdf',
+      contentType,
     };
   }
 
   /**
-   * Upload Landlord Verification Submission to private bucket 'landlord-docs'
+   * Upload Landlord Verification Submission to private bucket 'landlord-docs' (max 10 MB).
    */
   async uploadLandlordDocument(
     arg1: File | Blob | string,
     arg2: string | File | Blob,
     arg3: string = 'document.pdf',
-    arg4?: string
+    _arg4?: string
   ): Promise<SupabaseFileUploadResult> {
     const file = (typeof arg1 === 'string' ? arg2 : arg1) as File | Blob;
-    const landlordId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const rawLandlordId = (typeof arg1 === 'string' ? arg1 : arg2) as string;
+    const landlordId = this.assertValidOwnerId(rawLandlordId, 'landlord');
     const originalName = typeof arg1 === 'string' && typeof arg3 === 'string' ? arg3 : (file as File).name || 'document.pdf';
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Landlord document');
+    const contentType = this.validateUploadPayload(
+      file,
+      10 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+      'Landlord document',
+      'application/pdf'
+    );
     const cleanName = this.sanitizeFileName(originalName);
     const docId = crypto.randomUUID();
     const storagePath = `${landlordId}/${docId}/${cleanName}`;
@@ -104,7 +139,7 @@ export class SupabaseStorageService {
     const { error } = await supabase.storage
       .from('landlord-docs')
       .upload(storagePath, file, {
-        contentType: file.type || 'application/pdf',
+        contentType,
         upsert: false,
       });
 
@@ -117,7 +152,7 @@ export class SupabaseStorageService {
       path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'application/pdf',
+      contentType,
     };
   }
 
@@ -131,16 +166,22 @@ export class SupabaseStorageService {
     landlordId?: string,
     studentId?: string
   ): Promise<SupabaseFileUploadResult> {
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Payment receipt');
+    const contentType = this.validateUploadPayload(
+      file,
+      10 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+      'Payment receipt',
+      'application/pdf'
+    );
+    const effectiveLandlordId = this.assertValidOwnerId(landlordId, 'landlord');
+    const effectiveStudentId = this.assertValidOwnerId(studentId, 'student');
     const cleanName = this.sanitizeFileName(originalFileName);
-    const effectiveLandlordId = landlordId || 'landlord';
-    const effectiveStudentId = studentId || 'student';
     const storagePath = `${effectiveLandlordId}/${effectiveStudentId}/${reservationId}/${cleanName}`;
 
     const { error } = await supabase.storage
       .from('payment-receipts')
       .upload(storagePath, file, {
-        contentType: file.type || 'application/pdf',
+        contentType,
         upsert: false,
       });
 
@@ -153,26 +194,34 @@ export class SupabaseStorageService {
       path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'application/pdf',
+      contentType,
     };
   }
 
   /**
-   * Upload Property Image to public media bucket 'property-images'
+   * Upload Property Image to public media bucket 'property-images' (max 10 MB, JPEG/PNG/WebP).
    */
   async uploadPropertyImage(
     file: File | Blob,
     landlordId: string,
     propertyId: string
   ): Promise<SupabaseFileUploadResult> {
-    this.validateFileSize(file.size, 10 * 1024 * 1024, 'Property image');
+    const safeLandlordId = this.assertValidOwnerId(landlordId, 'landlord');
+    const contentType = this.validateUploadPayload(
+      file,
+      10 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp'],
+      'Property image',
+      'image/jpeg'
+    );
     const cleanName = this.sanitizeFileName((file as File).name || 'image.jpg');
-    const storagePath = `${landlordId}/${propertyId}/${Date.now()}_${cleanName}`;
+    const safePropId = (propertyId || '').trim() || crypto.randomUUID();
+    const storagePath = `${safeLandlordId}/${safePropId}/${Date.now()}_${cleanName}`;
 
     const { error } = await supabase.storage
       .from('property-images')
       .upload(storagePath, file, {
-        contentType: file.type || 'image/jpeg',
+        contentType,
         upsert: true,
       });
 
@@ -189,25 +238,32 @@ export class SupabaseStorageService {
       path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
+      contentType,
     };
   }
 
   /**
-   * Upload Profile Picture to public media bucket 'profile-pictures'
+   * Upload Profile Picture to public media bucket 'profile-pictures' (max 2 MB, JPEG/PNG/WebP).
    */
   async uploadProfilePicture(
     file: File | Blob,
     userId: string
   ): Promise<SupabaseFileUploadResult> {
-    this.validateFileSize(file.size, 2 * 1024 * 1024, 'Profile avatar');
+    const safeUserId = this.assertValidOwnerId(userId, 'user');
+    const contentType = this.validateUploadPayload(
+      file,
+      2 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp'],
+      'Profile avatar',
+      'image/jpeg'
+    );
     const cleanName = this.sanitizeFileName((file as File).name || 'avatar.jpg');
-    const storagePath = `${userId}/${Date.now()}_${cleanName}`;
+    const storagePath = `${safeUserId}/${Date.now()}_${cleanName}`;
 
     const { error } = await supabase.storage
       .from('profile-pictures')
       .upload(storagePath, file, {
-        contentType: file.type || 'image/jpeg',
+        contentType,
         upsert: true,
       });
 
@@ -224,7 +280,7 @@ export class SupabaseStorageService {
       path: storagePath,
       fileName: cleanName,
       fileSize: file.size,
-      contentType: file.type || 'image/jpeg',
+      contentType,
     };
   }
 
@@ -246,8 +302,13 @@ export class SupabaseStorageService {
     contentType: string;
     fileSize: number;
   }> {
-    this.validateFileSize(params.file.size, 10 * 1024 * 1024, 'Payment receipt');
-    const contentType = params.file.type || 'application/octet-stream';
+    const contentType = this.validateUploadPayload(
+      params.file,
+      10 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+      'Payment receipt',
+      'application/pdf'
+    );
     const cleanName = this.sanitizeFileName(params.originalFileName);
 
     // 1. Request upload session from Edge Function
@@ -325,8 +386,13 @@ export class SupabaseStorageService {
     createdAt?: string;
     text?: string;
   }> {
-    this.validateFileSize(params.file.size, 10 * 1024 * 1024, 'Chat attachment');
-    const contentType = params.file.type || 'application/octet-stream';
+    const contentType = this.validateUploadPayload(
+      params.file,
+      10 * 1024 * 1024,
+      ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'text/plain'],
+      'Chat attachment',
+      'application/pdf'
+    );
     const cleanName = this.sanitizeFileName(params.originalFileName);
 
     // 1. Request upload session from Edge Function
@@ -425,6 +491,31 @@ export class SupabaseStorageService {
     const { error } = await supabase.storage.from(bucket).remove([normalizedPath]);
     if (error) {
       console.warn(`[SupabaseStorageService] Orphan cleanup failed for ${bucket}/${normalizedPath}:`, error.message);
+    }
+  }
+
+  /**
+   * Delete a public media asset (property photo or avatar) by storage path or public URL.
+   */
+  async deletePublicMediaAsset(
+    bucket: 'property-images' | 'profile-pictures',
+    pathOrUrl: string
+  ): Promise<void> {
+    if (!pathOrUrl || pathOrUrl.startsWith('data:') || pathOrUrl.startsWith('blob:')) return;
+    let storagePath = pathOrUrl;
+    const marker = `/storage/v1/object/public/${bucket}/`;
+    const markerIdx = pathOrUrl.indexOf(marker);
+    if (markerIdx >= 0) {
+      storagePath = decodeURIComponent(pathOrUrl.slice(markerIdx + marker.length).split('?')[0]);
+    } else if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+      return;
+    } else if (pathOrUrl.startsWith(`${bucket}/`)) {
+      storagePath = pathOrUrl.slice(bucket.length + 1);
+    }
+    if (!storagePath) return;
+    const { error } = await supabase.storage.from(bucket).remove([storagePath]);
+    if (error) {
+      console.warn(`[SupabaseStorageService] Public asset cleanup failed for ${bucket}/${storagePath}:`, error.message);
     }
   }
 

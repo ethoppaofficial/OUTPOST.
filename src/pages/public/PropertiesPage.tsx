@@ -60,14 +60,40 @@ export const PropertiesPage: React.FC = () => {
     searchParams.get('selected') || null
   );
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
+  const [propertiesRevision, setPropertiesRevision] = useState(0);
 
   // Device-location nearby search state (sensitive, one-time only; never stored)
   const { currentUser } = useAuth();
   const [isLocating, setIsLocating] = useState(false);
   const [nearbyResults, setNearbyResults] = useState<NearbyAccommodationItem[] | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+
+  const loadDirectory = React.useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    setHasError(false);
+    try {
+      await propertyService.ensurePropertiesLoaded();
+      await propertyService.refreshApprovedProperties();
+      setPropertiesRevision((n) => n + 1);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load approved accommodation listings.');
+      setHasError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = propertyService.subscribeToProperties(() => {
+      setPropertiesRevision((n) => n + 1);
+    });
+    void loadDirectory();
+    return unsubscribe;
+  }, [loadDirectory]);
 
   // References for smooth scrolling
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -201,6 +227,7 @@ export const PropertiesPage: React.FC = () => {
       return [];
     }
   }, [
+    propertiesRevision,
     query,
     activeLocationIds,
     neighbourhood,
@@ -542,16 +569,26 @@ export const PropertiesPage: React.FC = () => {
                 Failed to Query Listings
               </h3>
               <p className="text-xs text-rose-700 dark:text-rose-300 max-w-sm mx-auto">
-                An error occurred while loading accommodation records. Please reset filters and try again.
+                {loadError || 'An error occurred while loading accommodation records. Please retry.'}
               </p>
-              <button
-                onClick={resetFilters}
-                className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-500 transition"
-              >
-                Reset Search Filters
-              </button>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadDirectory()}
+                  className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-500 transition cursor-pointer"
+                >
+                  Retry Loading
+                </button>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="px-4 py-2 rounded-xl border border-rose-300 text-rose-700 dark:text-rose-200 text-xs font-semibold hover:bg-rose-100/60 transition cursor-pointer"
+                >
+                  Reset Filters
+                </button>
+              </div>
             </div>
-          ) : loading ? (
+          ) : loading && displayedProperties.length === 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (
                 <PropertyCardSkeleton key={i} />
@@ -625,11 +662,17 @@ export const PropertiesPage: React.FC = () => {
           <div className="w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto" />
           <div className="flex items-start justify-between gap-3">
             <div className="flex gap-3">
-              <img
-                src={selectedProp.images[0] || 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=300'}
-                alt={selectedProp.title}
-                className="w-20 h-20 rounded-2xl object-cover flex-shrink-0"
-              />
+              {selectedProp.images[0] ? (
+                <img
+                  src={selectedProp.images[0]}
+                  alt={selectedProp.title}
+                  className="w-20 h-20 rounded-2xl object-cover flex-shrink-0"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center flex-shrink-0 text-slate-400">
+                  <Building2 className="w-7 h-7" />
+                </div>
+              )}
               <div className="space-y-1">
                 <span className="text-[11px] font-semibold text-emerald-600 uppercase">
                   {selectedProp.propertyType} • {selectedProp.neighbourhood}

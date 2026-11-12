@@ -178,7 +178,7 @@ class AuthService {
     programme: string;
     gender: 'Male' | 'Female' | 'Other';
     preferredLocation?: string;
-  }): Promise<{ success: boolean; user?: User; error?: string }> {
+  }): Promise<{ success: boolean; user?: User; requiresEmailConfirmation?: boolean; error?: string }> {
     const emailNorm = data.email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailNorm) || emailNorm.includes('tempmail') || emailNorm.includes('disposable')) {
@@ -203,6 +203,8 @@ class AuthService {
           data: {
             full_name: data.fullName.trim(),
             role: 'student',
+            phone: data.phone.trim(),
+            registration_number: regNorm,
           },
         },
       });
@@ -216,33 +218,64 @@ class AuthService {
       }
 
       const sbUser = signUpData.user;
+      const hasSession = Boolean(signUpData.session);
       const newUser: User = {
         id: sbUser.id,
         email: emailNorm,
+        fullName: data.fullName.trim(),
+        phone: data.phone.trim(),
         role: 'student',
-        accountStatus: 'email_unverified',
+        accountStatus: sbUser.email_confirmed_at ? 'active' : 'email_unverified',
         emailVerified: Boolean(sbUser.email_confirmed_at),
         createdAt: new Date().toISOString(),
       };
 
-      repository.createUser(newUser);
-      repository.saveStudentProfile({
-        userId: sbUser.id,
-        fullName: data.fullName.trim(),
-        phone: data.phone.trim(),
-        registrationNumber: regNorm,
-        university: data.university,
-        campus: data.campus,
-        studyLevel: data.studyLevel,
-        programme: data.programme.trim(),
-        gender: data.gender,
-        preferredLocation: data.preferredLocation?.trim() || 'Dambare',
-        bio: 'New student on Outpost.',
-        isProfileVerified: false,
-      });
+      // Only write authenticated DB companion updates when Supabase issued a live session.
+      // When email confirmation is required (session === null), handle_new_user() trigger has already
+      // provisioned public.profiles and public.student_profiles safely on the database side.
+      if (hasSession) {
+        await supabase
+          .from('profiles')
+          .update({
+            full_name: data.fullName.trim(),
+            phone: data.phone.trim(),
+          })
+          .eq('id', sbUser.id);
 
-      repository.setActiveUserId(sbUser.id);
-      return { success: true, user: newUser };
+        await supabase
+          .from('student_profiles')
+          .upsert(
+            {
+              user_id: sbUser.id,
+              institution: data.university,
+              campus: data.campus,
+              study_level: data.studyLevel,
+              registration_number: regNorm,
+              gender: data.gender?.toLowerCase() || 'other',
+              is_profile_verified: false,
+            },
+            { onConflict: 'user_id' }
+          );
+
+        repository.createUser(newUser);
+        repository.saveStudentProfile({
+          userId: sbUser.id,
+          fullName: data.fullName.trim(),
+          phone: data.phone.trim(),
+          registrationNumber: regNorm,
+          university: data.university,
+          campus: data.campus,
+          studyLevel: data.studyLevel,
+          programme: data.programme.trim(),
+          gender: data.gender,
+          preferredLocation: data.preferredLocation?.trim() || 'Dambare',
+          bio: 'New student on Outpost.',
+          isProfileVerified: false,
+        });
+        repository.setActiveUserId(sbUser.id);
+      }
+
+      return { success: true, user: newUser, requiresEmailConfirmation: !hasSession };
     } catch (err: any) {
       return { success: false, error: err.message || 'Registration failed.' };
     }
@@ -267,7 +300,7 @@ class AuthService {
     contactAddress: string;
     idType: any;
     idReference: string;
-  }): Promise<{ success: boolean; user?: User; error?: string }> {
+  }): Promise<{ success: boolean; user?: User; requiresEmailConfirmation?: boolean; error?: string }> {
     const emailNorm = data.email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
       return { success: false, error: 'A valid business or personal email is required.' };
@@ -285,6 +318,7 @@ class AuthService {
           data: {
             full_name: data.legalName.trim(),
             role: 'landlord',
+            phone: data.phone.trim(),
           },
         },
       });
@@ -298,30 +332,56 @@ class AuthService {
       }
 
       const sbUser = signUpData.user;
+      const hasSession = Boolean(signUpData.session);
       const newUser: User = {
         id: sbUser.id,
         email: emailNorm,
+        fullName: data.legalName.trim(),
+        phone: data.phone.trim(),
         role: 'landlord',
         accountStatus: 'profile_pending',
         emailVerified: Boolean(sbUser.email_confirmed_at),
         createdAt: new Date().toISOString(),
       };
 
-      repository.createUser(newUser);
-      repository.saveLandlordProfile({
-        userId: sbUser.id,
-        legalName: data.legalName.trim(),
-        phone: data.phone.trim(),
-        contactAddress: data.contactAddress.trim(),
-        idType: data.idType,
-        idReference: data.idReference.trim(),
-        businessName: data.businessName?.trim(),
-        verificationStatus: 'pending',
-        submittedAt: new Date().toISOString(),
-      });
+      if (hasSession) {
+        await supabase
+          .from('profiles')
+          .update({
+            full_name: data.legalName.trim(),
+            phone: data.phone.trim(),
+          })
+          .eq('id', sbUser.id);
 
-      repository.setActiveUserId(sbUser.id);
-      return { success: true, user: newUser };
+        await supabase
+          .from('landlord_profiles')
+          .upsert(
+            {
+              user_id: sbUser.id,
+              company_name: data.businessName?.trim() || data.legalName.trim(),
+              business_address: data.contactAddress.trim(),
+              tax_id: data.idReference.trim(),
+              verification_status: 'not_started',
+            },
+            { onConflict: 'user_id' }
+          );
+
+        repository.createUser(newUser);
+        repository.saveLandlordProfile({
+          userId: sbUser.id,
+          legalName: data.legalName.trim(),
+          phone: data.phone.trim(),
+          contactAddress: data.contactAddress.trim(),
+          idType: data.idType,
+          idReference: data.idReference.trim(),
+          businessName: data.businessName?.trim(),
+          // Match authoritative DB initial state ('not_started' until evidence document is uploaded)
+          verificationStatus: 'not_started',
+        });
+        repository.setActiveUserId(sbUser.id);
+      }
+
+      return { success: true, user: newUser, requiresEmailConfirmation: !hasSession };
     } catch (err: any) {
       return { success: false, error: err.message || 'Registration failed.' };
     }

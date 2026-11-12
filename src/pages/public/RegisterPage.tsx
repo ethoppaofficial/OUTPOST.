@@ -26,6 +26,7 @@ export const RegisterPage: React.FC = () => {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [requiresConfirmation, setRequiresConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
@@ -59,7 +60,11 @@ export const RegisterPage: React.FC = () => {
 
         if (res.success && res.user) {
           setSuccess(true);
-          setTimeout(() => navigate('/student/verification'), 1200);
+          if (res.requiresEmailConfirmation) {
+            setRequiresConfirmation(true);
+          } else {
+            setTimeout(() => navigate('/student/verification'), 1200);
+          }
         } else {
           setError(res.error || 'Failed to complete student registration.');
         }
@@ -77,7 +82,11 @@ export const RegisterPage: React.FC = () => {
 
         if (res.success && res.user) {
           setSuccess(true);
-          setTimeout(() => navigate('/landlord/verification'), 1200);
+          if (res.requiresEmailConfirmation) {
+            setRequiresConfirmation(true);
+          } else {
+            setTimeout(() => navigate('/landlord/verification'), 1200);
+          }
         } else {
           setError(res.error || 'Failed to complete landlord registration.');
         }
@@ -141,9 +150,23 @@ export const RegisterPage: React.FC = () => {
           <div className="text-center py-8 space-y-3">
             <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">Account Created!</h3>
-            <p className="text-xs text-slate-500">
-              Welcome to OUTPOST. Redirecting to your verification portal...
-            </p>
+            {requiresConfirmation ? (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  We sent a confirmation link to <strong className="text-slate-800 dark:text-slate-200">{email}</strong>. Confirm your email address, then sign in to upload your verification documents.
+                </p>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                >
+                  Continue to Sign In
+                </Link>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Welcome to OUTPOST. Redirecting to your verification portal...
+              </p>
+            )}
           </div>
         ) : (
           <form onSubmit={handleRegister} className="space-y-4 text-xs">

@@ -162,13 +162,13 @@ export const VerificationQueuePage: React.FC = () => {
         <div className="space-y-4">
           {queue.map((item) => {
             const name = activeTab === 'student' ? item.fullName : item.legalName;
-            const id = activeTab === 'student' ? item.id : item.userId || item.id;
+            const id = activeTab === 'student' ? item.id : item.submissionId || item.userId || item.id;
             const evidenceRecordId = activeTab === 'student' ? item.id : item.submissionId || item.userId || item.id;
             const activeSigned = signedEvidence?.id === evidenceRecordId ? signedEvidence : null;
 
             return (
               <article
-                key={id}
+                key={evidenceRecordId}
                 className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
               >
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">

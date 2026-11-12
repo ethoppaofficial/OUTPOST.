@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ChevronLeft, ChevronRight, Building2 } from 'lucide-react';
 
 interface ImageGalleryProps {
   images: string[];
@@ -8,14 +8,25 @@ interface ImageGalleryProps {
 
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, altTitle }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [failedUrls, setFailedUrls] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    setFailedUrls({});
+  }, [images]);
 
   if (!images || images.length === 0) {
     return (
-      <div className="w-full h-80 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-400">
-        No images available
+      <div className="w-full h-80 bg-slate-100 dark:bg-slate-800 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400">
+        <Building2 className="w-10 h-10 opacity-60" />
+        <span className="text-xs font-medium">No verified property images uploaded yet</span>
       </div>
     );
   }
+
+  const safeIndex = currentIndex < images.length ? currentIndex : 0;
+  const activeUrl = images[safeIndex];
+  const isBroken = !activeUrl || failedUrls[activeUrl];
 
   const next = () => setCurrentIndex((prev) => (prev + 1) % images.length);
   const prev = () => setCurrentIndex((prev) => (prev - 1 + images.length) % images.length);
@@ -24,11 +35,19 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, altTitle }) 
     <div className="space-y-3">
       {/* Main Image View */}
       <div className="relative h-72 sm:h-96 md:h-[420px] rounded-2xl overflow-hidden bg-slate-900 group">
-        <img
-          src={images[currentIndex]}
-          alt={`${altTitle} - photo ${currentIndex + 1} of ${images.length}`}
-          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
-        />
+        {!isBroken ? (
+          <img
+            src={activeUrl}
+            alt={`${altTitle} - photo ${safeIndex + 1} of ${images.length}`}
+            onError={() => setFailedUrls((prevMap) => ({ ...prevMap, [activeUrl]: true }))}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400 bg-slate-800">
+            <Building2 className="w-10 h-10 opacity-60" />
+            <span className="text-xs font-medium">Photo failed to load</span>
+          </div>
+        )}
 
         {images.length > 1 && (
           <>
@@ -50,7 +69,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, altTitle }) 
         )}
 
         <div className="absolute bottom-3 right-3 px-3 py-1 rounded-full bg-slate-900/70 backdrop-blur-xs text-xs font-medium text-white">
-          {currentIndex + 1} / {images.length}
+          {safeIndex + 1} / {images.length}
         </div>
       </div>
 
@@ -62,16 +81,23 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ images, altTitle }) 
               key={idx}
               onClick={() => setCurrentIndex(idx)}
               className={`relative flex-shrink-0 w-20 h-16 rounded-xl overflow-hidden border-2 transition ${
-                idx === currentIndex
+                idx === safeIndex
                   ? 'border-emerald-500 scale-102'
                   : 'border-transparent opacity-60 hover:opacity-100'
               }`}
             >
-              <img
-                src={img}
-                alt={`${altTitle} thumbnail ${idx + 1}`}
-                className="w-full h-full object-cover"
-              />
+              {!failedUrls[img] ? (
+                <img
+                  src={img}
+                  alt={`${altTitle} thumbnail ${idx + 1}`}
+                  onError={() => setFailedUrls((prevMap) => ({ ...prevMap, [img]: true }))}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-400">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              )}
             </button>
           ))}
         </div>

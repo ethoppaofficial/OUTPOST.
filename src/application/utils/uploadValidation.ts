@@ -19,12 +19,25 @@ export interface FileValidationResult {
   isValid: boolean;
   error?: string;
   sanitizedFileName?: string;
+  normalizedMimeType?: string;
 }
 
 export const STUDENT_DOCUMENT_UPLOAD_RULES: FileValidationOptions = {
   maxSizeMB: 5,
   allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
   allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.pdf'],
+};
+
+export const LANDLORD_DOCUMENT_UPLOAD_RULES: FileValidationOptions = {
+  maxSizeMB: 10,
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+  allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.pdf'],
+};
+
+export const PROFILE_PICTURE_UPLOAD_RULES: FileValidationOptions = {
+  maxSizeMB: 2,
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp'],
 };
 
 export const PAYMENT_RECEIPT_UPLOAD_RULES: FileValidationOptions = {
@@ -83,8 +96,10 @@ export function validateUploadFile(
     };
   }
 
-  // Reject unsupported MIME types (explicitly disallow active HTML/SVG scripts)
-  if (!options.allowedMimeTypes.includes(file.type.toLowerCase())) {
+  // Normalize non-standard 'image/jpg' before MIME allowlist validation (reject HTML/SVG scripts)
+  const rawType = (file.type || '').toLowerCase();
+  const normalizedType = rawType === 'image/jpg' ? 'image/jpeg' : rawType;
+  if (!options.allowedMimeTypes.includes(normalizedType)) {
     return {
       isValid: false,
       error: `Unsupported file type (${file.type || 'unknown'}). Accepted formats: ${options.allowedExtensions?.join(', ') || options.allowedMimeTypes.join(', ')}.`,
@@ -97,6 +112,7 @@ export function validateUploadFile(
   return {
     isValid: true,
     sanitizedFileName: sanitized,
+    normalizedMimeType: normalizedType,
   };
 }
 

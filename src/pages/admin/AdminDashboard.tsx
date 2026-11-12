@@ -35,6 +35,7 @@ import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
 
 const primaryCards: Array<{ key: keyof AdminMetrics; label: string; subtitle: string; icon: any }> = [
   { key: 'totalUsers', label: 'Registered users', subtitle: 'public.profiles', icon: Users },
+  { key: 'totalNonAdminUsers', label: 'Non-admin users', subtitle: 'students + landlords', icon: Users },
   { key: 'totalStudents', label: 'Registered students', subtitle: "role = 'student'", icon: Users },
   { key: 'totalLandlords', label: 'Registered landlords', subtitle: "role = 'landlord'", icon: Building2 },
   { key: 'totalAdministrators', label: 'Administrators', subtitle: "role = 'admin'", icon: ShieldCheck },
@@ -43,6 +44,10 @@ const primaryCards: Array<{ key: keyof AdminMetrics; label: string; subtitle: st
   { key: 'totalPaymentReceipts', label: 'Payment receipts uploaded', subtitle: 'payment_receipts', icon: Receipt },
   { key: 'pendingStudentVerifications', label: 'Student checks pending', subtitle: "status = 'pending'", icon: FileCheck2 },
   { key: 'pendingLandlordVerifications', label: 'Landlord checks pending', subtitle: 'submissions & profiles', icon: UserCheck },
+  { key: 'approvedLandlordVerifications', label: 'Approved landlords', subtitle: "verification_status = 'approved'", icon: ShieldCheck },
+  { key: 'rejectedLandlordVerifications', label: 'Rejected landlords', subtitle: "verification_status = 'rejected'", icon: AlertTriangle },
+  { key: 'totalProperties', label: 'Total submitted properties', subtitle: 'all review states', icon: Building2 },
+  { key: 'approvedProperties', label: 'Approved properties', subtitle: "approval_status = 'approved'", icon: FileCheck2 },
   { key: 'pendingPropertyVerifications', label: 'Property reviews pending', subtitle: "approval_status = 'pending'", icon: Clock3 },
   { key: 'activeProperties', label: 'Active properties', subtitle: 'approved & published', icon: Building2 },
   { key: 'activeReservations', label: 'Active reservations', subtitle: 'active holds', icon: Receipt },

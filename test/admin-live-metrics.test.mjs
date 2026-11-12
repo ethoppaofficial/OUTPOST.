@@ -217,8 +217,13 @@ describe('OUTPOST: Administrator Live Metrics, Fail-Closed Auth & Regression Sui
       assert.equal(metrics.totalUploadedStudentDocuments, 0);
       assert.equal(metrics.totalLandlordVerificationSubmissions, 0);
       assert.equal(metrics.totalPaymentReceipts, 0);
+      assert.equal(metrics.totalNonAdminUsers, 0);
       assert.equal(metrics.pendingStudentVerifications, 0);
       assert.equal(metrics.pendingLandlordVerifications, 0);
+      assert.equal(metrics.approvedLandlordVerifications, 0);
+      assert.equal(metrics.rejectedLandlordVerifications, 0);
+      assert.equal(metrics.totalProperties, 0);
+      assert.equal(metrics.approvedProperties, 0);
       assert.equal(metrics.pendingPropertyVerifications, 0);
       assert.equal(metrics.activeProperties, 0);
       assert.equal(metrics.activeReservations, 0);
@@ -241,11 +246,16 @@ describe('OUTPOST: Administrator Live Metrics, Fail-Closed Auth & Regression Sui
         totalStudents: 30,
         totalLandlords: 10,
         totalAdministrators: 2,
+        totalNonAdminUsers: 40,
         totalUploadedStudentDocuments: 18,
         totalLandlordVerificationSubmissions: 9,
         totalPaymentReceipts: 14,
         pendingStudentVerifications: 5,
         pendingLandlordVerifications: 3,
+        approvedLandlordVerifications: 5,
+        rejectedLandlordVerifications: 2,
+        totalProperties: 16,
+        approvedProperties: 12,
         pendingPropertyVerifications: 4,
         activeProperties: 12,
         activeReservations: 7,
@@ -322,11 +332,18 @@ describe('OUTPOST: Administrator Live Metrics, Fail-Closed Auth & Regression Sui
       assert.equal(metrics.totalStudents, 2);
       assert.equal(metrics.totalLandlords, 1);
       assert.equal(metrics.totalAdministrators, 1);
+      assert.equal(metrics.totalNonAdminUsers, 3);
+      assert.equal(metrics.totalNonAdminUsers, metrics.totalStudents + metrics.totalLandlords);
+      assert.equal(metrics.totalUsers, metrics.totalNonAdminUsers + metrics.totalAdministrators);
       assert.equal(metrics.totalUploadedStudentDocuments, 2);
       assert.equal(metrics.totalLandlordVerificationSubmissions, 1);
       assert.equal(metrics.totalPaymentReceipts, 2);
       assert.equal(metrics.pendingStudentVerifications, 1);
       assert.equal(metrics.pendingLandlordVerifications, 1);
+      assert.equal(metrics.approvedLandlordVerifications, 0);
+      assert.equal(metrics.rejectedLandlordVerifications, 0);
+      assert.equal(metrics.totalProperties, 2);
+      assert.equal(metrics.approvedProperties, 1);
       assert.equal(metrics.pendingPropertyVerifications, 1);
       assert.equal(metrics.activeProperties, 1);
       assert.equal(metrics.activeReservations, 2);
@@ -431,17 +448,22 @@ describe('OUTPOST: Administrator Live Metrics, Fail-Closed Auth & Regression Sui
       );
     });
 
-    test('ADMIN_METRICS_METADATA covers all 14 AdminMetrics keys without omissions', () => {
+    test('ADMIN_METRICS_METADATA covers all 19 AdminMetrics keys without omissions', () => {
       const expectedKeys = [
         'totalUsers',
         'totalStudents',
         'totalLandlords',
         'totalAdministrators',
+        'totalNonAdminUsers',
         'totalUploadedStudentDocuments',
         'totalLandlordVerificationSubmissions',
         'totalPaymentReceipts',
         'pendingStudentVerifications',
         'pendingLandlordVerifications',
+        'approvedLandlordVerifications',
+        'rejectedLandlordVerifications',
+        'totalProperties',
+        'approvedProperties',
         'pendingPropertyVerifications',
         'activeProperties',
         'activeReservations',

@@ -67,13 +67,14 @@ interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { currentUser, signOut } = useAuth();
+  const { currentUser, loading, profileStatus, landlordProfile, signOut } = useAuth();
   const session = currentUser
     ? {
         user: currentUser,
         displayName: currentUser.fullName || currentUser.name || currentUser.email,
       }
     : null;
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -464,14 +465,21 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                   title="View Account Profile"
                   className="flex items-center gap-2.5 min-w-0 flex-1 group"
                 >
-                  <img
-                    src={
-                      session.user.avatarUrl ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                    }
-                    alt={session.displayName}
-                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
-                  />
+                  {session.user.avatarUrl && !avatarLoadError ? (
+                    <img
+                      src={session.user.avatarUrl}
+                      alt={session.displayName}
+                      onError={() => setAvatarLoadError(true)}
+                      className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
+                    />
+                  ) : (
+                    <div
+                      aria-label={session.displayName}
+                      className="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
+                    >
+                      {(session.displayName || 'U').trim().charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
                       {session.displayName}
@@ -492,15 +500,23 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             ) : (
               <div className="flex flex-col items-center gap-2">
                 <Link to={profilePath} title="View Account Profile">
-                  <img
-                    src={
-                      session.user.avatarUrl ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                    }
-                    alt={session.displayName}
-                    title={session.displayName}
-                    className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
-                  />
+                  {session.user.avatarUrl && !avatarLoadError ? (
+                    <img
+                      src={session.user.avatarUrl}
+                      alt={session.displayName}
+                      title={session.displayName}
+                      onError={() => setAvatarLoadError(true)}
+                      className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
+                    />
+                  ) : (
+                    <div
+                      aria-label={session.displayName}
+                      title={session.displayName}
+                      className="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
+                    >
+                      {(session.displayName || 'U').trim().charAt(0).toUpperCase()}
+                    </div>
+                  )}
                 </Link>
                 <button
                   onClick={handleLogout}
@@ -548,8 +564,54 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
             <div className="flex items-center gap-2 sm:gap-3">
               <ThemeToggle />
-              {session ? (
-                <Link to={dashboardPath} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500">Go to dashboard</Link>
+              {loading || profileStatus === 'profile_pending' ? (
+                <span className="rounded-xl bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  Checking session…
+                </span>
+              ) : session ? (
+                <>
+                  {session.user.role === 'landlord' && landlordProfile?.verificationStatus !== 'approved' && (
+                    <Link
+                      to="/landlord/verification"
+                      className="hidden md:inline-flex items-center gap-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                    >
+                      Verify: {(landlordProfile?.verificationStatus || 'not_started').replace('_', ' ')}
+                    </Link>
+                  )}
+                  <Link
+                    to={dashboardPath}
+                    className="rounded-xl bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
+                  >
+                    {session.user.role === 'admin'
+                      ? 'Admin console'
+                      : session.user.role === 'landlord'
+                      ? 'Landlord hub'
+                      : 'Student dashboard'}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : profileStatus === 'profile_error' ? (
+                <>
+                  <Link
+                    to="/unauthorized"
+                    className="rounded-xl bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-300"
+                  >
+                    Account status issue
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  >
+                    Sign out
+                  </button>
+                </>
               ) : (
                 <>
                   <Link to="/login" className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800">Sign in</Link>
