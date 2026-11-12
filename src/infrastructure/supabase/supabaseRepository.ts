@@ -793,6 +793,27 @@ export class SupabaseRepository {
         if (error) console.warn('[SupabaseRepository] createProperty warning:', error.message);
       });
 
+    // Also persist initial units / rooms to the units table in Supabase
+    if (prop.rooms && prop.rooms.length > 0) {
+      const unitsToInsert = prop.rooms.map((u) => ({
+        id: u.id.startsWith('room-') || u.id.startsWith('unit-') ? undefined : u.id,
+        property_id: prop.id,
+        name: u.name,
+        unit_type: u.type || 'room',
+        capacity: u.totalCapacity || 1,
+        available_spaces: u.availableSpaces ?? (u.totalCapacity || 1),
+        price_annual: u.pricePerSession || prop.pricePerSession || 250000,
+        is_active: true,
+      }));
+
+      supabase
+        .from('units')
+        .insert(unitsToInsert)
+        .then(({ error }) => {
+          if (error) console.warn('[SupabaseRepository] createProperty units insert warning:', error.message);
+        });
+    }
+
     return prop;
   }
 
@@ -809,12 +830,38 @@ export class SupabaseRepository {
         featured_image_url: prop.images?.[0] || null,
         images: prop.images || [],
         amenities: prop.amenities || [],
+        total_spaces: prop.totalCapacity || prop.rooms?.reduce((acc, r) => acc + (r.totalCapacity || 1), 0),
+        available_spaces: prop.availableSpaces ?? prop.rooms?.reduce((acc, r) => acc + (r.availableSpaces ?? r.totalCapacity ?? 1), 0),
         updated_at: new Date().toISOString(),
       })
       .eq('id', prop.id)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] updateProperty warning:', error.message);
       });
+
+    // Synchronize units / rooms if provided
+    if (prop.rooms && prop.rooms.length > 0) {
+      prop.rooms.forEach((u) => {
+        const isSyntheticId = u.id.startsWith('room-') || u.id.startsWith('unit-');
+        if (!isSyntheticId) {
+          supabase
+            .from('units')
+            .upsert({
+              id: u.id,
+              property_id: prop.id,
+              name: u.name,
+              unit_type: u.type || 'room',
+              capacity: u.totalCapacity || 1,
+              available_spaces: u.availableSpaces ?? (u.totalCapacity || 1),
+              price_annual: u.pricePerSession || prop.pricePerSession || 250000,
+              is_active: (u.availableSpaces ?? 1) > 0,
+            })
+            .then(({ error }) => {
+              if (error) console.warn('[SupabaseRepository] updateProperty unit upsert warning:', error.message);
+            });
+        }
+      });
+    }
 
     return prop;
   }
