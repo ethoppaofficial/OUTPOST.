@@ -19,7 +19,7 @@ import { useAuth } from '../../application/context/AuthContext';
 export const AdminLoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, loading: sessionLoading, signOut, signInWithEmail } = useAuth();
-  const [email, setEmail] = useState('ethoppaofficial@gmail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -28,8 +28,10 @@ export const AdminLoginPage: React.FC = () => {
   const [resetErrorMessage, setResetErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sessionLoading && currentUser?.role === 'admin') navigate('/admin/dashboard', { replace: true });
-  }, [currentUser?.role, sessionLoading, navigate]);
+    if (!sessionLoading && currentUser?.role === 'admin' && currentUser?.accountStatus === 'active') {
+      navigate('/admin/dashboard', { replace: true });
+    }
+  }, [currentUser?.role, currentUser?.accountStatus, sessionLoading, navigate]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -39,7 +41,7 @@ export const AdminLoginPage: React.FC = () => {
     setSubmitting(true);
     try {
       const result = await signInWithEmail(email, password);
-      if (result.success && result.user?.role === 'admin') {
+      if (result.success && result.user?.role === 'admin' && result.user?.accountStatus === 'active') {
         try { await adminService.recordSecurityEvent('ADMIN_LOGIN'); }
         catch (auditError) { console.warn('Administrator login audit event could not be recorded:', auditError); }
         navigate('/admin/dashboard', { replace: true });
@@ -47,7 +49,7 @@ export const AdminLoginPage: React.FC = () => {
       }
       if (result.success) {
         await signOut();
-        setError('This account is not provisioned as an administrator. Use the Student/Landlord sign-in or contact the project owner.');
+        setError('Access denied: only active administrator accounts provisioned in public.profiles may access this console.');
       } else {
         setError(result.error || 'Administrator sign-in failed.');
       }
@@ -93,26 +95,6 @@ export const AdminLoginPage: React.FC = () => {
         <p className="text-sm text-slate-500 dark:text-slate-400">Restricted access for provisioned OUTPOST administrators.</p>
       </div>
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3.5 text-xs text-slate-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-between gap-3 shadow-sm">
-        <div className="space-y-0.5">
-          <div className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
-            <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Designated Admin Account</span>
-          </div>
-          <div className="font-mono text-[11px] text-slate-600 dark:text-emerald-300">ethoppaofficial@gmail.com</div>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEmail('ethoppaofficial@gmail.com');
-            setPassword('admin@outpost.edu.ng');
-          }}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 transition shadow-sm cursor-pointer shrink-0"
-        >
-          Quick-Fill Admin
-        </button>
-      </div>
-
       <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900 sm:p-8">
         <label className="block space-y-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
           Administrator email
@@ -123,7 +105,7 @@ export const AdminLoginPage: React.FC = () => {
             maxLength={254}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="ethoppaofficial@gmail.com"
+            placeholder="admin@yourdomain.com"
             className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-800"
           />
         </label>

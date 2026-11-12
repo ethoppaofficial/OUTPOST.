@@ -28,6 +28,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
+import { useAuth } from '../../application/context/AuthContext';
 import { groupChatService } from '../../application/services/groupChatService';
 import { chatService } from '../../application/services/chatService';
 import { AccommodationGroup, GroupInvitation } from '../../domain/types';
@@ -41,31 +42,34 @@ import { Badge } from '../../components/ui/Badge';
  */
 export const GroupsPage: React.FC = () => {
   const navigate = useNavigate();
-  const session = authService.getSession();
+  const { currentUser } = useAuth();
+  const fallbackSession = authService.getSession();
+  const activeUserId =
+    currentUser?.id || (fallbackSession.user.id !== 'anonymous' ? fallbackSession.user.id : '');
 
   const [allGroups, setAllGroups] = useState<AccommodationGroup[]>(() => groupChatService.getGroups());
   const [invitations, setInvitations] = useState<GroupInvitation[]>(() =>
-    groupChatService.getPendingInvitations(session.user.id)
+    activeUserId ? groupChatService.getPendingInvitations(activeUserId) : []
   );
   const [activeTab, setActiveTab] = useState<'my' | 'explore' | 'invites'>('my');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const refreshData = () => {
     setAllGroups(groupChatService.getGroups());
-    setInvitations(groupChatService.getPendingInvitations(session.user.id));
+    setInvitations(activeUserId ? groupChatService.getPendingInvitations(activeUserId) : []);
   };
 
   useEffect(() => {
     refreshData();
-  }, []);
+  }, [activeUserId]);
 
-  const myGroups = allGroups.filter((g) => g.memberIds.includes(session.user.id));
+  const myGroups = allGroups.filter((g) => g.memberIds.includes(activeUserId));
   const discoverableGroups = allGroups.filter(
-    (g) => !g.memberIds.includes(session.user.id) && g.visibility !== 'invite_only'
+    (g) => !g.memberIds.includes(activeUserId) && g.visibility !== 'invite_only'
   );
 
   const handleJoin = (groupId: string) => {
-    const res = groupChatService.joinGroup(groupId, session.user.id);
+    const res = groupChatService.joinGroup(groupId, activeUserId);
     if (res.success) {
       if (res.pendingApproval) {
         setNotice({ type: 'success', text: 'Join request sent to cohort administrators.' });
@@ -89,9 +93,21 @@ export const GroupsPage: React.FC = () => {
     }
   };
 
-  const handleOpenChat = (group: AccommodationGroup) => {
-    const convos = chatService.getUserConversations(session.user.id);
-    const conv = convos.find((c) => c.groupId === group.id);
+  const handleOpenChat = async (group: AccommodationGroup) => {
+    if (!activeUserId) {
+      navigate('/student/chat');
+      return;
+    }
+    let convos = chatService.getUserConversations(activeUserId);
+    let conv = convos.find((c) => c.groupId === group.id);
+    if (!conv) {
+      try {
+        convos = await chatService.loadUserConversations(activeUserId);
+        conv = convos.find((c) => c.groupId === group.id);
+      } catch {
+        // Fallback to chat hub
+      }
+    }
     if (conv) {
       navigate(`/student/chat/${conv.id}`);
     } else {
@@ -218,9 +234,9 @@ export const GroupsPage: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {myGroups.map((g) => {
                 const isAdmin =
-                  g.adminIds?.includes(session.user.id) ||
-                  g.leaderId === session.user.id ||
-                  g.ownerId === session.user.id;
+                  g.adminIds?.includes(activeUserId) ||
+                  g.leaderId === activeUserId ||
+                  g.ownerId === activeUserId;
 
                 return (
                   <div

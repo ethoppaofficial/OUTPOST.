@@ -30,6 +30,21 @@ class ChatService {
     return repository.getConversations(userId);
   }
 
+  public async loadUserConversations(userId: string): Promise<Conversation[]> {
+    return repository.hydrateUserConversationsAndMessages(userId);
+  }
+
+  public async loadConversationMessages(conversationId: string): Promise<ChatMessage[]> {
+    return repository.fetchConversationMessagesFromSupabase(conversationId);
+  }
+
+  public async searchChatUsers(
+    query: string,
+    excludeUserId: string
+  ): Promise<Array<{ id: string; fullName: string; email: string; role: string }>> {
+    return repository.searchProfilesForChat(query, excludeUserId);
+  }
+
   public getUnreadMessageCount(userId: string): number {
     const list = this.getConversations(userId);
     return list.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
@@ -90,16 +105,21 @@ class ChatService {
         text,
       });
 
-      const message = this.sendMessage(conversationId, senderId, text || `Attachment: ${res.fileName}`, {
-        attachment: {
+      const message = repository.recordAttachmentMessage(
+        conversationId,
+        senderId,
+        res.messageId,
+        res.text || text || `Sent an attachment: ${res.fileName}`,
+        {
           storagePath: res.storagePath,
           fileName: res.fileName,
           contentType: res.contentType,
           fileSize: res.fileSize,
           uploadedBy: senderId,
-          uploadedAt: new Date().toISOString(),
+          uploadedAt: res.createdAt || new Date().toISOString(),
         },
-      });
+        res.createdAt
+      );
 
       return { success: true, message };
     } catch (err: any) {
@@ -144,6 +164,14 @@ class ChatService {
 
   public startDirectConversation(userIdA: string, userIdB: string): Conversation {
     return repository.startDirectConversation(userIdA, userIdB);
+  }
+
+  public async startDirectConversationPersisted(
+    userIdA: string,
+    userIdB: string,
+    peerProfile?: { fullName?: string; role?: string }
+  ): Promise<Conversation> {
+    return repository.startDirectConversationPersisted(userIdA, userIdB, peerProfile);
   }
 
   public setTypingState(

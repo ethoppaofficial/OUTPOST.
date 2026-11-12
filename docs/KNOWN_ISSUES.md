@@ -22,8 +22,8 @@
 - **Affected Module**: Local infrastructure tooling and live database deployment.
 - **Why it matters**: The local development container lacks a running Docker daemon and the `supabase` CLI binary (`which supabase docker` exits with code 1). Consequently, live execution of `supabase db push` or `supabase functions deploy` cannot run autonomously within this specific sandbox container.
 - **Status**: **CONFIRMED** (Environmental constraint).
-- **Workaround & Verification Applied**: All SQL DDL, CHECK constraints, stored procedures, and triggers were verified via real runtime execution in Node.js using `pg-mem` in `test/database-runtime.test.mjs`. All 8 Edge Function handlers were verified via HTTP request simulations in `test/edge-functions-execution.test.mjs`.
-- **Recommended Next Step**: Operators must execute deployment commands (`supabase link`, `supabase db push`, `supabase functions deploy --all`) from an external workstation or CI/CD runner equipped with Docker and Supabase CLI `v1.180+`.
+- **Workaround & Verification Applied**: All SQL DDL, CHECK constraints, stored procedures, and triggers were verified via real runtime execution in Node.js using `pg-mem` (`test/database-runtime.test.mjs`), and live admin metrics/auth contracts were verified in `test/admin-live-metrics.test.mjs`. Pending remote push to project ref `bljscjzpycbzkubyyfrq`: `supabase/migrations/20261112000007_admin_live_metrics_and_rls_fixes.sql` and updated `supabase/functions/get-private-asset-url`.
+- **Recommended Next Step**: Operators must execute `supabase link --project-ref bljscjzpycbzkubyyfrq`, `supabase db push`, and `supabase functions deploy --all` from an authenticated workstation or CI/CD runner. Until Migration 07 is pushed, `adminService.getAdminMetrics()` falls back strictly to authenticated PostgREST `head: true, count: 'exact'` queries (never local demo data).
 
 ---
 
@@ -46,21 +46,20 @@
 
 ## 3. Frontend & Map Visualizations
 
-### Issue 3.1: Vector Map Rendering Deferred in Favor of Text-Based Corridor Discovery
+### Issue 3.1: Vector Map Rendering Requires MapTiler Key Configuration
 - **Affected Module**: `src/pages/public/StudentHousingMapPage.tsx`, `src/infrastructure/config/mapConfig.ts`.
-- **Why it matters**: To prevent reliance on external commercial map APIs (e.g. Mapbox / Google Maps billing keys) during initial MVP rollout, student accommodation discovery is centered on structured textual corridor search (Dambare vs Rimin Gata around BUK New Site). The map component renders a lightweight demonstration view with geofence boundaries.
-- **Status**: **CONFIRMED** (Approved MVP scope decision).
-- **Recommended Next Step**: In Phase 2, integrate a self-hosted MapLibre GL vector tile server or configure an official production Mapbox token to render full interactive lodge markers.
+- **Why it matters**: Interactive MapLibre vector tile rendering uses `VITE_MAPTILER_API_KEY`. When unset, discovery gracefully falls back to structured Dambare / Rimin Gata corridor discovery without breaking booking workflows.
+- **Status**: **CONFIRMED** (Configuration dependency).
+- **Recommended Next Step**: Configure `VITE_MAPTILER_API_KEY` in deployment environment variables for full vector map tiles.
 
 ---
 
-## 4. Cache Synchronization & Multi-Tab Concurrency
+## 4. Cache Synchronization & Admin Live Data Architecture
 
-### Issue 4.1: In-Memory Cache Depends on Realtime Channels for Multi-Tab Sync
-- **Affected Module**: `src/infrastructure/supabase/supabaseRepository.ts`.
-- **Why it matters**: `SupabaseRepository` maintains an in-memory synchronized entity cache to provide instantaneous local UI rendering without waiting for network roundtrips. While mutations are persisted to Supabase, concurrent modifications occurring in another browser tab or device rely on Supabase Realtime broadcast events. If the user is on an intermittent mobile network and loses WebSocket connectivity, local cache updates from other devices may be delayed until the next page refresh.
-- **Status**: **CONFIRMED** (Trade-off for synchronous UI responsiveness).
-- **Recommended Next Step**: Implement an automated cache re-validation polling interval (e.g. every 60 seconds) as a fallback when WebSocket connection state drops.
+### Issue 4.1: Admin Console Strict Live Queries vs. Non-Admin Repository Cache
+- **Affected Module**: `src/application/services/adminService.ts`, `src/application/hooks/useAdminData.ts`, `src/infrastructure/supabase/supabaseRepository.ts`.
+- **Why it matters**: Previously, `adminService` fell back to in-memory seed records on empty tables or query errors. That fallback has been completely removed: all admin pages now require live Supabase queries via `useAdminData` (with mount hydration, manual refresh, throttled tab reactivation, and Supabase Realtime table invalidation), and seed profiles in `SupabaseRepository` are strictly restricted to headless Node.js unit-test execution (`!IS_PROD && typeof window === 'undefined'`).
+- **Status**: **RESOLVED** in codebase; awaiting live `supabase db push` on remote instance.
 
 ---
 
@@ -68,6 +67,6 @@
 
 ### Issue 5.1: Legacy Firebase Configurations Preserved for Backward Reference
 - **Affected Module**: `src/infrastructure/firebase/firebaseConfig.ts`, `firebase-applet-config.json`, `firebase-blueprint.json`.
-- **Why it matters**: The codebase has cut over to Supabase as its exclusive production backend. However, legacy Firebase configuration files remain in the repository for historical traceability. While client storage services have been redirected to `supabaseStorageService`, these unused Firebase configuration files could cause confusion for new developers.
+- **Why it matters**: The codebase uses Supabase as its exclusive production backend. Selected legacy Firebase files remain solely for historical traceability and are ignored at runtime.
 - **Status**: **CONFIRMED** (Non-blocking legacy artifacts).
-- **Recommended Next Step**: Archive or remove legacy Firebase JSON configuration files once production Supabase deployment and customer acceptance testing are finalized.
+- **Recommended Next Step**: Archive or remove legacy Firebase configuration files once production Supabase deployment and acceptance testing are finalized.

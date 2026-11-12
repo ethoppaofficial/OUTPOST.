@@ -10,26 +10,37 @@
  * - Status displays: `pending` (under review), `approved` (grants gold shield badge on listings), or `rejected`.
  */
 
-import React, { useState } from 'react';
-import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ShieldCheck, Upload, CheckCircle2, Clock, FileText, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
 import { storageService } from '../../application/services/storageService';
-import { VerificationBadge } from '../../components/ui/Badge';
+import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { validateUploadFile } from '../../application/utils/uploadValidation';
 import { normalizeError } from '../../application/utils/errorUtils';
+import { useAuth } from '../../application/context/AuthContext';
+import { LandlordProfile, VerificationReviewStatus } from '../../domain/types';
 
-/**
- * LandlordVerificationPage Component
- * 
- * Renders the KYC submission form and current vetting accreditation status.
- */
 export const LandlordVerificationPage: React.FC = () => {
+  const { currentUser } = useAuth();
   const session = authService.getSession();
-  const profile = authService.getCurrentLandlordProfile();
+  const landlordId = currentUser?.id || session.user.id;
+  const cachedProfile = authService.getCurrentLandlordProfile();
 
-  const [legalName, setLegalName] = useState(profile?.legalName || session.displayName);
-  const [businessName, setBusinessName] = useState(profile?.businessName || '');
+  const [liveProfile, setLiveProfile] = useState<LandlordProfile | null>(cachedProfile || null);
+  const [submissions, setSubmissions] = useState<Array<{
+    id: string;
+    documentType: string;
+    fileName: string;
+    status: VerificationReviewStatus;
+    rejectionReason?: string;
+    createdAt: string;
+  }>>([]);
+  const [loadingState, setLoadingState] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [legalName, setLegalName] = useState(cachedProfile?.legalName || currentUser?.fullName || session.displayName);
+  const [businessName, setBusinessName] = useState(cachedProfile?.businessName || '');
   const [idType, setIdType] = useState('NIN');
   const [idNumber, setIdNumber] = useState('');
   const [ownershipDocType, setOwnershipDocType] = useState('Electricity Utility Bill');
@@ -39,7 +50,33 @@ export const LandlordVerificationPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
-  const status = profile?.verificationStatus || 'pending';
+  const loadVerification = useCallback(async () => {
+    if (!landlordId || landlordId === 'anonymous') {
+      setLoadingState(false);
+      return;
+    }
+    setLoadingState(true);
+    setLoadError(null);
+    try {
+      const state = await verificationService.loadLandlordVerificationState(landlordId);
+      if (state.profile) {
+        setLiveProfile(state.profile);
+        if (state.profile.businessName) setBusinessName(state.profile.businessName);
+      }
+      setSubmissions(state.submissions);
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not load landlord verification status.');
+      setLoadError(normalized.userMessage);
+    } finally {
+      setLoadingState(false);
+    }
+  }, [landlordId]);
+
+  useEffect(() => {
+    void loadVerification();
+  }, [loadVerification]);
+
+  const status = liveProfile?.verificationStatus || 'not_started';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
@@ -80,28 +117,34 @@ export const LandlordVerificationPage: React.FC = () => {
     try {
       // Direct upload through tenant-isolated Supabase storage
       const uploadRes = await storageService.uploadLandlordDocument(
-        session.user.id,
+        landlordId,
         file,
         fileName || file.name
       );
 
-      if (!uploadRes || !uploadRes.url) {
+      if (!uploadRes || !uploadRes.path) {
         throw new Error('Failed to upload landlord verification document to secure storage.');
       }
 
-      const res = verificationService.submitLandlordVerification({
-        landlordId: session.user.id,
+      const res = await verificationService.submitLandlordVerification({
+        landlordId,
         legalName: legalName.trim(),
         businessName: businessName.trim() || undefined,
         idType,
         idNumber: idNumber.trim(),
-        idDocumentUrl: uploadRes.url,
-        proofOfOwnershipUrl: uploadRes.url,
+        idDocumentUrl: uploadRes.path,
+        proofOfOwnershipUrl: uploadRes.path,
         ownershipDocType,
+        fileName: uploadRes.fileName,
+        fileSize: uploadRes.fileSize,
+        contentType: uploadRes.contentType,
       });
 
-      if (res && (res as any).success) {
+      if (res && res.success) {
         setSubmitted(true);
+        setFile(null);
+        setFileName('');
+        await loadVerification();
       } else {
         setError('Failed to submit verification request.');
       }
@@ -115,7 +158,7 @@ export const LandlordVerificationPage: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Landlord Credential Verification
@@ -125,8 +168,33 @@ export const LandlordVerificationPage: React.FC = () => {
           </p>
         </div>
 
-        <VerificationBadge type="landlord" status={status} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void loadVerification()}
+            disabled={loadingState}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingState ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+          <VerificationBadge type="landlord" status={status} />
+        </div>
       </div>
+
+      {loadError && (
+        <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => void loadVerification()} className="font-bold underline shrink-0">Retry</button>
+        </div>
+      )}
+
+      {liveProfile?.rejectionReason && status === 'rejected' && (
+        <div role="alert" className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
+          <strong className="font-bold">Previous Submission Declined: </strong>
+          {liveProfile.rejectionReason}. You may submit a clearer document below.
+        </div>
+      )}
 
       {status === 'approved' ? (
         <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-emerald-200 dark:border-emerald-900 shadow-sm space-y-3">
@@ -265,6 +333,29 @@ export const LandlordVerificationPage: React.FC = () => {
               </button>
             </form>
           )}
+        </div>
+      )}
+      {submissions.length > 0 && (
+        <div className="space-y-2.5">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Submission History</h2>
+          {submissions.map((sub) => (
+            <div key={sub.id} className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
+              <div>
+                <div className="font-semibold text-slate-900 dark:text-white capitalize">
+                  {sub.documentType.replaceAll('_', ' ')} — {sub.fileName}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Submitted {new Date(sub.createdAt).toLocaleString()}
+                </div>
+                {sub.rejectionReason && (
+                  <p className="mt-1 text-rose-600 dark:text-rose-400">Reason: {sub.rejectionReason}</p>
+                )}
+              </div>
+              <Badge variant={sub.status === 'approved' ? 'success' : sub.status === 'rejected' ? 'danger' : 'warning'}>
+                {sub.status}
+              </Badge>
+            </div>
+          ))}
         </div>
       )}
     </div>

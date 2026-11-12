@@ -35,7 +35,7 @@ export const NewPropertyPage: React.FC = () => {
   const [university, setUniversity] = useState('Bayero University Kano (BUK)');
   const [campus, setCampus] = useState('New Campus (Gwarzo Road)');
   const [address, setAddress] = useState('');
-  const [propertyDraftId] = useState(() => `prop-${Date.now()}`);
+  const [propertyDraftId] = useState(() => crypto.randomUUID());
   const [streetOrRoad, setStreetOrRoad] = useState('');
   const [nearestLandmark, setNearestLandmark] = useState('');
   const [directions, setDirections] = useState('');
@@ -238,7 +238,7 @@ export const NewPropertyPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -272,90 +272,95 @@ export const NewPropertyPage: React.FC = () => {
       Number.isFinite(locationData.longitude)
     );
 
-    const newProp = propertyService.createProperty({
-      id: propertyDraftId,
-      landlordId: session.user.id,
-      landlordName: profile?.legalName || profile?.businessName || session.displayName,
-      landlordVerified: profile?.verificationStatus === 'approved',
-      title: title.trim(),
-      description: description.trim() || 'Modern student accommodation located in prime campus neighbourhood with essential amenities.',
-      propertyType,
-      accommodationType,
-      genderPolicy,
-      address: address.trim(),
-      fullAddress: address.trim(),
-      streetOrRoad: streetOrRoad.trim(),
-      nearestLandmark: nearestLandmark.trim(),
-      directions: directions.trim(),
-      locationNote: locationNote.trim(),
-      area: locationData.area,
-      city: city.trim(),
-      state: 'Kano State',
-      country: 'Nigeria',
-      neighbourhood: locationData.area,
-      locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
-      campus: `${university} (${campus})`,
-      university,
-      distanceKm: Number(distanceKm),
-      pricePerSession: Number(pricePerSession),
-      billingPeriod: 'Academic Session (1 Year)',
-      depositAmount: Number(depositAmount),
-      utilitiesIncluded,
-      totalCapacity: Number(roomCapacity),
-      availableSpaces: Number(roomCapacity),
-      latitude: hasValidCoords ? locationData.latitude : undefined,
-      longitude: hasValidCoords ? locationData.longitude : undefined,
-      publicLatitude: undefined,
-      publicLongitude: undefined,
-      locationSource: hasValidCoords ? 'manual_pin' : 'unspecified',
-      locationPrecision: locationData.precision,
-      locationVerificationStatus: hasValidCoords ? 'pending' : 'pending',
-      location: {
-        id: `loc-${Date.now()}`,
-        propertyId: '',
-        locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
-        area: locationData.area,
-        city: 'Kano',
-        state: 'Kano State',
-        country: 'Nigeria',
+    try {
+      await propertyService.createPropertyPersisted({
+        id: propertyDraftId,
+        landlordId: session.user.id,
+        landlordName: profile?.legalName || profile?.businessName || session.displayName,
+        landlordVerified: profile?.verificationStatus === 'approved',
+        title: title.trim(),
+        description: description.trim() || 'Modern student accommodation located in prime campus neighbourhood with essential amenities.',
+        propertyType,
+        accommodationType,
+        genderPolicy,
+        address: address.trim(),
         fullAddress: address.trim(),
         streetOrRoad: streetOrRoad.trim(),
         nearestLandmark: nearestLandmark.trim(),
         directions: directions.trim(),
         locationNote: locationNote.trim(),
-        latitude: hasValidCoords ? locationData.latitude! : (undefined as any),
-        longitude: hasValidCoords ? locationData.longitude! : (undefined as any),
-        geohash: hasValidCoords ? locationData.geohash : '',
-        source: hasValidCoords ? 'manual_pin' : ('unspecified' as any),
-        verificationStatus: 'pending',
-        locationVerificationStatus: 'pending',
-        precision: locationData.precision,
+        area: locationData.area,
+        city: city.trim(),
+        state: 'Kano State',
+        country: 'Nigeria',
+        neighbourhood: locationData.area,
+        locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
+        campus: `${university} (${campus})`,
+        university,
+        distanceKm: Number(distanceKm),
+        pricePerSession: Number(pricePerSession),
+        billingPeriod: 'Academic Session (1 Year)',
+        depositAmount: Number(depositAmount),
+        utilitiesIncluded,
+        totalCapacity: Number(roomCapacity),
+        availableSpaces: Number(roomCapacity),
+        latitude: hasValidCoords ? locationData.latitude : undefined,
+        longitude: hasValidCoords ? locationData.longitude : undefined,
         publicLatitude: undefined,
         publicLongitude: undefined,
-        publicLocationLabel: locationData.publicLocationLabel,
-        formattedAddress: address.trim(),
-        submittedBy: session.user.id,
-        submittedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      rooms: [
-        {
-          id: `room-${Date.now()}`,
-          name: roomName,
-          type: accommodationType,
-          pricePerSession: Number(roomPrice),
-          totalCapacity: Number(roomCapacity),
-          availableSpaces: Number(roomCapacity),
+        locationSource: hasValidCoords ? 'manual_pin' : 'unspecified',
+        locationPrecision: locationData.precision,
+        locationVerificationStatus: 'pending',
+        location: {
+          id: crypto.randomUUID(),
+          propertyId: propertyDraftId,
+          locationId: locationData.area === 'Rimin Gata' ? 'loc-rimin-gata' : 'loc-dambare',
+          area: locationData.area,
+          city: 'Kano',
+          state: 'Kano State',
+          country: 'Nigeria',
+          fullAddress: address.trim(),
+          streetOrRoad: streetOrRoad.trim(),
+          nearestLandmark: nearestLandmark.trim(),
+          directions: directions.trim(),
+          locationNote: locationNote.trim(),
+          latitude: hasValidCoords ? locationData.latitude! : (undefined as any),
+          longitude: hasValidCoords ? locationData.longitude! : (undefined as any),
+          geohash: hasValidCoords ? locationData.geohash : '',
+          source: hasValidCoords ? 'manual_pin' : ('unspecified' as any),
+          verificationStatus: 'pending',
+          locationVerificationStatus: 'pending',
+          precision: locationData.precision,
+          publicLatitude: undefined,
+          publicLongitude: undefined,
+          publicLocationLabel: locationData.publicLocationLabel,
+          formattedAddress: address.trim(),
+          submittedBy: session.user.id,
+          submittedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         },
-      ],
-      amenities: selectedAmenities,
-      houseRules: houseRulesArray,
-      images: images,
-    });
+        rooms: [
+          {
+            id: crypto.randomUUID(),
+            name: roomName,
+            type: accommodationType,
+            pricePerSession: Number(roomPrice),
+            totalCapacity: Number(roomCapacity),
+            availableSpaces: Number(roomCapacity),
+          },
+        ],
+        amenities: selectedAmenities,
+        houseRules: houseRulesArray,
+        images: images,
+      });
 
-    setSubmitting(false);
-    navigate('/landlord/properties');
+      navigate('/landlord/properties');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save property listing to Supabase.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

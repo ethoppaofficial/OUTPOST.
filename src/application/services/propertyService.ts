@@ -189,7 +189,10 @@ class PropertyService {
 
     const locationId = data.locationId || (data.neighbourhood?.toLowerCase().includes('rimin') ? 'loc-rimin-gata' : 'loc-dambare');
     const area: HousingArea = locationId === 'loc-rimin-gata' ? 'Rimin Gata' : 'Dambare';
-    const propId = (data.id && typeof data.id === 'string' && data.id.trim()) ? data.id.trim() : `prop-${Date.now()}`;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const propId = (data.id && typeof data.id === 'string' && uuidRegex.test(data.id.trim()))
+      ? data.id.trim()
+      : crypto.randomUUID();
 
     // Ensure property location is initialized
     const hasCoordinates = Boolean(
@@ -442,11 +445,50 @@ class PropertyService {
     return repository.updateProperty(propOrId);
   }
 
-  public createProperty(
-    data: any
-  ): Property {
+  public createProperty(data: any): Property {
     const landlordId = data.landlordId || repository.getActiveUserId();
     return this.createPropertyDraft(landlordId, data);
+  }
+
+  public async createPropertyPersisted(data: any): Promise<Property> {
+    const landlordId = data.landlordId || repository.getActiveUserId();
+    const landlord = repository.getLandlordProfile(landlordId);
+    const slug = data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Math.floor(100 + Math.random() * 900);
+    const locationId = data.locationId || (data.neighbourhood?.toLowerCase().includes('rimin') ? 'loc-rimin-gata' : 'loc-dambare');
+    const area: HousingArea = locationId === 'loc-rimin-gata' ? 'Rimin Gata' : 'Dambare';
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const propId = (data.id && typeof data.id === 'string' && uuidRegex.test(data.id.trim()))
+      ? data.id.trim()
+      : crypto.randomUUID();
+
+    const hasCoordinates = Boolean(
+      data.location &&
+      typeof data.location.latitude === 'number' &&
+      typeof data.location.longitude === 'number' &&
+      Number.isFinite(data.location.latitude) &&
+      Number.isFinite(data.location.longitude)
+    );
+
+    const newProp: Property = {
+      ...data,
+      locationId,
+      id: propId,
+      landlordId,
+      landlordName: landlord?.legalName || data.landlordName || 'Landlord',
+      landlordVerified: landlord?.verificationStatus === 'approved',
+      slug,
+      verificationStatus: 'pending',
+      locationVerificationStatus: 'pending',
+      isActive: false,
+      publicLatitude: undefined,
+      publicLongitude: undefined,
+      latitude: hasCoordinates ? data.location.latitude : undefined,
+      longitude: hasCoordinates ? data.location.longitude : undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    return repository.createPropertyPersisted(newProp);
   }
 
   public updatePropertyAvailability(propertyId: string, unitId: string, count: number) {

@@ -74,12 +74,7 @@ class AuthService {
       if (!error && data?.user) {
         sbUser = data.user;
       } else {
-        // Fallback for local development / test environments without live Supabase
-        const localUser = repository.getUserByEmail(normalized);
-        if (localUser) {
-          repository.setActiveUserId(localUser.id);
-          return { success: true, user: localUser };
-        }
+        // Do NOT fall back to local/seed records without credential verification.
         return { success: false, error: error?.message || 'Invalid email or password.' };
       }
 
@@ -108,25 +103,12 @@ class AuthService {
       }
 
       if (!profile) {
-        const localUser = repository.getUserById(userId);
-        if (localUser) {
-          profile = {
-            id: localUser.id,
-            email: localUser.email,
-            role: localUser.role,
-            account_status: localUser.accountStatus,
-            full_name: localUser.fullName,
-            avatar_url: localUser.avatarUrl,
-            is_verified: localUser.emailVerified,
-          };
-        } else {
-          return {
-            success: false,
-            error: profileError
-              ? 'Database error retrieving account profile: ' + profileError.message
-              : 'User profile does not exist. Please contact support.',
-          };
-        }
+        return {
+          success: false,
+          error: profileError
+            ? 'Database error retrieving account profile: ' + profileError.message
+            : 'User profile does not exist in public.profiles. Please contact support.',
+        };
       }
 
       const storedRole = profile.role as UserRole | undefined;
@@ -142,6 +124,11 @@ class AuthService {
       if (profile.account_status === 'suspended') {
         await supabase.auth.signOut();
         return { success: false, error: 'Your account has been suspended by an administrator.' };
+      }
+
+      if (validRole === 'admin' && profile.account_status !== 'active') {
+        await supabase.auth.signOut();
+        return { success: false, error: 'Administrator account is not active.' };
       }
 
       const existing = repository.getUserById(userId);

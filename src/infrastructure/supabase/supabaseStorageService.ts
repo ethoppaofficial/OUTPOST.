@@ -322,6 +322,8 @@ export class SupabaseStorageService {
     fileName: string;
     contentType: string;
     fileSize: number;
+    createdAt?: string;
+    text?: string;
   }> {
     this.validateFileSize(params.file.size, 10 * 1024 * 1024, 'Chat attachment');
     const contentType = params.file.type || 'application/octet-stream';
@@ -358,8 +360,11 @@ export class SupabaseStorageService {
       throw new Error(`Failed to upload attachment file: ${uploadError.message}`);
     }
 
-    // 3. Finalize chat attachment via Edge Function
-    const { error: finalizeError } = await invokeEdgeFunction('finalize-chat-attachment-upload', {
+    // 3. Finalize chat attachment via Edge Function (creates the authoritative public.messages row)
+    const { data: finalizeData, error: finalizeError } = await invokeEdgeFunction<{
+      success: boolean;
+      message?: { id?: string; created_at?: string; text?: string };
+    }>('finalize-chat-attachment-upload', {
       conversationId: params.conversationId,
       messageId,
       storagePath,
@@ -374,11 +379,13 @@ export class SupabaseStorageService {
     }
 
     return {
-      messageId,
+      messageId: finalizeData?.message?.id || messageId,
       storagePath,
       fileName: cleanName,
       contentType,
       fileSize: params.file.size,
+      createdAt: finalizeData?.message?.created_at || new Date().toISOString(),
+      text: finalizeData?.message?.text,
     };
   }
 
@@ -402,6 +409,23 @@ export class SupabaseStorageService {
     }
 
     return data.downloadUrl;
+  }
+
+  /**
+   * Delete a private storage object (used to roll back orphaned uploads if DB metadata insert fails).
+   */
+  async deletePrivateAsset(
+    bucket: 'student-docs' | 'landlord-docs' | 'payment-receipts' | 'chat-attachments',
+    storagePath: string
+  ): Promise<void> {
+    if (!storagePath) return;
+    const normalizedPath = storagePath.startsWith(`${bucket}/`)
+      ? storagePath.slice(bucket.length + 1)
+      : storagePath;
+    const { error } = await supabase.storage.from(bucket).remove([normalizedPath]);
+    if (error) {
+      console.warn(`[SupabaseStorageService] Orphan cleanup failed for ${bucket}/${normalizedPath}:`, error.message);
+    }
   }
 
   /**

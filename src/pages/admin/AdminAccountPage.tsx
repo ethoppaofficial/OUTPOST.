@@ -64,7 +64,7 @@ export const AdminAccountPage: React.FC = () => {
           </div>
           <div>
             <dt className="text-xs text-slate-500">Email verified</dt>
-            <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{authUser?.email_confirmed_at || authUser?.emailVerified ? 'Yes' : 'Yes (Designated)'}</dd>
+            <dd className="mt-1 font-semibold text-slate-900 dark:text-white">{authUser?.email_confirmed_at || authUser?.emailVerified ? 'Verified' : 'Unverified'}</dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500">Role Status</dt>

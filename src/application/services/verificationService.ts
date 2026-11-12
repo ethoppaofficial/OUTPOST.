@@ -19,6 +19,8 @@ import {
   LandlordProfile,
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
+import { supabaseStorageService } from '../../infrastructure/supabase/supabaseStorageService';
 
 class VerificationService {
   public searchStudentByRegNumber(regNumber: string) {
@@ -29,11 +31,70 @@ class VerificationService {
     return repository.getStudentDocs(studentId);
   }
 
+  public async loadStudentDocuments(studentId: string): Promise<StudentVerificationDocument[]> {
+    return repository.fetchStudentDocumentsFromSupabase(studentId);
+  }
+
+  public async loadLandlordVerificationState(userId: string): Promise<{
+    profile: LandlordProfile | null;
+    submissions: Array<{
+      id: string;
+      documentType: string;
+      fileName: string;
+      status: VerificationReviewStatus;
+      rejectionReason?: string;
+      createdAt: string;
+    }>;
+  }> {
+    const [{ data: lp, error: lpErr }, { data: subs, error: subsErr }] = await Promise.all([
+      supabase.from('landlord_profiles').select('*').eq('user_id', userId).maybeSingle(),
+      supabase
+        .from('landlord_verification_submissions')
+        .select('*')
+        .eq('landlord_id', userId)
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (lpErr) {
+      throw new Error(`Could not load landlord verification profile: ${lpErr.message}`);
+    }
+    if (subsErr) {
+      throw new Error(`Could not load landlord verification submissions: ${subsErr.message}`);
+    }
+
+    const mappedProfile: LandlordProfile | null = lp
+      ? {
+          userId: lp.user_id,
+          legalName: lp.company_name || 'Landlord',
+          businessName: lp.company_name || undefined,
+          phone: '',
+          contactAddress: lp.business_address || '',
+          idType: 'National ID (NIN)',
+          idReference: lp.tax_id || '',
+          verificationStatus: (lp.verification_status as any) || 'not_started',
+          rejectionReason: lp.rejection_reason || undefined,
+          verifiedAt: lp.verified_at || undefined,
+        }
+      : null;
+
+    return {
+      profile: mappedProfile,
+      submissions: (subs || []).map((s: any) => ({
+        id: s.id,
+        documentType: s.document_type,
+        fileName: s.file_name,
+        status: s.status,
+        rejectionReason: s.rejection_reason || undefined,
+        createdAt: s.created_at,
+      })),
+    };
+  }
+
   public getAllPendingStudentDocuments(): StudentVerificationDocument[] {
     return repository.getStudentDocs().filter((d) => d.status === 'pending');
   }
 
-  public uploadStudentDocument(data: {
+  public async uploadStudentDocument(data: {
     studentId: string;
     studentName: string;
     documentType: StudentDocumentType;
@@ -41,8 +102,8 @@ class VerificationService {
     fileSize: number;
     fileUrl?: string;
     documentUrl?: string;
-  }): { success: boolean; doc?: StudentVerificationDocument; error?: string } {
-    // Validate document type explicitly
+    contentType?: string;
+  }): Promise<{ success: boolean; doc?: StudentVerificationDocument; error?: string }> {
     const allowedTypes: StudentDocumentType[] = ['student_id', 'admission_letter', 'school_fees_receipt'];
     if (!allowedTypes.includes(data.documentType)) {
       return {
@@ -51,20 +112,34 @@ class VerificationService {
       };
     }
 
-    // Validate size (max 5MB)
     if (data.fileSize > 5 * 1024 * 1024) {
       return { success: false, error: 'Document file size exceeds 5MB limit.' };
     }
 
-    const doc = repository.addStudentDocument({
-      studentId: data.studentId,
-      studentName: data.studentName,
-      documentType: data.documentType,
-      fileName: data.fileName,
-      fileSize: data.fileSize,
-      documentUrl: data.documentUrl || data.fileUrl || 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600',
-    });
-    return { success: true, doc };
+    const storagePath = data.documentUrl || data.fileUrl;
+    if (!storagePath) {
+      return { success: false, error: 'Document storage path is required. File upload must finish before metadata save.' };
+    }
+
+    try {
+      const doc = await repository.addStudentDocumentPersisted({
+        studentId: data.studentId,
+        studentName: data.studentName,
+        documentType: data.documentType,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        documentUrl: storagePath,
+        contentType: data.contentType,
+      });
+      return { success: true, doc };
+    } catch (err: any) {
+      // Prevent orphaned storage files if DB metadata insertion fails
+      await supabaseStorageService.deletePrivateAsset('student-docs', storagePath);
+      return {
+        success: false,
+        error: err?.message || 'Could not persist student verification metadata.',
+      };
+    }
   }
 
   public reviewStudentDocument(
@@ -80,10 +155,10 @@ class VerificationService {
     return repository.getLandlordProfile(userId);
   }
 
-  public submitLandlordVerification(
+  public async submitLandlordVerification(
     userIdOrData: string | any,
     possibleData?: any
-  ) {
+  ): Promise<LandlordProfile & { success: boolean; error?: string }> {
     const isSingleObject = typeof userIdOrData === 'object';
     const userId = isSingleObject
       ? userIdOrData.landlordId || userIdOrData.userId || repository.getActiveUserId()
@@ -92,7 +167,7 @@ class VerificationService {
 
     const docUrl = rawData.documentUrl || rawData.idDocumentUrl || rawData.proofOfOwnershipUrl || '';
     if (!docUrl) {
-      throw new Error('Verification document URL is required. Physical credential upload must succeed before submission.');
+      throw new Error('Verification document storage path is required. Physical credential upload must succeed before submission.');
     }
 
     const data = {
@@ -120,18 +195,22 @@ class VerificationService {
       rejectionReason: undefined,
     };
 
-    repository.saveLandlordProfile(updated);
+    try {
+      const persisted = await repository.submitLandlordVerificationPersisted({
+        profile: updated,
+        storagePath: docUrl,
+        fileName: rawData.fileName || docUrl.split('/').pop() || 'landlord_document.pdf',
+        fileSize: Number(rawData.fileSize || 1048576),
+        contentType: rawData.contentType || 'application/pdf',
+        ownershipDocType: rawData.ownershipDocType || data.idType,
+      });
 
-    // Notify admins
-    repository.createNotification({
-      userId: 'user-admin-1',
-      title: 'Landlord Verification Submitted',
-      message: `${data.legalName} submitted identification details (${data.idType} - ${data.idReference}) for review.`,
-      type: 'info',
-      link: '/admin/landlord-verifications',
-    });
-
-    return Object.assign(updated, { success: true });
+      return Object.assign(persisted, { success: true });
+    } catch (err: any) {
+      // Remove orphaned storage object if DB submission insert failed
+      await supabaseStorageService.deletePrivateAsset('landlord-docs', docUrl);
+      throw err;
+    }
   }
 
   public getAllPendingLandlords(): LandlordProfile[] {
@@ -146,12 +225,12 @@ class VerificationService {
         id: doc.id,
         studentId: doc.studentId,
         fullName: student?.fullName || doc.studentName,
-        registrationNumber: student?.registrationNumber || 'STU-2026-4821',
-        university: student?.university || 'Higher Institution',
-        campus: student?.campus || 'Main Campus',
-        programme: student?.programme || 'Undergraduate Programme',
-        studyLevel: student?.studyLevel || 'Undergraduate (300L)',
-        studentEmail: user?.email || 'student@campus.edu.ng',
+        registrationNumber: student?.registrationNumber || '',
+        university: student?.university || 'Bayero University Kano',
+        campus: student?.campus || 'New Campus',
+        programme: student?.programme || '',
+        studyLevel: student?.studyLevel || '',
+        studentEmail: user?.email || '',
         submittedAt: doc.uploadedAt,
         documentType: doc.documentType,
         documentUrl: doc.documentUrl,
@@ -171,13 +250,13 @@ class VerificationService {
         legalName: lp.legalName,
         businessName: lp.businessName || 'Independent Landlord',
         phone: lp.phone,
-        email: user?.email || 'landlord@lagoshousing.ng',
+        email: user?.email || '',
         idType: lp.idType,
         idReference: lp.idReference,
         idNumber: lp.idReference,
-        ownershipDocType: 'Certificate of Ownership / Utility Bill',
+        ownershipDocType: 'Property / Identity Verification Document',
         contactAddress: lp.contactAddress,
-        documentUrl: lp.documentUrl || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=500',
+        documentUrl: lp.documentUrl || '',
         submittedAt: lp.submittedAt || new Date().toISOString(),
         verificationStatus: lp.verificationStatus,
       };

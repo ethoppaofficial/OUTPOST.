@@ -42,32 +42,44 @@ import {
   Loader2,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
+import { useAuth } from '../../application/context/AuthContext';
 import { chatService } from '../../application/services/chatService';
-import { groupChatService } from '../../application/services/groupChatService';
 import {
   Conversation,
   ChatMessage,
   MessageReplyReference,
   MessageMention,
-  StudentProfile
 } from '../../domain/types';
 import { Modal } from '../../components/ui/Modal';
-import { Badge } from '../../components/ui/Badge';
+
+export function getChatBasePathForRole(role?: string | null): string {
+  if (role === 'landlord') return '/landlord/chat';
+  if (role === 'admin') return '/admin/chat';
+  return '/student/chat';
+}
 
 export const ChatPage: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
-  const session = authService.getSession();
+  const { currentUser } = useAuth();
+  const fallbackSession = authService.getSession();
+  const activeUserId = currentUser?.id || (fallbackSession.user.id !== 'anonymous' ? fallbackSession.user.id : '');
+  const activeUserRole = currentUser?.role || fallbackSession.user.role || 'student';
+  const activeDisplayName = currentUser?.fullName || fallbackSession.displayName || 'User';
+  const chatBasePath = getChatBasePathForRole(activeUserRole);
 
   const [conversations, setConversations] = useState<Conversation[]>(() =>
-    chatService.getUserConversations(session.user.id)
+    activeUserId ? chatService.getUserConversations(activeUserId) : []
   );
+  const [loadingConversations, setLoadingConversations] = useState<boolean>(true);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const [activeConvId, setActiveConvId] = useState<string>(
     conversationId || conversations[0]?.id || ''
   );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState<boolean>(false);
   const [inputText, setInputText] = useState('');
   const [activeReply, setActiveReply] = useState<MessageReplyReference | null>(null);
 
@@ -86,7 +98,7 @@ export const ChatPage: React.FC = () => {
 
   // Typing state
   const [remoteTypingUser, setRemoteTypingUser] = useState<string | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Group Details / Member Drawer
   const [groupDrawerOpen, setGroupDrawerOpen] = useState(false);
@@ -94,6 +106,13 @@ export const ChatPage: React.FC = () => {
   // New Direct Chat Modal
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [peerResults, setPeerResults] = useState<Array<{ id: string; fullName: string; email: string; role: string }>>([]);
+  const [searchingPeers, setSearchingPeers] = useState(false);
+  const [startingChatId, setStartingChatId] = useState<string | null>(null);
+
+  // Private attachment signed URL preview card
+  const [signedAttachmentLinks, setSignedAttachmentLinks] = useState<Record<string, { url: string; fileName: string }>>({});
+  const [loadingAttachmentId, setLoadingAttachmentId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -103,6 +122,37 @@ export const ChatPage: React.FC = () => {
 
   const activeConv = conversations.find((c) => c.id === activeConvId);
 
+  const hydrateConversations = async () => {
+    if (!activeUserId) {
+      setConversations([]);
+      setLoadingConversations(false);
+      return;
+    }
+    setLoadingConversations(true);
+    setChatError(null);
+    try {
+      const liveConvos = await chatService.loadUserConversations(activeUserId);
+      setConversations(liveConvos);
+      if (!activeConvId && !conversationId && liveConvos.length > 0) {
+        setActiveConvId(liveConvos[0].id);
+      }
+    } catch (err: any) {
+      setChatError(err?.message || 'Unable to load conversations from Supabase.');
+    } finally {
+      setLoadingConversations(false);
+    }
+  };
+
+  // Hydrate live conversations when authenticated user becomes ready or changes
+  useEffect(() => {
+    void hydrateConversations();
+    if (!activeUserId) return;
+    const unsubConvos = chatService.subscribeToConversations(() => {
+      setConversations(chatService.getUserConversations(activeUserId));
+    });
+    return () => unsubConvos();
+  }, [activeUserId]);
+
   // Sync activeConvId if URL param changes
   useEffect(() => {
     if (conversationId && conversationId !== activeConvId) {
@@ -110,18 +160,63 @@ export const ChatPage: React.FC = () => {
     }
   }, [conversationId]);
 
+  // Live user search inside New Direct Chat modal
+  useEffect(() => {
+    if (!newChatModalOpen || !activeUserId) return;
+    const term = userSearchTerm.trim();
+    if (!term) {
+      setPeerResults([]);
+      return;
+    }
+
+    let cancelled = false;
+    setSearchingPeers(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await chatService.searchChatUsers(term, activeUserId);
+        if (!cancelled) setPeerResults(results);
+      } catch (err: any) {
+        if (!cancelled) setChatError(err?.message || 'Could not search users.');
+      } finally {
+        if (!cancelled) setSearchingPeers(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [newChatModalOpen, userSearchTerm, activeUserId]);
+
   // Load and subscribe to active conversation messages
   useEffect(() => {
-    if (!activeConvId) return;
+    if (!activeConvId || !activeUserId) return;
+    let cancelled = false;
 
     // Mark messages as read
-    chatService.markMessagesAsRead(activeConvId, session.user.id);
+    chatService.markMessagesAsRead(activeConvId, activeUserId);
 
-    const msgs = chatService.getConversationMessages(activeConvId);
-    setMessages(msgs);
+    const cachedMsgs = chatService.getConversationMessages(activeConvId);
+    setMessages(cachedMsgs);
+    setLoadingMessages(cachedMsgs.length === 0);
+
+    chatService
+      .loadConversationMessages(activeConvId)
+      .then((liveMsgs) => {
+        if (!cancelled) {
+          setMessages(liveMsgs);
+          setLoadingMessages(false);
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setChatError(err?.message || 'Unable to load messages.');
+          setLoadingMessages(false);
+        }
+      });
 
     // Refresh conversation list
-    setConversations(chatService.getUserConversations(session.user.id));
+    setConversations(chatService.getUserConversations(activeUserId));
 
     // Subscribe to new incoming messages
     const unsubMsg = chatService.subscribeToMessages(activeConvId, (newMsg) => {
@@ -132,16 +227,15 @@ export const ChatPage: React.FC = () => {
         }
         return [...prev, newMsg];
       });
-      // Mark as read if from peer
-      if (newMsg.senderId !== session.user.id) {
-        chatService.markMessagesAsRead(activeConvId, session.user.id);
+      if (newMsg.senderId !== activeUserId) {
+        chatService.markMessagesAsRead(activeConvId, activeUserId);
       }
-      setConversations(chatService.getUserConversations(session.user.id));
+      setConversations(chatService.getUserConversations(activeUserId));
     });
 
     // Subscribe to typing notifications
     const unsubTyping = chatService.subscribeToTyping(activeConvId, (state) => {
-      if (state.userId !== session.user.id) {
+      if (state.userId !== activeUserId) {
         if (state.isTyping) {
           setRemoteTypingUser(state.userName);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -159,24 +253,26 @@ export const ChatPage: React.FC = () => {
     });
 
     return () => {
+      cancelled = true;
       unsubMsg();
       unsubTyping();
       unsubRead();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [activeConvId]);
+  }, [activeConvId, activeUserId]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
-  // Handle switching conversations
+  // Handle switching conversations using current persona's base route
   const handleSelectConversation = (id: string) => {
     setActiveConvId(id);
-    navigate(`/student/chat/${id}`);
+    navigate(`${chatBasePath}/${id}`);
     setActiveReply(null);
     setEditingMessageId(null);
+    setChatError(null);
     setSearchOpen(false);
     setSearchQuery('');
   };
@@ -185,8 +281,8 @@ export const ChatPage: React.FC = () => {
   const handleInputChange = (val: string) => {
     setInputText(val);
 
-    if (activeConv) {
-      chatService.setTypingState(activeConv.id, session.user.id, session.displayName, true);
+    if (activeConv && activeUserId) {
+      chatService.setTypingState(activeConv.id, activeUserId, activeDisplayName, true);
     }
 
     // Check for '@' mention trigger
@@ -216,9 +312,9 @@ export const ChatPage: React.FC = () => {
   // Send message
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !activeConv) return;
+    if (!inputText.trim() || !activeConv || !activeUserId) return;
+    setChatError(null);
 
-    // Detect mentions in text
     const mentions: MessageMention[] = [];
     if (activeConv.participants) {
       activeConv.participants.forEach((p) => {
@@ -233,7 +329,7 @@ export const ChatPage: React.FC = () => {
     }
 
     try {
-      chatService.sendMessage(activeConv.id, session.user.id, inputText.trim(), {
+      chatService.sendMessage(activeConv.id, activeUserId, inputText.trim(), {
         replyTo: activeReply || undefined,
         mentions: mentions.length > 0 ? mentions : undefined,
       });
@@ -241,52 +337,58 @@ export const ChatPage: React.FC = () => {
       setInputText('');
       setActiveReply(null);
       setMentionQuery(null);
-
-      // Stop typing
-      chatService.setTypingState(activeConv.id, session.user.id, session.displayName, false);
+      chatService.setTypingState(activeConv.id, activeUserId, activeDisplayName, false);
     } catch (err: any) {
-      alert(err?.message || 'Failed to send message.');
+      setChatError(err?.message || 'Failed to send message.');
     }
   };
 
   // Handle Chat Attachment Selection & Trusted Upload
   const handleAttachmentSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !activeConv) return;
+    if (!file || !activeConv || !activeUserId) return;
     if (file.size > 10 * 1024 * 1024) {
-      alert('Attachment exceeds maximum allowed size of 10 MB.');
+      setChatError('Attachment exceeds maximum allowed size of 10 MB.');
       return;
     }
+    setChatError(null);
     setUploadingAttachment(true);
     try {
       const res = await chatService.sendAttachmentMessage(
         activeConv.id,
-        session.user.id,
+        activeUserId,
         file,
         file.name,
         inputText.trim() || undefined
       );
       if (!res.success) {
-        alert(res.error || 'Failed to send attachment.');
+        setChatError(res.error || 'Failed to send attachment.');
       } else {
         setInputText('');
         setMessages(chatService.getMessages(activeConv.id));
       }
     } catch (err: any) {
-      alert(err?.message || 'Error uploading chat attachment.');
+      setChatError(err?.message || 'Error uploading chat attachment.');
     } finally {
       setUploadingAttachment(false);
       if (attachmentInputRef.current) attachmentInputRef.current.value = '';
     }
   };
 
-  // Open private chat attachment via short-lived signed URL
-  const handleOpenAttachment = async (messageId: string) => {
+  // Request short-lived (15m) signed download URL rendered inline
+  const handleOpenAttachment = async (messageId: string, fileName: string) => {
+    setLoadingAttachmentId(messageId);
+    setChatError(null);
     try {
       const signedUrl = await chatService.getAttachmentSignedUrl(messageId);
-      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      setSignedAttachmentLinks((prev) => ({
+        ...prev,
+        [messageId]: { url: signedUrl, fileName },
+      }));
     } catch (err: any) {
-      alert('Unable to load private chat attachment: ' + (err?.message || 'Unauthorized'));
+      setChatError('Unable to load private chat attachment: ' + (err?.message || 'Unauthorized'));
+    } finally {
+      setLoadingAttachmentId(null);
     }
   };
 
@@ -295,7 +397,7 @@ export const ChatPage: React.FC = () => {
     const messageTime = new Date(msg.createdAt).getTime();
     const fifteenMinutesMs = 15 * 60 * 1000;
     if (Date.now() - messageTime > fifteenMinutesMs) {
-      alert('This message can no longer be edited because the 15-minute window has expired.');
+      setChatError('This message can no longer be edited because the 15-minute window has expired.');
       return;
     }
     setEditingMessageId(msg.id);
@@ -305,8 +407,9 @@ export const ChatPage: React.FC = () => {
 
   // Submit Edited Message
   const handleSaveEdit = (msgId: string) => {
+    if (!activeUserId) return;
     setEditError(null);
-    const res = chatService.editMessage(msgId, session.user.id, editingText);
+    const res = chatService.editMessage(msgId, activeUserId, editingText);
     if (res.success && res.message) {
       setEditingMessageId(null);
       setEditingText('');
@@ -318,7 +421,8 @@ export const ChatPage: React.FC = () => {
 
   // Retry failed message
   const handleRetry = (msgId: string) => {
-    const res = chatService.retryFailedMessage(msgId, session.user.id);
+    if (!activeUserId) return;
+    const res = chatService.retryFailedMessage(msgId, activeUserId);
     if (res.success && res.message) {
       setMessages((prev) => prev.map((m) => (m.id === msgId ? res.message! : m)));
     }
@@ -345,23 +449,27 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Start new direct chat with another user
-  const handleStartDirectChat = (targetUserId: string) => {
+  // Start new direct chat with another live platform user
+  const handleStartDirectChat = async (peer: { id: string; fullName?: string; role?: string }) => {
+    if (!activeUserId) return;
+    setStartingChatId(peer.id);
+    setChatError(null);
     try {
-      const conv = chatService.startDirectConversation(session.user.id, targetUserId);
+      const conv = await chatService.startDirectConversationPersisted(activeUserId, peer.id, {
+        fullName: peer.fullName,
+        role: peer.role,
+      });
       setNewChatModalOpen(false);
-      setConversations(chatService.getUserConversations(session.user.id));
+      setUserSearchTerm('');
+      setConversations(chatService.getUserConversations(activeUserId));
       setActiveConvId(conv.id);
-      navigate(`/student/chat/${conv.id}`);
+      navigate(`${chatBasePath}/${conv.id}`);
     } catch (err: any) {
-      alert(err?.message || 'Could not start direct chat.');
+      setChatError(err?.message || 'Could not start direct chat.');
+    } finally {
+      setStartingChatId(null);
     }
   };
-
-  // Search candidate peers for direct chat
-  const allPeers: StudentProfile[] = userSearchTerm.trim()
-    ? groupChatService.searchStudents(userSearchTerm).filter((s) => s.userId !== session.user.id)
-    : [];
 
   // Filter messages in search mode
   const displayedMessages = searchQuery.trim()
@@ -390,13 +498,18 @@ export const ChatPage: React.FC = () => {
 
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
-          {conversations.length === 0 ? (
+          {loadingConversations && conversations.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 space-y-2">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mx-auto" />
+              <p>Loading conversations…</p>
+            </div>
+          ) : conversations.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-400 space-y-2">
               <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
               <p>No active conversations yet.</p>
               <button
                 onClick={() => setNewChatModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold"
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold cursor-pointer"
               >
                 Start a Message
               </button>
@@ -406,12 +519,13 @@ export const ChatPage: React.FC = () => {
               const isActive = c.id === activeConv?.id;
               const isGroup = c.type === 'group';
               const unread = c.unreadCount || 0;
+              const lastTime = c.lastMessageTimestamp || c.lastMessageAt;
 
               return (
                 <button
                   key={c.id}
                   onClick={() => handleSelectConversation(c.id)}
-                  className={`w-full text-left p-3.5 flex items-start gap-3 transition ${
+                  className={`w-full text-left p-3.5 flex items-start gap-3 transition cursor-pointer ${
                     isActive
                       ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-l-4 border-emerald-600'
                       : 'hover:bg-slate-100/60 dark:hover:bg-slate-800/50'
@@ -442,9 +556,9 @@ export const ChatPage: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      {c.lastMessageTimestamp && (
+                      {lastTime && (
                         <span className="text-[10px] text-slate-400 flex-shrink-0 ml-1">
-                          {new Date(c.lastMessageTimestamp).toLocaleTimeString([], {
+                          {new Date(lastTime).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
                           })}
@@ -526,8 +640,9 @@ export const ChatPage: React.FC = () => {
 
               <button
                 onClick={() => {
-                  const muted = chatService.toggleMuteConversation(activeConv.id, session.user.id);
-                  setConversations(chatService.getUserConversations(session.user.id));
+                  if (!activeUserId) return;
+                  chatService.toggleMuteConversation(activeConv.id, activeUserId);
+                  setConversations(chatService.getUserConversations(activeUserId));
                 }}
                 className={`p-2 rounded-xl transition ${
                   activeConv.isMuted
@@ -551,6 +666,32 @@ export const ChatPage: React.FC = () => {
               )}
             </div>
           </div>
+
+          {chatError && (
+            <div role="alert" className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+              <span className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{chatError}</span>
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => void hydrateConversations()}
+                  className="font-bold underline cursor-pointer"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChatError(null)}
+                  className="p-0.5 text-rose-500 hover:text-rose-700 cursor-pointer"
+                  aria-label="Dismiss chat error"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* In-Conversation Search Bar */}
           {searchOpen && (
@@ -583,7 +724,12 @@ export const ChatPage: React.FC = () => {
 
           {/* Messages Stream */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {displayedMessages.length === 0 ? (
+            {loadingMessages && displayedMessages.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-xs text-slate-400 gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                <span>Loading messages…</span>
+              </div>
+            ) : displayedMessages.length === 0 ? (
               <div className="h-full flex items-center justify-center text-center text-xs text-slate-400">
                 {searchQuery.trim()
                   ? 'No matching messages found for this query.'
@@ -591,7 +737,7 @@ export const ChatPage: React.FC = () => {
               </div>
             ) : (
               displayedMessages.map((msg) => {
-                const isMe = msg.senderId === session.user.id;
+                const isMe = msg.senderId === activeUserId;
                 const messageAgeMs = Date.now() - new Date(msg.createdAt).getTime();
                 const canEdit = isMe && messageAgeMs <= 15 * 60 * 1000;
                 const isEditingThis = editingMessageId === msg.id;
@@ -684,28 +830,47 @@ export const ChatPage: React.FC = () => {
                       )}
 
                       {msg.attachment && (
-                        <div
-                          className={`mt-2 p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
-                            isMe
-                              ? 'bg-emerald-700/60 border-emerald-500/40 text-white'
-                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 truncate">
-                            <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="truncate font-medium">{msg.attachment.fileName}</span>
-                            <span className="text-[10px] opacity-75">
-                              ({(msg.attachment.fileSize / 1024).toFixed(0)} KB)
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenAttachment(msg.id)}
-                            className="p-1 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-semibold flex items-center gap-1 transition"
-                            title="Open private file via short-lived signed link"
+                        <div className="mt-2 space-y-1.5">
+                          <div
+                            className={`p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                              isMe
+                                ? 'bg-emerald-700/60 border-emerald-500/40 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                            }`}
                           >
-                            <ExternalLink className="w-3 h-3" />
-                          </button>
+                            <div className="flex items-center gap-1.5 truncate">
+                              <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate font-medium">{msg.attachment.fileName}</span>
+                              <span className="text-[10px] opacity-75">
+                                ({(msg.attachment.fileSize / 1024).toFixed(0)} KB)
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={loadingAttachmentId === msg.id}
+                              onClick={() => void handleOpenAttachment(msg.id, msg.attachment!.fileName)}
+                              className="px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer disabled:opacity-60"
+                              title="Generate 15-minute signed download link"
+                            >
+                              {loadingAttachmentId === msg.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <ExternalLink className="w-3 h-3" />
+                              )}
+                              <span>Link</span>
+                            </button>
+                          </div>
+                          {signedAttachmentLinks[msg.id] && (
+                            <a
+                              href={signedAttachmentLinks[msg.id].url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-500"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Download {signedAttachmentLinks[msg.id].fileName} (15m link)
+                            </a>
+                          )}
                         </div>
                       )}
 
@@ -794,7 +959,7 @@ export const ChatPage: React.FC = () => {
                 .filter(
                   (p) =>
                     p.name.toLowerCase().includes(mentionQuery.toLowerCase()) &&
-                    p.userId !== session.user.id
+                    p.userId !== activeUserId
                 )
                 .map((p) => (
                   <button
@@ -904,45 +1069,54 @@ export const ChatPage: React.FC = () => {
         <div className="space-y-4 p-1">
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Search by Student Name or Reg Number
+              Search Users by Name or Email
             </label>
             <input
               type="text"
               value={userSearchTerm}
               onChange={(e) => setUserSearchTerm(e.target.value)}
-              placeholder="e.g. Adebayo, Chioma..."
+              placeholder="Search student, landlord, or support..."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               autoFocus
             />
           </div>
 
           <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-            {allPeers.length === 0 ? (
+            {searchingPeers ? (
+              <div className="py-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                <span>Searching users…</span>
+              </div>
+            ) : peerResults.length === 0 ? (
               <p className="text-xs text-slate-400 py-6 text-center">
                 {userSearchTerm.trim()
-                  ? 'No verified peers found.'
-                  : 'Search for a verified peer to begin a private 1-on-1 discussion.'}
+                  ? 'No active users found matching that query.'
+                  : 'Enter a name or email to start a live conversation.'}
               </p>
             ) : (
-              allPeers.map((peer) => (
-                <div key={peer.userId} className="py-2.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 font-bold text-xs flex items-center justify-center">
-                      {peer.fullName[0]}
+              peerResults.map((peer) => (
+                <div key={peer.id} className="py-2.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 font-bold text-xs flex items-center justify-center shrink-0">
+                      {peer.fullName[0]?.toUpperCase() || 'U'}
                     </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">
+                    <div className="min-w-0">
+                      <h5 className="text-xs font-bold text-slate-900 dark:text-white truncate">
                         {peer.fullName}
                       </h5>
-                      <span className="text-[10px] text-slate-400">{peer.university}</span>
+                      <span className="text-[10px] text-slate-400 capitalize">
+                        {peer.role} · {peer.email}
+                      </span>
                     </div>
                   </div>
 
                   <button
-                    onClick={() => handleStartDirectChat(peer.userId)}
-                    className="px-3 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 text-white text-xs font-bold shadow-xs"
+                    type="button"
+                    disabled={startingChatId === peer.id}
+                    onClick={() => void handleStartDirectChat(peer)}
+                    className="px-3 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-60 shrink-0"
                   >
-                    Message
+                    {startingChatId === peer.id ? 'Opening…' : 'Message'}
                   </button>
                 </div>
               ))
@@ -964,7 +1138,7 @@ export const ChatPage: React.FC = () => {
               <span className="text-xs text-slate-500">
                 {activeConv.participantIds.length} Verified Participants
               </span>
-              {activeConv.groupId && (
+              {activeConv.groupId && activeUserRole === 'student' && (
                 <Link
                   to={`/student/groups/${activeConv.groupId}`}
                   className="text-xs font-bold text-emerald-600 hover:underline flex items-center gap-1"
@@ -977,7 +1151,7 @@ export const ChatPage: React.FC = () => {
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
               {activeConv.participants?.map((p) => {
-                const isMe = p.userId === session.user.id;
+                const isMe = p.userId === activeUserId;
                 return (
                   <div key={p.userId} className="py-2.5 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -997,11 +1171,12 @@ export const ChatPage: React.FC = () => {
 
                     {!isMe && (
                       <button
+                        type="button"
                         onClick={() => {
                           setGroupDrawerOpen(false);
-                          handleStartDirectChat(p.userId);
+                          void handleStartDirectChat({ id: p.userId, fullName: p.name, role: p.role });
                         }}
-                        className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200"
+                        className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer"
                       >
                         1-on-1 Chat
                       </button>

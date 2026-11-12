@@ -28,6 +28,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
+import { useAuth } from '../../application/context/AuthContext';
 import { reservationService } from '../../application/services/reservationService';
 import { storageService } from '../../application/services/storageService';
 import { ReservationStatusBadge, ReceiptStatusBadge } from '../../components/ui/Badge';
@@ -45,7 +46,9 @@ import { normalizeError } from '../../application/utils/errorUtils';
 export const ReservationDetailPage: React.FC = () => {
   const { reservationId } = useParams<{ reservationId: string }>();
   const navigate = useNavigate();
-  const session = authService.getSession();
+  const { currentUser } = useAuth();
+  const fallbackSession = authService.getSession();
+  const activeUser = currentUser || fallbackSession.user;
 
   const [reservation, setReservation] = useState(() =>
     reservationService.getReservationById(reservationId || '')
@@ -56,6 +59,7 @@ export const ReservationDetailPage: React.FC = () => {
   );
 
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [payerBank, setPayerBank] = useState('GTBank');
   const [reference, setReference] = useState('');
   const [amountPaid, setAmountPaid] = useState<number>(reservation?.amount || 0);
@@ -77,8 +81,8 @@ export const ReservationDetailPage: React.FC = () => {
   }
 
   // Tenant Boundary Check: Student can only view their own reservation
-  const isAuthorizedStudent = reservation.studentId === session.user.id;
-  if (!isAuthorizedStudent && session.user.role !== 'admin') {
+  const isAuthorizedStudent = reservation.studentId === activeUser.id;
+  if (!isAuthorizedStudent && activeUser.role !== 'admin') {
     return (
       <div className="text-center py-12 space-y-3">
         <p className="text-sm text-rose-500 font-semibold">Unauthorized: You do not have permission to view this reservation.</p>
@@ -150,7 +154,7 @@ export const ReservationDetailPage: React.FC = () => {
         receiptFile,
         fileValidation.sanitizedFileName || receiptFile.name,
         reservation.landlordId,
-        session.user.id
+        activeUser.id
       );
 
       if (!uploadRes || !uploadRes.url) {
@@ -160,7 +164,7 @@ export const ReservationDetailPage: React.FC = () => {
       const res = await reservationService.uploadPaymentReceipt({
         reservationId: reservation.id,
         invoiceId: reservation.invoiceId || invoice?.id || `inv-${reservation.id}`,
-        studentId: session.user.id,
+        studentId: activeUser.id,
         landlordId: reservation.landlordId,
         fileUrl: uploadRes.url,
         fileName: uploadRes.fileName,
@@ -190,10 +194,9 @@ export const ReservationDetailPage: React.FC = () => {
   };
 
   const handleCancelReservation = () => {
-    if (window.confirm('Are you sure you want to cancel this reservation hold? Your bed-space will be immediately released.')) {
-      reservationService.cancelReservation(reservation.id);
-      setReservation(reservationService.getReservationById(reservation.id));
-    }
+    reservationService.cancelReservation(reservation.id);
+    setReservation(reservationService.getReservationById(reservation.id));
+    setConfirmCancel(false);
   };
 
   return (
@@ -388,15 +391,38 @@ export const ReservationDetailPage: React.FC = () => {
         )}
       </div>
 
-      {/* Cancellation option */}
+      {/* Cancellation option (inline iframe-safe confirmation) */}
       {reservation.status === 'pending_payment' && !isExpired && (
-        <div className="text-right">
-          <button
-            onClick={handleCancelReservation}
-            className="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer"
-          >
-            Cancel this reservation hold
-          </button>
+        <div className="flex items-center justify-end gap-3">
+          {confirmCancel ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-xs">
+              <span className="text-rose-700 dark:text-rose-300 font-medium">
+                Release this bed-space immediately?
+              </span>
+              <button
+                type="button"
+                onClick={() => setConfirmCancel(false)}
+                className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
+              >
+                Keep Hold
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelReservation}
+                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer"
+              >
+                Confirm Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(true)}
+              className="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer"
+            >
+              Cancel this reservation hold
+            </button>
+          )}
         </div>
       )}
 

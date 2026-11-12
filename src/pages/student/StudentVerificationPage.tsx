@@ -13,26 +13,29 @@
  * - Prevents arbitrary file uploads and displays verification badge according to approval status.
  */
 
-import React, { useState } from 'react';
-import { ShieldCheck, Upload, FileText, CheckCircle2, Clock, XCircle, AlertTriangle } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ShieldCheck, Upload, FileText, CheckCircle2, Clock, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
 import { storageService } from '../../application/services/storageService';
-import { StudentDocumentType } from '../../domain/types';
+import { StudentDocumentType, StudentVerificationDocument } from '../../domain/types';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { validateUploadFile, STUDENT_DOCUMENT_UPLOAD_RULES } from '../../application/utils/uploadValidation';
 import { normalizeError } from '../../application/utils/errorUtils';
+import { useAuth } from '../../application/context/AuthContext';
 
-/**
- * StudentVerificationPage Component
- * 
- * Renders the verification status banner, file upload form for new credential proofs,
- * and an audit list of previously submitted verification documents with reviewer notes.
- */
 export const StudentVerificationPage: React.FC = () => {
+  const { currentUser } = useAuth();
   const session = authService.getSession();
+  const studentId = currentUser?.id || session.user.id;
+  const studentName = currentUser?.fullName || session.displayName || 'Student';
   const student = authService.getCurrentStudentProfile();
-  const [documents, setDocuments] = useState(() => verificationService.getStudentDocuments(session.user.id));
+
+  const [documents, setDocuments] = useState<StudentVerificationDocument[]>(() =>
+    verificationService.getStudentDocuments(studentId)
+  );
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [documentType, setDocumentType] = useState<StudentDocumentType>('student_id');
   const [file, setFile] = useState<File | null>(null);
@@ -40,6 +43,28 @@ export const StudentVerificationPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const refreshDocuments = useCallback(async () => {
+    if (!studentId || studentId === 'anonymous') {
+      setLoadingDocs(false);
+      return;
+    }
+    setLoadingDocs(true);
+    setLoadError(null);
+    try {
+      const liveDocs = await verificationService.loadStudentDocuments(studentId);
+      setDocuments(liveDocs);
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not load uploaded verification documents.');
+      setLoadError(normalized.userMessage);
+    } finally {
+      setLoadingDocs(false);
+    }
+  }, [studentId]);
+
+  useEffect(() => {
+    void refreshDocuments();
+  }, [refreshDocuments]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
@@ -71,34 +96,35 @@ export const StudentVerificationPage: React.FC = () => {
 
     try {
       const uploadRes = await storageService.uploadStudentDocument(
-        session.user.id,
+        studentId,
         file,
         check.sanitizedFileName || fileName || file.name,
         documentType
       );
 
-      if (!uploadRes || !uploadRes.url) {
+      if (!uploadRes || !uploadRes.path) {
         throw new Error('Could not upload document to secure storage.');
       }
 
       const res = await verificationService.uploadStudentDocument({
-        studentId: session.user.id,
-        studentName: student?.fullName || session.displayName || 'Student',
+        studentId,
+        studentName: student?.fullName || studentName,
         documentType,
         fileName: uploadRes.fileName,
         fileSize: uploadRes.fileSize,
-        fileUrl: uploadRes.url,
-        documentUrl: uploadRes.url,
+        fileUrl: uploadRes.path,
+        documentUrl: uploadRes.path,
+        contentType: uploadRes.contentType,
       });
 
       if (res.success && res.doc) {
-        setSuccessMsg('Document successfully uploaded for administrator review.');
-        setDocuments(verificationService.getStudentDocuments(session.user.id));
+        setSuccessMsg('Document successfully uploaded and recorded for administrator review.');
+        await refreshDocuments();
         setFile(null);
         setFileName('');
-        setTimeout(() => setSuccessMsg(null), 4000);
+        setTimeout(() => setSuccessMsg(null), 5000);
       } else {
-        setError(res.error || 'Failed to upload document.');
+        setError(res.error || 'Failed to record uploaded document metadata.');
       }
     } catch (err: unknown) {
       const normalized = normalizeError(err, 'Error uploading document to storage.');
@@ -213,9 +239,32 @@ export const StudentVerificationPage: React.FC = () => {
 
       {/* Submitted Documents Log */}
       <div className="space-y-3">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white">Document History & Review Log</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Document History & Review Log</h3>
+          <button
+            type="button"
+            onClick={() => void refreshDocuments()}
+            disabled={loadingDocs}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingDocs ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
 
-        {documents.length === 0 ? (
+        {loadError && (
+          <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 text-xs flex items-center justify-between gap-2">
+            <span>{loadError}</span>
+            <button type="button" onClick={() => void refreshDocuments()} className="font-bold underline shrink-0">Retry</button>
+          </div>
+        )}
+
+        {loadingDocs ? (
+          <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+            <span>Loading verification documents…</span>
+          </div>
+        ) : documents.length === 0 ? (
           <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
             No verification documents submitted yet.
           </div>

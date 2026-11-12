@@ -84,17 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSupabaseUser(user);
 
       if (!user) {
-        const activeId = repository.getActiveUserId();
-        const existing = activeId ? repository.getUserById(activeId) : null;
-        if (existing) {
-          setCurrentUser(existing);
-          setProfileStatus('authenticated');
-          setMaintenanceMode(false);
-          setMaintenanceLoaded(true);
-          setLoading(false);
-          return;
-        }
-
+        // Never restore stale local/in-memory accounts in browser runtime when Supabase has no active session.
         repository.clearActiveSession();
         setCurrentUser(null);
         setProfileStatus('unauthenticated');
@@ -160,19 +150,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
           }
 
+          const resolvedStatus = (profile.account_status as AccountStatus) || 'active';
+
+          if (resolvedStatus === 'suspended') {
+            repository.clearActiveSession();
+            setProfileStatus('profile_error');
+            setProfileError('Your account has been suspended by an administrator.');
+            setCurrentUser(null);
+            return;
+          }
+
+          // Administrator privileges strictly require role === 'admin' AND account_status === 'active'.
+          if (validRole === 'admin' && resolvedStatus !== 'active') {
+            repository.clearActiveSession();
+            setProfileStatus('profile_error');
+            setProfileError('Administrator access requires an active account status in public.profiles.');
+            setCurrentUser(null);
+            return;
+          }
+
           const existingUser = repository.getUserById(user.id);
           const resolvedUser: User = {
             ...(existingUser || {
               id: user.id,
               email: user.email || profile.email || '',
-              accountStatus: (profile.account_status as AccountStatus) || 'active',
+              accountStatus: resolvedStatus,
               emailVerified: Boolean(user.email_confirmed_at),
               createdAt: profile.created_at || user.created_at || new Date().toISOString(),
             }),
             id: user.id,
             email: user.email || profile.email || existingUser?.email || '',
             role: validRole,
-            accountStatus: (profile.account_status as AccountStatus) || 'active',
+            accountStatus: resolvedStatus,
             emailVerified: Boolean(user.email_confirmed_at),
             fullName: profile.full_name || user.user_metadata?.full_name || '',
             avatarUrl: profile.avatar_url || user.user_metadata?.avatar_url || '',
@@ -186,13 +195,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Check in-memory repository (for offline / unit-test environments)
-        const localUser = repository.getUserById(user.id);
-        if (localUser) {
-          setCurrentUser(localUser);
-          setProfileStatus('authenticated');
-          setProfileError(undefined);
-          return;
+        // Only allow in-memory repository user in non-browser Node unit tests (never in browser runtime)
+        if (typeof window === 'undefined') {
+          const localUser = repository.getUserById(user.id);
+          if (localUser) {
+            setCurrentUser(localUser);
+            setProfileStatus('authenticated');
+            setProfileError(undefined);
+            return;
+          }
         }
 
         // If database query failed with network/PostgREST error

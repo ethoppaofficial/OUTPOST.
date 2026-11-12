@@ -22,10 +22,13 @@ All database schema definitions reside in `supabase/migrations/` and must be app
 
 | Step | Migration File | Primary Responsibility |
 | :---: | :--- | :--- |
-| **1** | `20261020000001_initial_schema.sql` | Declares extensions, 11 custom ENUMs, 23 domain tables, foreign keys, and CHECK constraints. |
-| **2** | `20261020000002_row_level_security.sql` | Enables RLS on all 23 tables and defines granular SELECT, INSERT, UPDATE, DELETE policies. |
+| **1** | `20261020000001_initial_schema.sql` | Declares extensions, 11 custom ENUMs, domain tables, foreign keys, and CHECK constraints. |
+| **2** | `20261020000002_row_level_security.sql` | Enables RLS on all domain tables and defines granular SELECT, INSERT, UPDATE, DELETE policies. |
 | **3** | `20261020000003_storage_buckets_and_policies.sql` | Provisions 6 Supabase Storage buckets, MIME type whitelists, and storage RLS policies. |
 | **4** | `20261020000004_functions_triggers_and_automation.sql` | Installs SECURITY DEFINER functions, atomic stored procedures, and immutable field triggers. |
+| **5** | `20261020000005_pre_deployment_hardening.sql` | Applies FORCE RLS, auto-profile trigger `handle_new_user()`, capacity sync triggers, and cron helper. |
+| **6** | `20261020000006_fix_landlord_registration_profile_initialization.sql` | Ensures landlord signup role assignment and profile initialization without client elevation. |
+| **7** | `20261112000007_admin_live_metrics_and_rls_fixes.sql` | Hardens `is_admin()`, adds `admin_get_dashboard_metrics()`, landlord submission RPC, atomic admin governance RPCs, and email confirmation profile sync. |
 
 ---
 
@@ -189,7 +192,7 @@ erDiagram
 
 #### `public.platform_settings`
 - **Purpose**: System-wide configuration singleton.
-- **Columns**: `id INTEGER PRIMARY KEY CHECK (id = 1)`, `maintenance_mode BOOLEAN DEFAULT FALSE`, `reservation_hold_days INTEGER DEFAULT 7`, `notifications_enabled BOOLEAN DEFAULT TRUE`, `updated_at TIMESTAMPTZ`, `updated_by UUID`.
+- **Columns**: `id TEXT PRIMARY KEY DEFAULT 'default'`, `maintenance_mode BOOLEAN DEFAULT FALSE`, `reservation_hold_days INTEGER DEFAULT 7`, `notifications_enabled BOOLEAN DEFAULT TRUE`, `settings JSONB` (stores `receiptReviewDeadlineHours`, `studentVerificationRequired`, `landlordVerificationRequired`, `propertyVerificationRequired`), `updated_at TIMESTAMPTZ`, `updated_by UUID`.
 
 ---
 
@@ -241,5 +244,12 @@ erDiagram
 ### 4. Field Immutability Triggers
 - `protect_profile_immutable_fields`: Prevents non-admins from altering `role` or `account_status`.
 - `protect_student_profile_immutable_fields`: Prevents self-granting `is_profile_verified = true`.
+- `protect_landlord_profile_immutable_fields` (hardened in Migration 07): Permits `not_started` / `rejected` → `pending` ONLY when a backing pending row exists in `landlord_verification_submissions`; strictly forbids self-approval.
+- `handle_auth_user_email_confirmed` (Migration 07): Transitions `email_unverified` profiles to `active` upon `auth.users.email_confirmed_at` confirmation.
 - `enforce_message_edit_window`: Enforces 15-minute edit restriction on chat messages.
 - `prevent_removing_last_group_admin`: Blocks deletion or demotion of the final administrator in accommodation groups.
+
+### 5. Authoritative Admin Metrics & Governance RPCs (`20261112000007_admin_live_metrics_and_rls_fixes.sql`)
+- `admin_get_dashboard_metrics()`: `SECURITY DEFINER` (`SET search_path = public, auth, pg_temp`), requires `public.is_admin()`, returns JSONB with all 14 live counters directly from database metadata tables.
+- `submit_landlord_verification_submission(...)`: Atomically inserts submission row + updates `landlord_profiles.verification_status = 'pending'` + writes audit log.
+- `admin_review_student_verification(...)`, `admin_review_landlord_verification(...)`, `admin_review_property(...)`, `admin_review_property_location(...)`, `admin_set_user_status(...)`: Atomic transaction wrappers updating target state, sending user notification, and appending `audit_logs`.

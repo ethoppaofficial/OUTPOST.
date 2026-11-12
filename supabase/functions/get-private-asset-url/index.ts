@@ -22,6 +22,8 @@ const corsHeaders = {
 
 const EXPIRY_SECONDS = 900; // 15 minutes
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -55,40 +57,42 @@ serve(async (req) => {
     const body = await req.json();
     const { assetType, recordId } = body;
 
-    if (!assetType || !recordId) {
-      return new Response(JSON.stringify({ error: 'assetType and recordId are required' }), {
+    if (!assetType || !recordId || typeof recordId !== 'string' || !UUID_REGEX.test(recordId.trim())) {
+      return new Response(JSON.stringify({ error: 'Valid assetType and UUID recordId are required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
+    const cleanRecordId = recordId.trim();
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check caller profile
+    // Check caller profile (must not be suspended; admin privileges require account_status === 'active')
     const { data: profile } = await adminClient
       .from('profiles')
       .select('role, account_status')
       .eq('id', user.id)
       .single();
 
-    if (profile?.account_status === 'suspended') {
-      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended' }), {
+    if (!profile || profile.account_status === 'suspended') {
+      return new Response(JSON.stringify({ error: 'Forbidden: Account is suspended or missing' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const isAdmin = profile?.role === 'admin';
+    const isAdmin = profile.role === 'admin' && profile.account_status === 'active';
 
     let bucketName = '';
     let storagePath = '';
+    let resolvedEntityId = cleanRecordId;
 
     if (assetType === 'payment-receipt') {
       const { data: receipt } = await adminClient
         .from('payment_receipts')
-        .select('student_id, landlord_id, storage_path')
-        .eq('id', recordId)
-        .single();
+        .select('id, student_id, landlord_id, storage_path')
+        .eq('id', cleanRecordId)
+        .maybeSingle();
 
       if (!receipt) {
         return new Response(JSON.stringify({ error: 'Receipt not found' }), {
@@ -106,12 +110,13 @@ serve(async (req) => {
 
       bucketName = 'payment-receipts';
       storagePath = receipt.storage_path;
+      resolvedEntityId = receipt.id;
     } else if (assetType === 'chat-attachment') {
       const { data: message } = await adminClient
         .from('messages')
-        .select('conversation_id, attachment')
-        .eq('id', recordId)
-        .single();
+        .select('id, conversation_id, attachment')
+        .eq('id', cleanRecordId)
+        .maybeSingle();
 
       if (!message || !message.attachment?.storage_path) {
         return new Response(JSON.stringify({ error: 'Attachment not found' }), {
@@ -126,7 +131,7 @@ serve(async (req) => {
           .select('id')
           .eq('conversation_id', message.conversation_id)
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
 
         if (!participant) {
           return new Response(JSON.stringify({ error: 'Forbidden: not a participant in this conversation' }), {
@@ -138,14 +143,25 @@ serve(async (req) => {
 
       bucketName = 'chat-attachments';
       storagePath = message.attachment.storage_path;
+      resolvedEntityId = message.id;
     } else if (assetType === 'student-document') {
-      const { data: doc } = await adminClient
+      // Strictly query by document primary ID first; if caller passed student_id, check safely without string-interpolated .or()
+      let { data: doc } = await adminClient
         .from('student_verification_documents')
-        .select('student_id, storage_path')
-        .or(`id.eq.${recordId},student_id.eq.${recordId}`)
-        .order('created_at', { ascending: false })
-        .limit(1)
+        .select('id, student_id, storage_path')
+        .eq('id', cleanRecordId)
         .maybeSingle();
+
+      if (!doc) {
+        const fallback = await adminClient
+          .from('student_verification_documents')
+          .select('id, student_id, storage_path')
+          .eq('student_id', cleanRecordId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        doc = fallback.data;
+      }
 
       if (!doc) {
         return new Response(JSON.stringify({ error: 'Document not found' }), {
@@ -163,14 +179,24 @@ serve(async (req) => {
 
       bucketName = 'student-docs';
       storagePath = doc.storage_path;
+      resolvedEntityId = doc.id;
     } else if (assetType === 'landlord-document') {
-      const { data: doc } = await adminClient
+      let { data: doc } = await adminClient
         .from('landlord_verification_submissions')
-        .select('landlord_id, storage_path')
-        .or(`id.eq.${recordId},landlord_id.eq.${recordId}`)
-        .order('created_at', { ascending: false })
-        .limit(1)
+        .select('id, landlord_id, storage_path')
+        .eq('id', cleanRecordId)
         .maybeSingle();
+
+      if (!doc) {
+        const fallback = await adminClient
+          .from('landlord_verification_submissions')
+          .select('id, landlord_id, storage_path')
+          .eq('landlord_id', cleanRecordId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        doc = fallback.data;
+      }
 
       if (!doc) {
         return new Response(JSON.stringify({ error: 'Document not found' }), {
@@ -188,6 +214,7 @@ serve(async (req) => {
 
       bucketName = 'landlord-docs';
       storagePath = doc.storage_path;
+      resolvedEntityId = doc.id;
     } else {
       return new Response(JSON.stringify({ error: 'Invalid assetType' }), {
         status: 400,
@@ -195,15 +222,40 @@ serve(async (req) => {
       });
     }
 
+    if (!storagePath) {
+      return new Response(JSON.stringify({ error: 'No storage path associated with this record' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Normalize path if bucket prefix was stored accidentally
+    const normalizedPath = storagePath.startsWith(`${bucketName}/`)
+      ? storagePath.slice(bucketName.length + 1)
+      : storagePath;
+
     const { data: signedData, error: signError } = await adminClient.storage
       .from(bucketName)
-      .createSignedUrl(storagePath, EXPIRY_SECONDS);
+      .createSignedUrl(normalizedPath, EXPIRY_SECONDS);
 
     if (signError || !signedData?.signedUrl) {
       return new Response(JSON.stringify({ error: 'Failed to generate signed download URL' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Write immutable audit trail entry for sensitive private evidence access
+    try {
+      await adminClient.from('audit_logs').insert({
+        actor_id: user.id,
+        action: isAdmin ? 'ADMIN_VIEW_PRIVATE_EVIDENCE' : 'VIEW_PRIVATE_EVIDENCE',
+        entity_type: assetType,
+        entity_id: resolvedEntityId,
+        details: { bucket: bucketName, expiresInSeconds: EXPIRY_SECONDS },
+      });
+    } catch (auditErr) {
+      console.warn('[get-private-asset-url audit warning]:', auditErr);
     }
 
     return new Response(

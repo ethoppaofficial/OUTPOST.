@@ -19,55 +19,79 @@
 | Component | Provider | Status | Verification Method | Remaining Action |
 | :--- | :--- | :--- | :--- | :--- |
 | **Authentication** | Supabase Auth | CONFIGURED | Remote REST probe `/auth/v1/settings` returns HTTP 200 with signup & email enabled | Ready for administrative sign-in |
-| **PostgreSQL Schema** | Supabase PostgreSQL | PREPARED ONLY | Authoritative ordered migrations in `supabase/migrations/` validated via in-memory PostgreSQL test suite | Apply via `supabase db push` with project access token |
-| **Row Level Security** | Supabase PostgreSQL RLS | PREPARED ONLY | 23 tables protected with RLS in `20261020000002_row_level_security.sql`, tested across tenant roles | Automatically applied during migration push |
+| **PostgreSQL Schema** | Supabase PostgreSQL | PREPARED ONLY | Authoritative ordered migrations (`01` through `07`) in `supabase/migrations/` | Apply via `supabase db push` with project access token |
+| **Row Level Security** | Supabase PostgreSQL RLS | PREPARED ONLY | Protected across all tables (`20261020000002` + `20261112000007`), enforced by `public.is_admin()` | Automatically applied during migration push |
 | **Storage Buckets & Policies** | Supabase Storage | PREPARED ONLY | 6 buckets and bucket RLS policies defined in `20261020000003_storage_buckets_and_policies.sql` | Automatically created during migration push |
-| **Realtime** | Supabase Realtime | PREPARED ONLY | Publications enabled for messages & notifications in schema migration | Active upon database push |
-| **Edge Functions** | Supabase Edge Functions (Deno) | PREPARED ONLY | 8 functions implemented, CORS-validated, and tested in `supabase/functions/` | Deploy via `supabase functions deploy --all` |
+| **Realtime** | Supabase Realtime | PREPARED ONLY | Publications enabled for messages & notifications; admin console subscribes to verification/property tables | Active upon database push |
+| **Edge Functions** | Supabase Edge Functions (Deno) | PREPARED ONLY | Functions including `get-private-asset-url` implemented and tested in `supabase/functions/` | Deploy via `supabase functions deploy --all` |
 | **Reservation Expiration Scheduler** | PostgreSQL / pg_cron | PREPARED ONLY | Hourly procedure `expire_pending_reservations` defined in migration 4 | Enabled with `pg_cron` in Supabase project dashboard |
 
 ---
 
-## Administrator Bootstrap & Security Guardrails
+## Administrator Authorization & Zero-Fallback Contract
 
-OUTPOST enforces zero-client-trust administration:
-1. `/admin/login` is a dedicated administrator authentication portal. It does NOT permit self-registration.
-2. Administrative privileges are rooted in `public.profiles.role = 'admin'` backed by database triggers that strictly prevent client mutations.
-3. System audit logs are append-only; direct `UPDATE`, `DELETE`, and `TRUNCATE` privileges on `audit_logs` are revoked from `PUBLIC`, `authenticated`, and `anon`.
-4. Stored procedures (`create_reservation_atomic`, `review_payment_receipt_atomic`, `expire_pending_reservations`) execute as `SECURITY DEFINER` with fixed `search_path = public, auth`.
+OUTPOST enforces fail-closed zero-client-trust administration:
+1. `/admin/login` is a dedicated administrator authentication portal. It does NOT permit self-registration or demo quick-fill credentials.
+2. Every administrator action and dashboard query verifies `public.profiles` where:
+   - `profiles.id = auth.uid()`
+   - `role = 'admin'`
+   - `account_status = 'active'`
+3. **Zero Local/Demo Fallback**: `adminService` NEVER falls back to seed profiles, browser `localStorage`, or in-memory mock records when Supabase returns empty sets or errors.
+   - Live empty database tables legitimately display `0` counts and empty queues (`"No pending items"`).
+   - Missing authentication, insufficient roles, RLS rejections (`42501`), or network errors surface an explicit `"Data Unavailable"` banner with the typed error code (`UNAUTHENTICATED`, `FORBIDDEN_ROLE`, `ADMIN_SUSPENDED_OR_INACTIVE`, `SCHEMA_OR_RLS_ERROR`, `NETWORK_ERROR`) and a Retry button.
+
+---
+
+## Live Dashboard & Reports Metrics Contract (`ADMIN_METRICS_METADATA`)
+
+Both `/admin/dashboard` and `/admin/reports` consume the identical `AdminMetrics` contract served by `public.admin_get_dashboard_metrics()` (or database `head: true, count: 'exact'` queries if Migration 07 has not yet been pushed):
+
+| Metric Key | Source Table | Definition / Filter |
+| :--- | :--- | :--- |
+| `totalUsers` | `public.profiles` | All registered user profiles across all roles |
+| `totalStudents` | `public.profiles` | `role = 'student'` |
+| `totalLandlords` | `public.profiles` | `role = 'landlord'` |
+| `totalAdministrators` | `public.profiles` | `role = 'admin'` |
+| `totalUploadedStudentDocuments` | `public.student_verification_documents` | All student verification metadata rows |
+| `totalLandlordVerificationSubmissions` | `public.landlord_verification_submissions` | All landlord verification submission rows |
+| `totalPaymentReceipts` | `public.payment_receipts` | All payment receipt metadata rows |
+| `pendingStudentVerifications` | `public.student_verification_documents` | `status = 'pending'` |
+| `pendingLandlordVerifications` | `landlord_verification_submissions` / `landlord_profiles` | Distinct landlords with pending submission or `verification_status = 'pending'` |
+| `pendingPropertyVerifications` | `public.properties` | `approval_status = 'pending'` |
+| `activeProperties` | `public.properties` | `approval_status = 'approved' AND is_published = true` |
+| `activeReservations` | `public.reservations` | `status IN ('pending_payment', 'payment_submitted', 'confirmed') AND hold_expires_at > now()` |
+| `pendingReceiptVerifications` | `public.payment_receipts` | `status = 'pending_review'` |
+| `expiredReservations` | `public.reservations` | `status = 'expired'` OR unpaid hold past `hold_expires_at` |
+
+### Definition of "Uploaded Files"
+- Identity and payment counts strictly track **authorized PostgreSQL metadata rows** (`student_verification_documents`, `landlord_verification_submissions`, `payment_receipts`), never raw Storage bucket listings from the browser.
+- Public property photos (`property-images`) and private chat files (`chat-attachments`) are excluded from identity/payment file counts.
+- Orphaned Storage objects without a linked authorized database record are never counted or surfaced.
+
+---
 
 ### One-Time Administrator Bootstrap (Supabase SQL)
 
-To promote an initial verified user to administrator, execute the following SQL in the Supabase SQL Editor:
+To promote an initial verified user to administrator, execute the following SQL in the Supabase SQL Editor (replacing `<ADMIN_EMAIL>` with your designated operator account):
 
 ```sql
--- 1. Verify user exists in auth.users (or created with designated credentials)
-SELECT id, email, created_at FROM auth.users WHERE email = 'ethoppaofficial@gmail.com';
+-- 1. Verify user exists in auth.users
+SELECT id, email, email_confirmed_at, created_at FROM auth.users WHERE email = '<ADMIN_EMAIL>';
 
--- 2. Set administrator role in profiles table
+-- 2. Set administrator role and active status in profiles table
 UPDATE public.profiles
 SET role = 'admin',
-    account_status = 'active'
-WHERE id = (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com');
+    account_status = 'active',
+    is_verified = true
+WHERE id = (SELECT id FROM auth.users WHERE email = '<ADMIN_EMAIL>');
 
--- 3. Ensure corresponding admin_profile entry exists
-INSERT INTO public.admin_profiles (id, full_name, permissions)
+-- 3. Record bootstrap in immutable audit log
+INSERT INTO public.audit_logs (actor_id, action, entity_type, entity_id, details)
 VALUES (
-  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com'),
-  'System Administrator',
-  '{"can_verify_students": true, "can_verify_landlords": true, "can_approve_properties": true, "can_manage_settings": true, "can_suspend_users": true}'::jsonb
-)
-ON CONFLICT (id) DO UPDATE
-SET permissions = EXCLUDED.permissions;
-
--- 4. Record bootstrap in immutable audit log
-INSERT INTO public.audit_logs (actor_id, actor_role, action, target_type, target_id, details)
-VALUES (
-  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com'),
-  'admin',
+  (SELECT id FROM auth.users WHERE email = '<ADMIN_EMAIL>'),
   'ADMIN_BOOTSTRAP',
-  'admin_profile',
-  (SELECT id FROM auth.users WHERE email = 'ethoppaofficial@gmail.com')::text,
+  'profiles',
+  (SELECT id FROM auth.users WHERE email = '<ADMIN_EMAIL>')::text,
   '{"method": "manual_bootstrap_sql", "reason": "initial_admin_setup"}'::jsonb
 );
 ```
@@ -82,10 +106,10 @@ From developer workstation with the Supabase CLI installed:
 # 1. Link project
 supabase link --project-ref bljscjzpycbzkubyyfrq
 
-# 2. Push database schema, RLS, storage, and automation migrations
+# 2. Push database schema, RLS, storage, automation, and Migration 07 live admin RPCs
 supabase db push
 
-# 3. Deploy all Edge Functions
+# 3. Deploy all Edge Functions (including hardened get-private-asset-url)
 supabase functions deploy --all
 
 # 4. Verify Edge Function secrets
@@ -96,10 +120,23 @@ supabase secrets set \
 
 ---
 
-## Production Smoke Tests
+## Troubleshooting Live vs. Unavailable Admin Data
 
-1. Navigate to `/admin/login`. Ensure standard student or landlord credentials are not permitted.
-2. Sign in with the promoted administrator account and verify `/admin/dashboard` loads live statistics.
-3. Access `/admin/users` and ensure user directory displays Supabase user records and allows account suspension with recorded reasons.
-4. Access `/admin/properties` and verify property approval and location verification workflows execute independently.
-5. Access `/admin/settings` and verify platform settings (maintenance mode) update and record audit entries.
+| Symptom | Root Cause | Resolution |
+| :--- | :--- | :--- |
+| Banner displays `[UNAUTHENTICATED]` | Browser session missing or JWT expired | Sign in again via `/admin/login`. |
+| Banner displays `[FORBIDDEN_ROLE]` | User lacks `role = 'admin'` in `public.profiles` | Run the Bootstrap SQL above for the account. |
+| Banner displays `[ADMIN_SUSPENDED_OR_INACTIVE]` | `profiles.account_status` is not `'active'` | Update `account_status = 'active'` in `public.profiles`. |
+| Banner displays `[SCHEMA_OR_RLS_ERROR]` (code `42501` / `42883`) | Latest migrations (`20261112000007`) not pushed to live Supabase | Run `supabase db push` on ref `bljscjzpycbzkubyyfrq`. |
+| Clicking "Preview File" fails in Verification Queue | `get-private-asset-url` Edge Function undeployed or Storage object missing | Run `supabase functions deploy get-private-asset-url` and confirm the `storage_path` exists in the private bucket. |
+| Dashboard shows `0` with `Live` badge | Connected live PostgreSQL database genuinely has zero records | Register a student/landlord, submit verification files, and click **Refresh**. |
+
+---
+
+## Post-Deployment Verification Checklist
+
+1. Navigate to `/admin/login`. Verify non-admin student/landlord credentials are rejected and no demo credentials are prefilled.
+2. Sign in as the active administrator and verify `/admin/dashboard` shows the green **Live** indicator (`ADMIN_METRICS_METADATA` counts match SQL `SELECT COUNT(*)` queries).
+3. Register or verify a student (`student_verification_documents`) and landlord (`landlord_verification_submissions`) upload; verify the file appears in `/admin/verification` and generates an expiring 15-minute signed download link via `get-private-asset-url` with a corresponding `ADMIN_VIEW_PRIVATE_EVIDENCE` row in `/admin/audit-logs`.
+4. Test `/admin/users` (account suspension with reason), `/admin/properties` (property approval and location verification), `/admin/disputes` (reservation & receipt inspection), and `/admin/settings` (`platform_settings` upsert).
+

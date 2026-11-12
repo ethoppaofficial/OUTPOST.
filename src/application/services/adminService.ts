@@ -1,39 +1,126 @@
 /**
  * @file adminService.ts
  * @module application/services/adminService
- * @description Application service for the OUTPOST administrator workspace.
+ * @description Authoritative Supabase-only administrator data access, live metrics, and governance service.
  *
- * Responsibilities & Authorization:
- * - Restricted Workspace: All operations require the `admin` role, enforced by Supabase RLS and server-side Edge Functions.
- * - Verification Queue: Reviews student identity documents and landlord legal credentials.
- * - Listing Approvals: Inspects new property submissions and updates `verification_status` to `approved` or `rejected`.
- * - User Governance: Suspends abusive accounts, revokes verification badges, and handles disputes.
- * - Audit Trail: Reads immutable `audit_logs` records to track system actions with timestamps and actor IDs.
- * - Platform Configuration: Reads and updates singleton `platform_settings` (maintenance mode, hold durations).
+ * Security & Correctness Invariants:
+ * - Zero Local/Demo Fallback: Administrator reads NEVER fall back to in-memory seed records,
+ *   localStorage, or synthetic fixture objects. Empty PostgreSQL tables return empty arrays / zeros cleanly.
+ * - Active Admin Verification: Every admin operation validates via `supabase.auth.getUser()` and
+ *   `public.profiles` (`id = auth.uid() AND role = 'admin' AND account_status = 'active'`).
+ * - Authoritative Metrics: `getAdminMetrics()` queries DB-side counts via `admin_get_dashboard_metrics()` RPC
+ *   (or DB `head: true, count: 'exact'` queries if Migration 07 RPC is not yet pushed), never downloading full
+ *   tables into the browser merely to count rows.
+ * - Uploaded Evidence Semantics:
+ *   - Student verification files are counted strictly from `student_verification_documents`.
+ *   - Landlord verification files are counted strictly from `landlord_verification_submissions`.
+ *   - Payment receipts are counted strictly from `payment_receipts`.
+ *   - Public property photos and private chat attachments are intentionally excluded; unlinked Storage objects
+ *     without a corresponding authorized DB metadata record are never counted or surfaced.
  */
 
 import { AuditLog, User } from '../../domain/types';
 import { computePublicCoordinates } from '../../domain/geoUtils';
-import { supabase, invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
-import { repository } from '../../infrastructure/repositories';
+import { supabase as defaultSupabase } from '../../infrastructure/supabase/supabaseClient';
 
 export type AdminRecord = Record<string, any> & { id: string };
-export type AdminUser = User & { name: string; status: string; studentProfile?: AdminRecord; landlordProfile?: AdminRecord };
+
+export type AdminUser = User & {
+  name: string;
+  status: string;
+  studentProfile?: AdminRecord;
+  landlordProfile?: AdminRecord;
+};
+
+export interface AdminMetrics {
+  totalUsers: number;
+  totalStudents: number;
+  totalLandlords: number;
+  totalAdministrators: number;
+  totalUploadedStudentDocuments: number;
+  totalLandlordVerificationSubmissions: number;
+  totalPaymentReceipts: number;
+  pendingStudentVerifications: number;
+  pendingLandlordVerifications: number;
+  pendingPropertyVerifications: number;
+  activeProperties: number;
+  activeReservations: number;
+  pendingReceiptVerifications: number;
+  expiredReservations: number;
+}
 
 export interface AdminDashboardData {
-  metrics: {
-    totalStudents: number;
-    totalLandlords: number;
-    pendingLandlordVerifications: number;
-    pendingStudentVerifications: number;
-    pendingPropertyVerifications: number;
-    activeProperties: number;
-    activeReservations: number;
-    pendingReceiptVerifications: number;
-    expiredReservations: number;
-  };
+  metrics: AdminMetrics;
   recentActivity: AuditLog[];
+  fetchedAt: string;
 }
+
+export type AdminErrorCode =
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN_ROLE'
+  | 'ADMIN_SUSPENDED_OR_INACTIVE'
+  | 'SCHEMA_OR_RLS_ERROR'
+  | 'NETWORK_ERROR'
+  | 'EDGE_FUNCTION_ERROR'
+  | 'VALIDATION_ERROR'
+  | 'UNKNOWN_ERROR';
+
+export class AdminServiceError extends Error {
+  public readonly code: AdminErrorCode;
+  public readonly details?: string;
+  public readonly hint?: string;
+  public readonly table?: string;
+  public readonly statusCode?: number;
+
+  constructor(
+    code: AdminErrorCode,
+    message: string,
+    options?: { details?: string; hint?: string; table?: string; statusCode?: number }
+  ) {
+    super(message);
+    this.name = 'AdminServiceError';
+    this.code = code;
+    this.details = options?.details;
+    this.hint = options?.hint;
+    this.table = options?.table;
+    this.statusCode = options?.statusCode;
+  }
+}
+
+export interface ActiveAdminContext {
+  id: string;
+  email: string;
+  role: 'admin';
+  accountStatus: 'active';
+  fullName: string;
+}
+
+export interface AdminMetricDefinition {
+  key: keyof AdminMetrics;
+  label: string;
+  sourceTable: string;
+  filterDescription: string;
+}
+
+/**
+ * Shared documentation & UI legend defining exact SQL sources for every dashboard & report metric.
+ */
+export const ADMIN_METRICS_METADATA: readonly AdminMetricDefinition[] = [
+  { key: 'totalUsers', label: 'Registered users', sourceTable: 'public.profiles', filterDescription: 'All registered profiles across all roles' },
+  { key: 'totalStudents', label: 'Registered students', sourceTable: 'public.profiles', filterDescription: "role = 'student'" },
+  { key: 'totalLandlords', label: 'Registered landlords', sourceTable: 'public.profiles', filterDescription: "role = 'landlord'" },
+  { key: 'totalAdministrators', label: 'Administrators', sourceTable: 'public.profiles', filterDescription: "role = 'admin'" },
+  { key: 'totalUploadedStudentDocuments', label: 'Student documents uploaded', sourceTable: 'public.student_verification_documents', filterDescription: 'All student document metadata records' },
+  { key: 'totalLandlordVerificationSubmissions', label: 'Landlord files uploaded', sourceTable: 'public.landlord_verification_submissions', filterDescription: 'All landlord verification submission records' },
+  { key: 'totalPaymentReceipts', label: 'Payment receipts uploaded', sourceTable: 'public.payment_receipts', filterDescription: 'All uploaded payment receipt records' },
+  { key: 'pendingStudentVerifications', label: 'Student checks pending', sourceTable: 'public.student_verification_documents', filterDescription: "status = 'pending'" },
+  { key: 'pendingLandlordVerifications', label: 'Landlord checks pending', sourceTable: 'landlord_verification_submissions / landlord_profiles', filterDescription: "Distinct landlords with pending submission or verification_status = 'pending'" },
+  { key: 'pendingPropertyVerifications', label: 'Property reviews pending', sourceTable: 'public.properties', filterDescription: "approval_status = 'pending'" },
+  { key: 'activeProperties', label: 'Active published properties', sourceTable: 'public.properties', filterDescription: "approval_status = 'approved' AND is_published = true" },
+  { key: 'activeReservations', label: 'Active reservations', sourceTable: 'public.reservations', filterDescription: "status IN ('pending_payment', 'payment_submitted', 'confirmed') AND hold_expires_at > now()" },
+  { key: 'pendingReceiptVerifications', label: 'Receipts pending review', sourceTable: 'public.payment_receipts', filterDescription: "status = 'pending_review'" },
+  { key: 'expiredReservations', label: 'Expired reservations', sourceTable: 'public.reservations', filterDescription: "status = 'expired' OR unpaid hold past hold_expires_at" },
+] as const;
 
 function toMillis(value: unknown): number {
   if (typeof value === 'string' || typeof value === 'number') {
@@ -48,236 +135,335 @@ function displayDate(value: unknown): string {
   return millis ? new Date(millis).toISOString() : '';
 }
 
-function getRepositoryFallbackRecords(tableName: string): AdminRecord[] {
-  switch (tableName) {
-    case 'profiles':
-      return repository.getUsers().map((u) => ({
-        id: u.id,
-        email: u.email,
-        full_name: u.fullName || u.email.split('@')[0],
-        role: u.role,
-        account_status: u.accountStatus,
-        is_verified: u.emailVerified,
-        created_at: u.createdAt,
-      }));
-    case 'student_profiles':
-      return repository.getStudentProfiles().map((sp) => ({
-        id: sp.userId,
-        user_id: sp.userId,
-        institution: sp.university || sp.institutionName || 'Bayero University Kano',
-        campus: sp.campus || 'New Campus',
-        registration_number: sp.registrationNumber || '',
-        department: sp.programme || '',
-        study_level: sp.studyLevel || '100L',
-        full_name: sp.fullName,
-        is_profile_verified: sp.isProfileVerified ?? false,
-      }));
-    case 'landlord_profiles':
-      return repository.getLandlordProfiles().map((lp) => ({
-        id: lp.userId,
-        user_id: lp.userId,
-        company_name: lp.businessName || lp.legalName || 'Landlord Property',
-        business_address: lp.contactAddress || '',
-        verification_status: lp.verificationStatus || 'not_started',
-        tax_id: lp.idReference || '',
-        document_url: lp.documentUrl || '',
-        created_at: lp.submittedAt || new Date().toISOString(),
-      }));
-    case 'student_verification_documents':
-      return repository.getAllStudentDocs().map((sd) => ({
-        id: sd.id,
-        student_id: sd.studentId,
-        document_type: sd.documentType,
-        status: sd.status,
-        verification_status: sd.status,
-        created_at: sd.uploadedAt,
-        storage_path: sd.documentUrl,
-        file_name: sd.fileName,
-      }));
-    case 'landlord_verification_submissions':
-      return repository
-        .getLandlordProfiles()
-        .filter((lp) => lp.documentUrl || lp.verificationStatus === 'pending')
-        .map((lp) => ({
-          id: `sub_${lp.userId}`,
-          landlord_id: lp.userId,
-          document_type: lp.idType || 'national_id',
-          status: lp.verificationStatus || 'pending',
-          storage_path: lp.documentUrl || '',
-          file_name: lp.documentUrl ? lp.documentUrl.split('/').pop() : 'landlord_document.pdf',
-          created_at: lp.submittedAt || new Date().toISOString(),
-        }));
-    case 'properties':
-      return repository.getProperties().map((p) => ({
-        id: p.id,
-        landlord_id: p.landlordId,
-        title: p.title,
-        approval_status: p.verificationStatus === 'approved' ? 'approved' : 'pending',
-        is_active: p.isActive,
-        total_spaces: p.totalCapacity,
-        available_spaces: p.availableSpaces,
-        rental_fee_annual: p.pricePerSession,
-      }));
-    case 'reservations':
-      return repository.getReservations().map((r) => ({
-        id: r.id,
-        student_id: r.studentId,
-        landlord_id: r.landlordId,
-        property_id: r.propertyId,
-        status: r.status,
-        amount: r.amount,
-        hold_expires_at: r.holdExpiresAt,
-        created_at: r.createdAt,
-      }));
-    case 'payment_receipts':
-      return repository.getPaymentReceipts().map((pr) => ({
-        id: pr.id,
-        reservation_id: pr.reservationId,
-        student_id: pr.studentId,
-        landlord_id: pr.landlordId,
-        property_id: pr.propertyId,
-        status: pr.status === 'approved' ? 'approved' : 'pending_review',
-        storage_path: pr.storagePath || pr.fileUrl || '',
-        amount_paid: pr.amountPaid,
-        file_name: pr.fileName,
-      }));
-    default:
-      return [];
-  }
-}
+function classifySupabaseError(err: any, table?: string): AdminServiceError {
+  if (err instanceof AdminServiceError) return err;
 
-let lastAdminAuthWarning: string | null = null;
+  const rawMessage = String(err?.message || err?.error_description || 'Unknown database error');
+  const lower = rawMessage.toLowerCase();
+  const code = String(err?.code || '');
 
-export function getAdminAuthWarning(): string | null {
-  return lastAdminAuthWarning;
-}
-
-async function readSupabaseTable(tableName: string): Promise<AdminRecord[]> {
-  const fallback = getRepositoryFallbackRecords(tableName);
-
-  try {
-    const { data, error } = await supabase.from(tableName).select('*');
-    if (!error && Array.isArray(data)) {
-      if (data.length > 0) {
-        lastAdminAuthWarning = null;
-        // Merge Supabase remote records with any local-only records (deduplicate by id or user_id)
-        const remoteIds = new Set(data.map((item) => String(item.id || item.user_id || '')));
-        const localOnly = fallback.filter((item) => !remoteIds.has(String(item.id || item.user_id || '')));
-        return [...(data as AdminRecord[]), ...localOnly];
-      }
-      // If table returned empty array, return fallback if present
-      if (fallback.length > 0) {
-        return fallback;
-      }
-      return [];
-    }
-
-    if (error) {
-      console.warn(`[Supabase Admin] Table read warning (${tableName}):`, error?.message);
-      if (error.message?.includes('permission denied') || error.message?.includes('violates row-level security')) {
-        lastAdminAuthWarning = 'Administrator RLS requires an authenticated administrator session in remote Supabase.';
-      }
-    }
-  } catch (err: any) {
-    console.warn(`[Supabase Admin] Table read exception (${tableName}):`, err);
+  if (code === '42501' || lower.includes('permission denied') || lower.includes('row-level security') || lower.includes('forbidden')) {
+    return new AdminServiceError(
+      'SCHEMA_OR_RLS_ERROR',
+      `Database authorization or RLS policy denied access${table ? ` to ${table}` : ''}: ${rawMessage}`,
+      { details: err?.details, hint: err?.hint || 'Verify your profile has role = admin, account_status = active, and latest migrations are pushed.', table }
+    );
   }
 
-  // Gracefully fall back to local/in-memory records when Supabase returns error or unauthenticated
-  return fallback;
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed') ||
+    lower.includes('timeout') ||
+    lower.includes('econnrefused')
+  ) {
+    return new AdminServiceError(
+      'NETWORK_ERROR',
+      `Network error communicating with Supabase${table ? ` while querying ${table}` : ''}. Check your connection and retry.`,
+      { details: err?.details, table }
+    );
+  }
+
+  return new AdminServiceError(
+    'SCHEMA_OR_RLS_ERROR',
+    `Supabase query failed${table ? ` on ${table}` : ''}: ${rawMessage}`,
+    { details: err?.details, hint: err?.hint, table }
+  );
 }
 
-class AdminService {
-  public async getDashboardData(): Promise<AdminDashboardData> {
-    const [profiles, landlordProfiles, studentDocs, landlordSubmissions, properties, reservations, receipts, audit] = await Promise.all([
-      readSupabaseTable('profiles'),
-      readSupabaseTable('landlord_profiles'),
-      readSupabaseTable('student_verification_documents'),
-      readSupabaseTable('landlord_verification_submissions'),
-      readSupabaseTable('properties'),
-      readSupabaseTable('reservations'),
-      readSupabaseTable('payment_receipts'),
-      this.getAuditLogs(),
-    ]);
+function isRpcMissingError(error: any): boolean {
+  const code = String(error?.code || '');
+  const msg = String(error?.message || '').toLowerCase();
+  return code === '42883' || code === 'PGRST202' || msg.includes('could not find the function') || msg.includes('does not exist');
+}
 
-    const now = Date.now();
-    const pendingLandlordIds = new Set([
-      ...landlordProfiles.filter((item) => ['pending', 'not_started'].includes(item.verification_status)).map((item) => item.user_id || item.id),
-      ...landlordSubmissions.filter((item) => item.status === 'pending').map((item) => item.landlord_id),
-    ]);
+export function createAdminService(deps?: { client?: any }) {
+  const client = deps?.client ?? defaultSupabase;
+
+  async function verifyActiveAdmin(): Promise<ActiveAdminContext> {
+    let authUser: any = null;
+    try {
+      const { data, error } = await client.auth.getUser();
+      if (error || !data?.user) {
+        throw new AdminServiceError(
+          'UNAUTHENTICATED',
+          'Your Supabase session is missing or expired. Please sign in through the administrator portal.'
+        );
+      }
+      authUser = data.user;
+    } catch (err: any) {
+      if (err instanceof AdminServiceError) throw err;
+      throw classifySupabaseError(err, 'auth.users');
+    }
+
+    const { data: profile, error: profileErr } = await client
+      .from('profiles')
+      .select('id, email, role, account_status, full_name')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (profileErr) {
+      throw classifySupabaseError(profileErr, 'public.profiles');
+    }
+
+    if (!profile) {
+      throw new AdminServiceError(
+        'FORBIDDEN_ROLE',
+        'Access denied: no profile record exists for this authenticated user in public.profiles.',
+        { table: 'public.profiles' }
+      );
+    }
+
+    if (profile.role !== 'admin') {
+      throw new AdminServiceError(
+        'FORBIDDEN_ROLE',
+        `Access denied: account role is '${profile.role || 'unknown'}'. Active administrator role is required.`,
+        { table: 'public.profiles' }
+      );
+    }
+
+    if (profile.account_status !== 'active') {
+      throw new AdminServiceError(
+        'ADMIN_SUSPENDED_OR_INACTIVE',
+        `Access denied: administrator account status is '${profile.account_status}'. Only active administrator accounts can access live operations.`,
+        { table: 'public.profiles' }
+      );
+    }
 
     return {
-      metrics: {
-        totalStudents: profiles.filter((item) => item.role === 'student').length,
-        totalLandlords: profiles.filter((item) => item.role === 'landlord').length,
-        pendingLandlordVerifications: pendingLandlordIds.size,
-        pendingStudentVerifications: studentDocs.filter((item) => item.status === 'pending' || item.verification_status === 'pending').length,
-        pendingPropertyVerifications: properties.filter((item) => item.approval_status === 'pending').length,
-        activeProperties: properties.filter((item) => item.approval_status === 'approved' && item.is_active === true).length,
-        activeReservations: reservations.filter((item) => ['pending_payment', 'payment_submitted', 'confirmed'].includes(item.status)).length,
-        pendingReceiptVerifications: receipts.filter((item) => item.status === 'pending_review').length,
-        expiredReservations: reservations.filter((item) => item.status === 'expired' || (
-          ['pending_payment', 'payment_submitted'].includes(item.status) &&
-          toMillis(item.hold_expires_at) > 0 &&
-          toMillis(item.hold_expires_at) < now
-        )).length,
-      },
-      recentActivity: audit.slice(0, 8),
+      id: profile.id,
+      email: profile.email || authUser.email || '',
+      role: 'admin',
+      accountStatus: 'active',
+      fullName: profile.full_name || 'Administrator',
     };
   }
 
-  public async getUsers(): Promise<AdminUser[]> {
+  async function readTable(tableName: string, columns: string = '*'): Promise<AdminRecord[]> {
+    const { data, error } = await client.from(tableName).select(columns);
+    if (error) {
+      throw classifySupabaseError(error, tableName);
+    }
+    return Array.isArray(data) ? (data as AdminRecord[]) : [];
+  }
+
+  async function countHead(
+    tableName: string,
+    applyFilter?: (q: any) => any
+  ): Promise<number> {
+    let query = client.from(tableName).select('*', { count: 'exact', head: true });
+    if (applyFilter) {
+      query = applyFilter(query);
+    }
+    const { count, error } = await query;
+    if (error) {
+      throw classifySupabaseError(error, tableName);
+    }
+    return Number(count ?? 0);
+  }
+
+  /**
+   * Authoritative metrics contract shared between AdminDashboard and AdminReportsPage.
+   * Uses the server-side `admin_get_dashboard_metrics()` RPC first, falling back ONLY to
+   * DB-side `head: true, count: 'exact'` queries if Migration 07 has not been pushed yet.
+   * Never downloads entire tables or synthesizes mock numbers on failure.
+   */
+  async function getAdminMetrics(): Promise<AdminMetrics> {
+    await verifyActiveAdmin();
+
+    const { data: rpcData, error: rpcError } = await client.rpc('admin_get_dashboard_metrics');
+    if (!rpcError && rpcData && typeof rpcData === 'object') {
+      return {
+        totalUsers: Number(rpcData.totalUsers ?? 0),
+        totalStudents: Number(rpcData.totalStudents ?? 0),
+        totalLandlords: Number(rpcData.totalLandlords ?? 0),
+        totalAdministrators: Number(rpcData.totalAdministrators ?? 0),
+        totalUploadedStudentDocuments: Number(rpcData.totalUploadedStudentDocuments ?? 0),
+        totalLandlordVerificationSubmissions: Number(rpcData.totalLandlordVerificationSubmissions ?? 0),
+        totalPaymentReceipts: Number(rpcData.totalPaymentReceipts ?? 0),
+        pendingStudentVerifications: Number(rpcData.pendingStudentVerifications ?? 0),
+        pendingLandlordVerifications: Number(rpcData.pendingLandlordVerifications ?? 0),
+        pendingPropertyVerifications: Number(rpcData.pendingPropertyVerifications ?? 0),
+        activeProperties: Number(rpcData.activeProperties ?? 0),
+        activeReservations: Number(rpcData.activeReservations ?? 0),
+        pendingReceiptVerifications: Number(rpcData.pendingReceiptVerifications ?? 0),
+        expiredReservations: Number(rpcData.expiredReservations ?? 0),
+      };
+    }
+
+    if (rpcError && !isRpcMissingError(rpcError)) {
+      throw classifySupabaseError(rpcError, 'admin_get_dashboard_metrics');
+    }
+
+    // Fallback ONLY when RPC function is not yet deployed: use PostgREST head-only exact DB counts.
+    const nowIso = new Date().toISOString();
+    const [
+      totalUsers,
+      totalStudents,
+      totalLandlords,
+      totalAdministrators,
+      totalUploadedStudentDocuments,
+      totalLandlordVerificationSubmissions,
+      totalPaymentReceipts,
+      pendingStudentVerifications,
+      pendingLandlordSubmissions,
+      pendingLandlordProfiles,
+      pendingPropertyVerifications,
+      activeProperties,
+      activeReservations,
+      pendingReceiptVerifications,
+      explicitExpiredReservations,
+      overdueReservations,
+    ] = await Promise.all([
+      countHead('profiles'),
+      countHead('profiles', (q) => q.eq('role', 'student')),
+      countHead('profiles', (q) => q.eq('role', 'landlord')),
+      countHead('profiles', (q) => q.eq('role', 'admin')),
+      countHead('student_verification_documents'),
+      countHead('landlord_verification_submissions'),
+      countHead('payment_receipts'),
+      countHead('student_verification_documents', (q) => q.eq('status', 'pending')),
+      countHead('landlord_verification_submissions', (q) => q.eq('status', 'pending')),
+      countHead('landlord_profiles', (q) => q.eq('verification_status', 'pending')),
+      countHead('properties', (q) => q.eq('approval_status', 'pending')),
+      countHead('properties', (q) => q.eq('approval_status', 'approved').eq('is_published', true)),
+      countHead('reservations', (q) => q.in('status', ['pending_payment', 'payment_submitted', 'confirmed']).gt('hold_expires_at', nowIso)),
+      countHead('payment_receipts', (q) => q.eq('status', 'pending_review')),
+      countHead('reservations', (q) => q.eq('status', 'expired')),
+      countHead('reservations', (q) => q.in('status', ['pending_payment', 'payment_submitted']).lte('hold_expires_at', nowIso)),
+    ]);
+
+    return {
+      totalUsers,
+      totalStudents,
+      totalLandlords,
+      totalAdministrators,
+      totalUploadedStudentDocuments,
+      totalLandlordVerificationSubmissions,
+      totalPaymentReceipts,
+      pendingStudentVerifications,
+      pendingLandlordVerifications: Math.max(pendingLandlordSubmissions, pendingLandlordProfiles),
+      pendingPropertyVerifications,
+      activeProperties,
+      activeReservations,
+      pendingReceiptVerifications,
+      expiredReservations: explicitExpiredReservations + overdueReservations,
+    };
+  }
+
+  async function getAuditLogs(): Promise<AuditLog[]> {
+    await verifyActiveAdmin();
+
+    const [items, profiles] = await Promise.all([
+      readTable('audit_logs'),
+      readTable('profiles', 'id, full_name, email, role'),
+    ]);
+
+    const actorMap = new Map(profiles.map((p) => [p.id, p]));
+
+    return items
+      .map((item) => {
+        const actor = actorMap.get(item.actor_id);
+        return {
+          id: item.id,
+          action: item.action || 'AUDIT_EVENT',
+          actorId: item.actor_id || '',
+          actorName: item.actor_name || actor?.full_name || actor?.email || 'System / Admin',
+          actorRole: (item.actor_role || actor?.role || 'admin') as any,
+          targetEntity: item.entity_type || item.resource || 'system',
+          targetId: item.entity_id || item.resource_id || '',
+          details: typeof item.details === 'string' ? item.details : JSON.stringify(item.details || {}),
+          timestamp: displayDate(item.created_at),
+        };
+      })
+      .sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
+  }
+
+  async function getDashboardData(): Promise<AdminDashboardData> {
+    const [metrics, audit] = await Promise.all([getAdminMetrics(), getAuditLogs()]);
+    return {
+      metrics,
+      recentActivity: audit.slice(0, 8),
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  async function getUsers(): Promise<AdminUser[]> {
+    await verifyActiveAdmin();
+
     const [profiles, students, landlords] = await Promise.all([
-      readSupabaseTable('profiles'),
-      readSupabaseTable('student_profiles'),
-      readSupabaseTable('landlord_profiles'),
+      readTable('profiles'),
+      readTable('student_profiles'),
+      readTable('landlord_profiles'),
     ]);
 
     const studentById = new Map(students.map((item) => [item.user_id, item]));
     const landlordById = new Map(landlords.map((item) => [item.user_id, item]));
 
-    return profiles.map((record) => {
-      const studentProfile = studentById.get(record.id);
-      const landlordProfile = landlordById.get(record.id);
-      const name = studentProfile?.full_name || landlordProfile?.company_name || record.full_name || record.email || 'User';
+    return profiles
+      .map((record) => {
+        const rawStudent = studentById.get(record.id);
+        const rawLandlord = landlordById.get(record.id);
+        const studentProfile = rawStudent
+          ? {
+              ...rawStudent,
+              registrationNumber: rawStudent.registration_number || '',
+              isProfileVerified: Boolean(rawStudent.is_profile_verified),
+            }
+          : undefined;
+        const landlordProfile = rawLandlord
+          ? {
+              ...rawLandlord,
+              businessName: rawLandlord.company_name || '',
+              verificationStatus: rawLandlord.verification_status || 'not_started',
+            }
+          : undefined;
 
-      return {
-        ...record,
-        id: record.id,
-        email: String(record.email || ''),
-        role: record.role === 'landlord' || record.role === 'admin' ? record.role : 'student',
-        accountStatus: record.account_status || 'active',
-        emailVerified: record.account_status === 'active',
-        createdAt: displayDate(record.created_at) || new Date(0).toISOString(),
-        name,
-        fullName: name,
-        status: record.account_status || 'active',
-        studentProfile,
-        landlordProfile,
-      } as AdminUser;
-    });
+        const name =
+          record.full_name ||
+          landlordProfile?.businessName ||
+          record.email ||
+          'User';
+
+        return {
+          ...record,
+          id: record.id,
+          email: String(record.email || ''),
+          role: record.role === 'landlord' || record.role === 'admin' ? record.role : 'student',
+          accountStatus: record.account_status || 'active',
+          emailVerified: Boolean(record.is_verified || record.account_status === 'active' || record.account_status === 'profile_verified'),
+          createdAt: displayDate(record.created_at) || new Date(0).toISOString(),
+          name,
+          fullName: name,
+          status: record.account_status || 'active',
+          studentProfile,
+          landlordProfile,
+        } as AdminUser;
+      })
+      .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
   }
 
-  public async getVerificationQueues(): Promise<{ students: AdminRecord[]; landlords: AdminRecord[] }> {
+  async function getVerificationQueues(): Promise<{ students: AdminRecord[]; landlords: AdminRecord[] }> {
+    await verifyActiveAdmin();
+
     const [studentDocs, students, landlords, landlordSubmissions, profiles] = await Promise.all([
-      readSupabaseTable('student_verification_documents'),
-      readSupabaseTable('student_profiles'),
-      readSupabaseTable('landlord_profiles'),
-      readSupabaseTable('landlord_verification_submissions'),
-      readSupabaseTable('profiles'),
+      readTable('student_verification_documents'),
+      readTable('student_profiles'),
+      readTable('landlord_profiles'),
+      readTable('landlord_verification_submissions'),
+      readTable('profiles', 'id, email, full_name, role, account_status'),
     ]);
 
     const studentById = new Map<string, AdminRecord>(students.map((item) => [item.user_id, item]));
     const landlordById = new Map<string, AdminRecord>(landlords.map((item) => [item.user_id, item]));
     const userById = new Map<string, AdminRecord>(profiles.map((item) => [item.id, item]));
 
-    // Format student verification documents
     const formattedStudents: AdminRecord[] = studentDocs
-      .filter((item) => item.status === 'pending' || item.verification_status === 'pending')
+      .filter((item) => item.status === 'pending')
       .map((item) => {
         const studentProfile: AdminRecord = studentById.get(item.student_id) || { id: '' };
         const user: AdminRecord = userById.get(item.student_id) || { id: '' };
 
-        // Normalize DB document_type for UI display
         const displayDocType =
           item.document_type === 'student_id_card' || item.document_type === 'student_id'
             ? 'Student ID Card'
@@ -298,27 +484,27 @@ class AdminService {
           university: studentProfile.institution || 'Bayero University Kano',
           campus: studentProfile.campus || 'New Campus',
           programme: studentProfile.department || '',
-          studyLevel: studentProfile.study_level || '100L',
+          studyLevel: studentProfile.study_level || '',
           studentEmail: user.email || '',
           submittedAt: displayDate(item.created_at),
           documentType: displayDocType,
-          documentUrl: item.storage_path || item.file_url || item.document_url || '',
+          documentUrl: item.storage_path || '',
+          storage_path: item.storage_path || '',
+          hasUploadedEvidence: Boolean(item.storage_path),
         };
-      });
+      })
+      .sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt));
 
-    // Format landlord verification submissions
     const processedLandlordIds = new Set<string>();
     const formattedLandlords: AdminRecord[] = [];
 
-    // 1. Submissions from landlord_verification_submissions table
     for (const sub of landlordSubmissions) {
-      if (sub.status && sub.status !== 'pending') continue;
+      if (sub.status !== 'pending') continue;
       const landlordId = sub.landlord_id;
       processedLandlordIds.add(landlordId);
 
       const landlordProfile: AdminRecord = landlordById.get(landlordId) || { id: '' };
       const user: AdminRecord = userById.get(landlordId) || { id: '' };
-      const localProfile = repository.getLandlordProfile(landlordId);
 
       const displayDocType =
         sub.document_type === 'national_id'
@@ -333,179 +519,528 @@ class AdminService {
           ? 'Utility Bill'
           : sub.document_type === 'cac_certificate'
           ? 'CAC Certificate'
-          : localProfile?.idType || sub.document_type || 'Identity & Ownership';
+          : sub.document_type || 'Identity & Ownership';
 
       formattedLandlords.push({
         ...sub,
         id: sub.id,
         submissionId: sub.id,
         userId: landlordId,
-        legalName: user.full_name || localProfile?.legalName || landlordProfile.company_name || 'Landlord',
-        businessName: landlordProfile.company_name || localProfile?.businessName || '',
+        legalName: user.full_name || landlordProfile.company_name || 'Landlord',
+        businessName: landlordProfile.company_name || '',
         email: user.email || '',
         idType: displayDocType,
-        idNumber: localProfile?.idReference || landlordProfile.tax_id || sub.id_number || 'Under Review',
-        ownershipDocType: (localProfile as any)?.ownershipDocType || (sub.document_type === 'property_deed' ? 'Property Deed' : 'Document Evidence'),
-        submittedAt: displayDate(sub.created_at || landlordProfile.created_at),
-        documentUrl: sub.storage_path || localProfile?.documentUrl || landlordProfile.document_url || '',
-        storage_path: sub.storage_path || localProfile?.documentUrl || '',
+        idNumber: landlordProfile.tax_id || '',
+        ownershipDocType: sub.file_name || displayDocType,
+        submittedAt: displayDate(sub.created_at),
+        documentUrl: sub.storage_path || '',
+        storage_path: sub.storage_path || '',
+        hasUploadedEvidence: Boolean(sub.storage_path),
       });
     }
 
-    // 2. Pending landlords from landlord_profiles without a separate submission record
+    // Surface pending landlord_profiles that have not yet linked a submission row
     for (const lp of landlords) {
-      if (!['pending', 'not_started'].includes(lp.verification_status)) continue;
+      if (lp.verification_status !== 'pending') continue;
       if (processedLandlordIds.has(lp.user_id)) continue;
 
       const user: AdminRecord = userById.get(lp.user_id) || { id: '' };
-      const localProfile = repository.getLandlordProfile(lp.user_id);
-      const docUrl = lp.document_url || localProfile?.documentUrl || '';
-
       formattedLandlords.push({
         ...lp,
         id: lp.id || lp.user_id,
         submissionId: lp.id || lp.user_id,
         userId: lp.user_id,
-        legalName: user.full_name || localProfile?.legalName || lp.company_name || 'Landlord',
-        businessName: lp.company_name || localProfile?.businessName || '',
+        legalName: user.full_name || lp.company_name || 'Landlord',
+        businessName: lp.company_name || '',
         email: user.email || '',
-        idType: localProfile?.idType || lp.id_type || 'National ID (NIN)',
-        idNumber: localProfile?.idReference || lp.tax_id || lp.id_number || 'Under Review',
-        ownershipDocType: (localProfile as any)?.ownershipDocType || (lp.verification_status === 'not_started' ? 'Pending Document Upload' : 'Submitted Property Deed'),
-        submittedAt: displayDate(lp.created_at || localProfile?.submittedAt),
-        documentUrl: docUrl,
-        storage_path: docUrl,
+        idType: 'Pending Verification Profile',
+        idNumber: lp.tax_id || '',
+        ownershipDocType: 'No document row recorded',
+        submittedAt: displayDate(lp.updated_at || lp.created_at),
+        documentUrl: '',
+        storage_path: '',
+        hasUploadedEvidence: false,
       });
     }
 
     return {
       students: formattedStudents,
-      landlords: formattedLandlords,
+      landlords: formattedLandlords.sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt)),
     };
   }
 
-  public async getProperties(): Promise<AdminRecord[]> {
-    const [properties, locations] = await Promise.all([
-      readSupabaseTable('properties'),
-      readSupabaseTable('property_locations'),
+  async function getProperties(): Promise<AdminRecord[]> {
+    await verifyActiveAdmin();
+
+    const [properties, locations, profiles] = await Promise.all([
+      readTable('properties'),
+      readTable('property_locations'),
+      readTable('profiles', 'id, full_name, email'),
     ]);
 
     const locationByProperty = new Map(locations.map((item) => [item.property_id, item]));
-    return properties.map((property) => ({
-      ...property,
-      submittedLocation: locationByProperty.get(property.id),
-    }));
+    const landlordById = new Map(profiles.map((item) => [item.id, item]));
+
+    return properties
+      .map((property) => {
+        const loc = locationByProperty.get(property.id);
+        const landlord = landlordById.get(property.landlord_id);
+        const approvalStatus = property.approval_status || 'pending';
+        const locStatus = loc?.verification_status || 'not_submitted';
+
+        return {
+          ...property,
+          propertyType: property.property_type || 'Property',
+          verificationStatus: approvalStatus,
+          moderationStatus: approvalStatus === 'archived' ? 'suspended' : approvalStatus,
+          locationVerificationStatus: locStatus,
+          pricePerSession: Number(property.rental_fee_annual ?? 0),
+          neighbourhood: property.area || 'Dambare',
+          landlordName: landlord?.full_name || landlord?.email || property.landlord_id,
+          adminReviewReason: property.rejection_reason || undefined,
+          createdAt: displayDate(property.created_at),
+          images: Array.isArray(property.images) && property.images.length > 0
+            ? property.images
+            : (property.featured_image_url ? [property.featured_image_url] : []),
+          submittedLocation: loc
+            ? {
+                ...loc,
+                area: property.area || 'Dambare',
+                formattedAddress: loc.formatted_address || property.address,
+                verificationStatus: loc.verification_status,
+                publicLocationLabel: loc.directions || loc.formatted_address,
+              }
+            : undefined,
+        };
+      })
+      .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
   }
 
-  public async getReservations(): Promise<AdminRecord[]> {
-    const items = await readSupabaseTable('reservations');
-    return items.sort((a, b) => toMillis(b.created_at) - toMillis(a.created_at));
+  async function getReservations(): Promise<AdminRecord[]> {
+    await verifyActiveAdmin();
+
+    const [items, properties, profiles] = await Promise.all([
+      readTable('reservations'),
+      readTable('properties', 'id, title'),
+      readTable('profiles', 'id, full_name, email'),
+    ]);
+
+    const propMap = new Map(properties.map((p) => [p.id, p.title]));
+    const userMap = new Map(profiles.map((u) => [u.id, u.full_name || u.email]));
+
+    return items
+      .map((item) => ({
+        ...item,
+        reservationNumber: item.id.slice(0, 8).toUpperCase(),
+        propertyTitle: propMap.get(item.property_id) || 'Property',
+        studentId: item.student_id,
+        landlordId: item.landlord_id,
+        studentName: userMap.get(item.student_id) || item.student_id,
+        landlordName: userMap.get(item.landlord_id) || item.landlord_id,
+        holdExpiresAt: displayDate(item.hold_expires_at),
+        createdAt: displayDate(item.created_at),
+      }))
+      .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
   }
 
-  public async getReceipts(): Promise<AdminRecord[]> {
-    return readSupabaseTable('payment_receipts');
+  async function getReceipts(): Promise<AdminRecord[]> {
+    await verifyActiveAdmin();
+
+    const [items, properties, profiles] = await Promise.all([
+      readTable('payment_receipts'),
+      readTable('properties', 'id, title'),
+      readTable('profiles', 'id, full_name, email'),
+    ]);
+
+    const propMap = new Map(properties.map((p) => [p.id, p.title]));
+    const userMap = new Map(profiles.map((u) => [u.id, u.full_name || u.email]));
+
+    return items
+      .map((item) => ({
+        ...item,
+        propertyName: propMap.get(item.property_id) || 'Property',
+        studentId: item.student_id,
+        studentName: userMap.get(item.student_id) || item.student_id,
+        paymentReference: item.payment_reference || '',
+        amountPaid: Number(item.amount_paid ?? 0),
+        uploadedAt: displayDate(item.created_at),
+        storagePath: item.storage_path || '',
+      }))
+      .sort((a, b) => toMillis(b.uploadedAt) - toMillis(a.uploadedAt));
   }
 
-  public async getAuditLogs(): Promise<AuditLog[]> {
-    const items = await readSupabaseTable('audit_logs');
-    return items.map((item) => ({
-      id: item.id,
-      action: item.action || 'AUDIT_EVENT',
-      actorId: item.actor_id || '',
-      actorName: item.actor_name || 'System / Admin',
-      actorRole: (item.actor_role as any) || 'admin',
-      targetEntity: item.resource || 'system',
-      targetId: item.resource_id || '',
-      details: typeof item.details === 'string' ? item.details : JSON.stringify(item.details || {}),
-      timestamp: displayDate(item.created_at),
-    })).sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
-  }
+  async function getSettings(): Promise<Record<string, unknown>> {
+    await verifyActiveAdmin();
 
-  public async getSettings(): Promise<Record<string, unknown>> {
-    try {
-      const { data } = await supabase.from('platform_settings').select('*').limit(1).single();
-      if (data) return data;
-    } catch (err) {
-      console.warn('[AdminService] Could not read platform settings from Supabase:', err);
-    }
-    return { reservationHoldDays: 7, notificationsEnabled: true };
-  }
+    const { data, error } = await client
+      .from('platform_settings')
+      .select('*')
+      .eq('id', 'default')
+      .maybeSingle();
 
-  private async call<T>(name: string, payload: Record<string, unknown>): Promise<T> {
-    const { data, error } = await invokeEdgeFunction<T>(name, payload);
     if (error) {
-      console.warn(`[AdminService] Edge Function notice (${name}):`, error.message);
-      return { success: true, message: 'Processed via Supabase.' } as unknown as T;
+      throw classifySupabaseError(error, 'platform_settings');
     }
-    return data as T;
-  }
 
-  public async setUserStatus(targetId: string, status: 'active' | 'suspended', reason?: string) {
-    const { error } = await supabase.from('profiles').update({ account_status: status }).eq('id', targetId);
-    if (!error) {
-      repository.logAudit({
-        actorId: repository.getActiveUserId(),
-        action: status === 'suspended' ? 'USER_SUSPENDED' : 'USER_ACTIVATED',
-        resource: 'profiles',
-        resourceId: targetId,
-        details: { reason },
-      });
+    if (!data) {
+      return {
+        reservationHoldDays: 7,
+        receiptReviewDeadlineHours: null,
+        notificationsEnabled: true,
+        maintenanceMode: false,
+        studentVerificationRequired: true,
+        landlordVerificationRequired: true,
+        propertyVerificationRequired: true,
+      };
     }
-    return { success: !error };
-  }
 
-  public async reviewVerification(payload: { kind: 'student' | 'landlord'; targetId: string; decision: 'approved' | 'rejected'; reason?: string }) {
-    if (payload.kind === 'student') {
-      return repository.reviewStudentDocument(payload.targetId, payload.decision === 'approved' ? 'approved' : 'rejected', repository.getActiveUserId(), payload.reason);
-    } else {
-      return repository.reviewLandlordVerification(payload.targetId, payload.decision === 'approved' ? 'approved' : 'rejected', repository.getActiveUserId(), payload.reason);
-    }
-  }
-
-  public async reviewProperty(payload: { propertyId: string; decision: 'approve' | 'reject' | 'suspend' | 'reactivate'; reason?: string }) {
-    const statusMap: Record<string, string> = {
-      approve: 'approved',
-      reject: 'rejected',
-      suspend: 'archived',
-      reactivate: 'approved',
+    const nested = (data.settings && typeof data.settings === 'object' ? data.settings : {}) as Record<string, unknown>;
+    return {
+      ...nested,
+      reservationHoldDays: Number(data.reservation_hold_days ?? 7),
+      notificationsEnabled: data.notifications_enabled !== false,
+      maintenanceMode: data.maintenance_mode === true,
+      updatedAt: data.updated_at,
     };
-    const targetStatus = statusMap[payload.decision] || 'pending';
-    const { error } = await supabase.from('properties').update({ approval_status: targetStatus }).eq('id', payload.propertyId);
-    return { success: !error };
   }
 
-  public async reviewPropertyLocation(payload: { propertyId: string; decision: 'verified' | 'rejected'; reason?: string }) {
-    const property = (await this.getProperties()).find((item) => item.id === payload.propertyId);
-    const location = property?.submittedLocation;
-    if (!location) throw new Error('No location submission is available for this property.');
-    if (payload.decision === 'rejected') {
-      if (!payload.reason?.trim()) throw new Error('A reason is required to reject a location.');
-      const { error } = await supabase.from('property_locations').update({ verification_status: 'rejected' }).eq('property_id', payload.propertyId);
-      return { success: !error };
+  async function setUserStatus(targetId: string, status: 'active' | 'suspended', reason?: string) {
+    const admin = await verifyActiveAdmin();
+    if (status === 'suspended' && (!reason || reason.trim().length < 5)) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A suspension reason of at least 5 characters is required.');
     }
-    const coordinates = computePublicCoordinates(Number(location.latitude), Number(location.longitude), location.precision || 'nearby_building', location.area, payload.propertyId);
-    const { error } = await supabase.from('property_locations').update({
-      verification_status: 'verified',
-      public_latitude: coordinates.publicLatitude,
-      public_longitude: coordinates.publicLongitude,
-    }).eq('property_id', payload.propertyId);
-    return { success: !error };
-  }
 
-  public async saveSettings(settings: Record<string, unknown>) {
-    const { error } = await supabase.from('platform_settings').upsert({ id: 'default', ...settings });
-    return { success: !error };
-  }
-
-  public async recordSecurityEvent(event: 'ADMIN_LOGIN' | 'ADMIN_LOGOUT') {
-    repository.logAudit({
-      actorId: repository.getActiveUserId(),
-      action: event,
-      resource: 'auth',
-      details: { timestamp: new Date().toISOString() },
+    const { data, error } = await client.rpc('admin_set_user_status', {
+      p_target_id: targetId,
+      p_status: status,
+      p_reason: reason?.trim() || null,
     });
+
+    if (error) {
+      if (!isRpcMissingError(error)) {
+        throw classifySupabaseError(error, 'profiles');
+      }
+
+      // Direct RLS-enforced fallback if Migration 07 RPC is not yet pushed
+      const { error: updateErr } = await client
+        .from('profiles')
+        .update({ account_status: status, updated_at: new Date().toISOString() })
+        .eq('id', targetId);
+      if (updateErr) throw classifySupabaseError(updateErr, 'profiles');
+
+      await client.from('audit_logs').insert({
+        actor_id: admin.id,
+        action: status === 'suspended' ? 'ADMIN_SUSPEND_USER' : 'ADMIN_ACTIVATE_USER',
+        entity_type: 'profiles',
+        entity_id: targetId,
+        details: { status, reason: reason?.trim() || null },
+      });
+
+      return { success: true };
+    }
+
+    return data || { success: true };
+  }
+
+  async function reviewVerification(payload: {
+    kind: 'student' | 'landlord';
+    targetId: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+  }) {
+    const admin = await verifyActiveAdmin();
+    if (payload.decision === 'rejected' && (!payload.reason || payload.reason.trim().length < 3)) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A rejection reason is required.');
+    }
+
+    if (payload.kind === 'student') {
+      const { data, error } = await client.rpc('admin_review_student_verification', {
+        p_doc_id: payload.targetId,
+        p_decision: payload.decision,
+        p_reason: payload.reason?.trim() || null,
+      });
+
+      if (error) {
+        if (!isRpcMissingError(error)) {
+          throw classifySupabaseError(error, 'student_verification_documents');
+        }
+        const nowIso = new Date().toISOString();
+        const { data: docRow, error: updErr } = await client
+          .from('student_verification_documents')
+          .update({
+            status: payload.decision,
+            reviewer_id: admin.id,
+            reviewed_at: nowIso,
+            rejection_reason: payload.decision === 'rejected' ? payload.reason?.trim() || null : null,
+          })
+          .eq('id', payload.targetId)
+          .select('student_id')
+          .single();
+
+        if (updErr) throw classifySupabaseError(updErr, 'student_verification_documents');
+
+        if (payload.decision === 'approved' && docRow?.student_id) {
+          await client
+            .from('student_profiles')
+            .update({ is_profile_verified: true, verification_date: nowIso })
+            .eq('user_id', docRow.student_id);
+        }
+
+        return { success: true, id: payload.targetId, status: payload.decision };
+      }
+      return data || { success: true };
+    } else {
+      const { data, error } = await client.rpc('admin_review_landlord_verification', {
+        p_target_id: payload.targetId,
+        p_decision: payload.decision,
+        p_reason: payload.reason?.trim() || null,
+      });
+
+      if (error) {
+        if (!isRpcMissingError(error)) {
+          throw classifySupabaseError(error, 'landlord_profiles');
+        }
+        const nowIso = new Date().toISOString();
+        const { error: lpErr } = await client
+          .from('landlord_profiles')
+          .update({
+            verification_status: payload.decision,
+            verified_by: admin.id,
+            verified_at: nowIso,
+            rejection_reason: payload.decision === 'rejected' ? payload.reason?.trim() || null : null,
+          })
+          .eq('user_id', payload.targetId);
+        if (lpErr) throw classifySupabaseError(lpErr, 'landlord_profiles');
+
+        await client
+          .from('landlord_verification_submissions')
+          .update({
+            status: payload.decision,
+            reviewer_id: admin.id,
+            reviewed_at: nowIso,
+            rejection_reason: payload.decision === 'rejected' ? payload.reason?.trim() || null : null,
+          })
+          .eq('landlord_id', payload.targetId);
+
+        return { success: true, landlordId: payload.targetId, status: payload.decision };
+      }
+
+      return data || { success: true };
+    }
+  }
+
+  async function reviewProperty(payload: {
+    propertyId: string;
+    decision: 'approve' | 'reject' | 'suspend' | 'reactivate';
+    reason?: string;
+  }) {
+    const admin = await verifyActiveAdmin();
+    if ((payload.decision === 'reject' || payload.decision === 'suspend') && (!payload.reason || payload.reason.trim().length < 3)) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A moderation reason is required.');
+    }
+
+    const { data, error } = await client.rpc('admin_review_property', {
+      p_property_id: payload.propertyId,
+      p_decision: payload.decision,
+      p_reason: payload.reason?.trim() || null,
+    });
+
+    if (error) {
+      if (!isRpcMissingError(error)) {
+        throw classifySupabaseError(error, 'properties');
+      }
+
+      const statusMap: Record<string, { approval_status: string; is_published: boolean }> = {
+        approve: { approval_status: 'approved', is_published: true },
+        reject: { approval_status: 'rejected', is_published: false },
+        suspend: { approval_status: 'archived', is_published: false },
+        reactivate: { approval_status: 'approved', is_published: true },
+      };
+      const mapped = statusMap[payload.decision];
+      if (!mapped) throw new AdminServiceError('VALIDATION_ERROR', `Unsupported decision: ${payload.decision}`);
+
+      const { error: updErr } = await client
+        .from('properties')
+        .update({
+          approval_status: mapped.approval_status,
+          is_published: mapped.is_published,
+          approved_at: mapped.is_published ? new Date().toISOString() : null,
+          approved_by: mapped.is_published ? admin.id : null,
+          rejection_reason: mapped.is_published ? null : payload.reason?.trim() || null,
+        })
+        .eq('id', payload.propertyId);
+      if (updErr) throw classifySupabaseError(updErr, 'properties');
+
+      return { success: true };
+    }
+
+    return data || { success: true };
+  }
+
+  async function reviewPropertyLocation(payload: {
+    propertyId: string;
+    decision: 'verified' | 'approved' | 'rejected';
+    reason?: string;
+  }) {
+    const admin = await verifyActiveAdmin();
+    // PostgreSQL verification_status ENUM uses 'approved' | 'rejected' (UI labels it 'verified')
+    const dbDecision: 'approved' | 'rejected' = payload.decision === 'rejected' ? 'rejected' : 'approved';
+
+    if (dbDecision === 'rejected' && (!payload.reason || payload.reason.trim().length < 3)) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A reason is required to reject a property location.');
+    }
+
+    const { data: location, error: locFetchErr } = await client
+      .from('property_locations')
+      .select('*, properties(area)')
+      .eq('property_id', payload.propertyId)
+      .maybeSingle();
+
+    if (locFetchErr) {
+      throw classifySupabaseError(locFetchErr, 'property_locations');
+    }
+    if (!location) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'No location submission is available for this property.');
+    }
+
+    let pubLat: number | null = null;
+    let pubLng: number | null = null;
+    if (dbDecision === 'approved') {
+      const area = (location.properties as any)?.area || 'Dambare';
+      const coords = computePublicCoordinates(
+        Number(location.latitude),
+        Number(location.longitude),
+        location.precision || 'nearby_building',
+        area,
+        payload.propertyId
+      );
+      pubLat = coords.publicLatitude;
+      pubLng = coords.publicLongitude;
+    }
+
+    const { data, error } = await client.rpc('admin_review_property_location', {
+      p_property_id: payload.propertyId,
+      p_decision: dbDecision,
+      p_public_latitude: pubLat,
+      p_public_longitude: pubLng,
+      p_reason: payload.reason?.trim() || null,
+    });
+
+    if (error) {
+      if (!isRpcMissingError(error)) {
+        throw classifySupabaseError(error, 'property_locations');
+      }
+
+      const { error: updErr } = await client
+        .from('property_locations')
+        .update({
+          verification_status: dbDecision,
+          public_latitude: pubLat,
+          public_longitude: pubLng,
+          reviewed_by: admin.id,
+          reviewed_at: new Date().toISOString(),
+          rejection_reason: dbDecision === 'rejected' ? payload.reason?.trim() || null : null,
+        })
+        .eq('property_id', payload.propertyId);
+      if (updErr) throw classifySupabaseError(updErr, 'property_locations');
+
+      return { success: true };
+    }
+
+    return data || { success: true };
+  }
+
+  async function saveSettings(input: Record<string, unknown>) {
+    const admin = await verifyActiveAdmin();
+
+    const reservationHoldDays = Math.min(7, Math.max(1, Number(input.reservationHoldDays ?? 7)));
+    const maintenanceMode = input.maintenanceMode === true;
+    const notificationsEnabled = input.notificationsEnabled !== false;
+
+    const nestedSettings = {
+      receiptReviewDeadlineHours:
+        input.receiptReviewDeadlineHours === '' || input.receiptReviewDeadlineHours == null
+          ? null
+          : Number(input.receiptReviewDeadlineHours),
+      studentVerificationRequired: input.studentVerificationRequired !== false,
+      landlordVerificationRequired: input.landlordVerificationRequired !== false,
+      propertyVerificationRequired: input.propertyVerificationRequired !== false,
+    };
+
+    const { error } = await client.from('platform_settings').upsert(
+      {
+        id: 'default',
+        reservation_hold_days: reservationHoldDays,
+        maintenance_mode: maintenanceMode,
+        notifications_enabled: notificationsEnabled,
+        settings: nestedSettings,
+        updated_at: new Date().toISOString(),
+        updated_by: admin.id,
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      throw classifySupabaseError(error, 'platform_settings');
+    }
+
+    await client.from('audit_logs').insert({
+      actor_id: admin.id,
+      action: 'ADMIN_UPDATE_SETTINGS',
+      entity_type: 'platform_settings',
+      entity_id: 'default',
+      details: {
+        reservationHoldDays,
+        maintenanceMode,
+        notificationsEnabled,
+        ...nestedSettings,
+      },
+    });
+
     return { success: true };
   }
+
+  async function recordSecurityEvent(event: 'ADMIN_LOGIN' | 'ADMIN_LOGOUT') {
+    try {
+      const { data } = await client.auth.getUser();
+      const actorId = data?.user?.id || null;
+      if (!actorId) return { success: false };
+
+      const { error } = await client.from('audit_logs').insert({
+        actor_id: actorId,
+        action: event,
+        entity_type: 'auth',
+        entity_id: actorId,
+        details: { timestamp: new Date().toISOString() },
+      });
+      if (error) {
+        console.warn('[AdminService] Could not record security event:', error.message);
+        return { success: false };
+      }
+      return { success: true };
+    } catch {
+      return { success: false };
+    }
+  }
+
+  return {
+    verifyActiveAdmin,
+    getAdminMetrics,
+    getDashboardData,
+    getUsers,
+    getVerificationQueues,
+    getProperties,
+    getReservations,
+    getReceipts,
+    getAuditLogs,
+    getSettings,
+    setUserStatus,
+    reviewVerification,
+    reviewProperty,
+    reviewPropertyLocation,
+    saveSettings,
+    recordSecurityEvent,
+  };
 }
 
-export const adminService = new AdminService();
+export const adminService = createAdminService();

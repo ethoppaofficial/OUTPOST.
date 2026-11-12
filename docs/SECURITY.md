@@ -52,23 +52,27 @@ The system supports three strict roles: `student`, `landlord`, and `admin`.
 The frontend client application is treated as completely untrusted:
 1. **Self-Promotion Prevention**:
    - Direct SQL updates to `profiles.role` or `profiles.account_status` are blocked by PostgreSQL trigger `protect_profile_immutable_fields`.
-   - Only database operations executing with `service_role` or verified administrators can elevate user roles or alter verification status.
-2. **Student Self-Verification Prevention**:
-   - Trigger `protect_student_profile_immutable_fields` raises an exception if a student attempts to set `is_profile_verified = true` via direct database write.
-3. **No Admin Persona Switcher**:
-   - There are no client-side admin toggles, demo administrator logins, or backdoor bypasses in the codebase. Admin status requires server-side verification.
+   - Only database operations executing with `service_role` or verified active administrators can elevate user roles or alter verification status.
+2. **Active Administrator Verification**:
+   - `public.is_admin()` (`SECURITY DEFINER`, `SET search_path = public, auth, pg_temp`) requires a matching row in `public.profiles` with `id = auth.uid()`, `role = 'admin'`, AND `account_status = 'active'`.
+   - `adminService` and `AuthContext` fail closed if a session is unauthenticated, non-admin, or non-active/suspended, and never restore stale cached user IDs or query local mock fixtures.
+3. **Student & Landlord Self-Verification Prevention**:
+   - Trigger `protect_student_profile_immutable_fields` raises an exception if a student attempts to set `is_profile_verified = true`.
+   - Trigger `protect_landlord_profile_immutable_fields` allows `not_started`/`rejected` → `pending` solely when backed by a real row in `landlord_verification_submissions`, and blocks self-approval.
+4. **No Admin Persona Switcher or Hardcoded Credentials**:
+   - There are no client-side admin toggles, demo administrator quick-fill logins, or hardcoded email privilege checks anywhere in the codebase.
 
 ---
 
 ## 4. Database & Row Level Security (RLS) Enforcement
 
-RLS is enabled on **all 23 tables** in `public`. Default behavior without an explicit matching policy is complete denial of access.
+RLS is enabled on all tables in `public` (and enforced with `FORCE ROW LEVEL SECURITY` on sensitive tables). Default behavior without an explicit matching policy is complete denial of access.
 
 ### Critical RLS Invariants
 - **Student Data Isolation**: Students can only read and mutate their own profile, preferences, requests, and reservations (`auth.uid() = student_id`).
 - **Landlord Data Isolation**: Landlords can only manage properties, units, and review receipts associated with their own landlord account (`auth.uid() = landlord_id`). Cross-landlord receipt access is blocked.
 - **Conversation Isolation**: Messages and chat threads are strictly restricted to users registered in `conversation_participants` for that specific `conversation_id`.
-- **Property Location Privacy**: The table `property_locations` containing raw device GPS points has RLS restricting read access exclusively to the owning landlord and administrators. Students can never query exact landlord coordinates.
+- **Property Location Privacy**: The table `property_locations` containing raw device GPS points has RLS restricting read access exclusively to the owning landlord and active administrators (`public.is_admin()`). Students can never query exact landlord coordinates.
 
 ---
 
@@ -86,10 +90,12 @@ Media and documents are partitioned across 6 Supabase Storage buckets:
 | `profile-pictures` | Public | `image/jpeg`, `image/png`, `image/webp` | 2 MB | `{userId}/{fileName}` |
 
 ### Signed URL Access Gate
-Private documents (`student-docs`, `landlord-docs`, `payment-receipts`, `chat-attachments`) cannot be accessed through public CDN URLs. Any download request must go through the `get-private-asset-url` Edge Function, which:
-1. Validates the caller's JWT.
-2. Checks that the caller is the student owner, property landlord, conversation peer, or administrator.
-3. Generates a signed URL expiring in **900 seconds (15 minutes)**.
+Private documents (`student-docs`, `landlord-docs`, `payment-receipts`, `chat-attachments`) remain private and cannot be accessed through public CDN URLs or direct client-side `createSignedUrl` calls. All download/preview requests route through the `get-private-asset-url` Edge Function, which:
+1. Validates the caller's JWT and checks `UUID_REGEX` on `recordId` with parameterized queries (zero `.or()` string interpolation).
+2. Verifies the caller is non-suspended and is either the authorized owner/participant or an active administrator (`role = 'admin' AND account_status = 'active'`).
+3. Generates a signed URL expiring in **900 seconds (15 minutes)** rendered inline in the UI (`rel="noopener noreferrer"`).
+4. Records an immutable `ADMIN_VIEW_PRIVATE_EVIDENCE` / `VIEW_PRIVATE_EVIDENCE` entry in `public.audit_logs`.
+5. If client database metadata insertion fails after a private Storage upload, `deletePrivateAsset()` rolls back the uploaded blob so orphaned files do not accumulate.
 
 ---
 
