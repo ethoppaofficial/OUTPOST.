@@ -54,8 +54,8 @@ export const AdminReportsPage: React.FC = () => {
             <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-800/70">
               <tr>
                 <th className="p-3">Measure</th>
-                <th className="p-3">Authoritative Source Table</th>
-                <th className="p-3">Filter / Definition</th>
+                {/* <th className="p-3">Authoritative Source Table</th> */}
+                {/* <th className="p-3">Filter / Definition</th> */}
                 <th className="p-3 text-right">Live Count</th>
               </tr>
             </thead>
@@ -63,8 +63,8 @@ export const AdminReportsPage: React.FC = () => {
               {ADMIN_METRICS_METADATA.map((def) => (
                 <tr key={def.key}>
                   <td className="p-3 font-medium text-slate-900 dark:text-white">{def.label}</td>
-                  <td className="p-3 font-mono text-xs text-slate-600 dark:text-slate-300">{def.sourceTable}</td>
-                  <td className="p-3 text-xs text-slate-500 dark:text-slate-400">{def.filterDescription}</td>
+                  {/* <td className="p-3 font-mono text-xs text-slate-600 dark:text-slate-300">{def.sourceTable}</td> */}
+                  {/* <td className="p-3 text-xs text-slate-500 dark:text-slate-400">{def.filterDescription}</td> */}
                   <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
                     {activeMetrics[def.key].toLocaleString()}
                   </td>
