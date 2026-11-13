@@ -33,7 +33,7 @@ import {
 import { useAdminData } from '../../application/hooks/useAdminData';
 import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
 
-const primaryCards: Array<{ key: keyof AdminMetrics; label: string; subtitle: string; icon: any }> = [
+const primaryCards: Array<{ key: keyof AdminMetrics; label: string; subtitle?: string; icon: any }> = [
   { key: 'totalUsers', label: 'Registered users', icon: Users },
   { key: 'totalNonAdminUsers', label: 'Non-admin users', icon: Users },
   { key: 'totalStudents', label: 'Registered students', icon: Users },
@@ -145,7 +145,7 @@ export const AdminDashboard: React.FC = () => {
                 <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                   {metrics[key].toLocaleString()}
                 </div>
-                <p className="mt-1 font-mono text-[10px] text-slate-400">{subtitle}</p>
+                {subtitle && <p className="mt-1 font-mono text-[10px] text-slate-400">{subtitle}</p>}
               </div>
             ))}
           </section>

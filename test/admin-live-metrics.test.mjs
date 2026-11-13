@@ -8,6 +8,7 @@ import {
   AdminServiceError,
   ADMIN_METRICS_METADATA,
 } from '../src/application/services/adminService.ts';
+import { isEdgeFunctionUnavailableError } from '../src/infrastructure/supabase/supabaseClient.ts';
 
 /**
  * Builds a minimal mock Supabase client that supports:
@@ -70,6 +71,9 @@ function createMockSupabaseClient({
         },
         lte(col, val) {
           filters.push((row) => String(row?.[col] ?? '') <= String(val));
+          return builder;
+        },
+        order() {
           return builder;
         },
         update() {
@@ -540,6 +544,198 @@ describe('OUTPOST: Administrator Live Metrics, Fail-Closed Auth & Regression Sui
       ]) {
         assert.ok(content.includes(symbol), `Migration 07 must define ${symbol}`);
       }
+    });
+  });
+
+  describe('5. Admin User Profile Inspection & Edge Function Fallback Detection', () => {
+    test('adminService.getUserProfileDetails returns full student profile, preferences, documents, and reservations', async () => {
+      const studentId = '33333333-3333-4333-8333-333333333333';
+      const client = createMockSupabaseClient({
+        tables: {
+          profiles: [
+            ACTIVE_ADMIN_ROW,
+            {
+              id: studentId,
+              email: 'aminu@buk.edu.ng',
+              full_name: 'Aminu Kano',
+              phone: '+2348000000001',
+              role: 'student',
+              account_status: 'active',
+              created_at: '2026-11-01T10:00:00.000Z',
+            },
+          ],
+          student_profiles: [
+            {
+              user_id: studentId,
+              registration_number: 'CST/21/COM/00123',
+              institution: 'Bayero University Kano',
+              campus: 'New Campus',
+              faculty: 'Computing',
+              department: 'Computer Science',
+              study_level: '400L',
+              gender: 'male',
+              is_profile_verified: true,
+            },
+          ],
+          roommate_preferences: [
+            {
+              student_id: studentId,
+              budget_min: 150000,
+              budget_max: 300000,
+              preferred_area: ['Dambare'],
+              sleep_habit: 'early_bird',
+              study_habit: 'quiet_study',
+            },
+          ],
+          student_verification_documents: [
+            {
+              id: 'doc-1',
+              student_id: studentId,
+              document_type: 'student_id',
+              file_name: 'buk-id.png',
+              storage_path: `${studentId}/buk-id.png`,
+              status: 'approved',
+            },
+          ],
+          reservations: [
+            {
+              id: 'res-1111-2222',
+              student_id: studentId,
+              landlord_id: '44444444-4444-4444-8444-444444444444',
+              property_id: 'prop-99',
+              amount: 450000,
+              status: 'pending_payment',
+              hold_expires_at: '2026-11-20T10:00:00.000Z',
+              created_at: '2026-11-13T10:00:00.000Z',
+            },
+          ],
+          properties: [{ id: 'prop-99', title: 'Ethoppa Property' }],
+        },
+      });
+
+      const details = await createAdminService({ client }).getUserProfileDetails(studentId);
+      assert.equal(details.user.id, studentId);
+      assert.equal(details.user.role, 'student');
+      assert.equal(details.studentProfile?.registration_number, 'CST/21/COM/00123');
+      assert.equal(details.roommatePreferences?.budget_max, 300000);
+      assert.equal(details.studentDocuments.length, 1);
+      assert.equal(details.reservations.length, 1);
+      assert.equal(details.reservations[0].propertyTitle, 'Ethoppa Property');
+    });
+
+    test('adminService.getUserProfileDetails returns full landlord profile, KYC submissions, properties, and reservations', async () => {
+      const landlordId = '44444444-4444-4444-8444-444444444444';
+      const client = createMockSupabaseClient({
+        tables: {
+          profiles: [
+            ACTIVE_ADMIN_ROW,
+            {
+              id: landlordId,
+              email: 'ibrahim@ethoppa.ng',
+              full_name: 'Ibrahim Itopa',
+              phone: '+2348000000002',
+              role: 'landlord',
+              account_status: 'active',
+              created_at: '2026-11-01T10:00:00.000Z',
+            },
+          ],
+          landlord_profiles: [
+            {
+              user_id: landlordId,
+              company_name: 'Ethoppa Property 1',
+              business_address: 'Dambare Road, Kano',
+              tax_id: '221123456789',
+              bank_name: 'Access Bank',
+              bank_account_name: 'Ibrahim Itopa',
+              bank_account_number: '0123456789',
+              verification_status: 'pending',
+            },
+          ],
+          landlord_verification_submissions: [
+            {
+              id: 'sub-1',
+              landlord_id: landlordId,
+              document_type: 'national_id',
+              file_name: 'nin.pdf',
+              storage_path: `${landlordId}/nin.pdf`,
+              status: 'pending',
+            },
+          ],
+          properties: [
+            {
+              id: 'prop-99',
+              landlord_id: landlordId,
+              title: 'Ethoppa Property',
+              area: 'Dambare',
+              property_type: 'self_con',
+              rental_fee_annual: 450000,
+              available_spaces: 2,
+              total_spaces: 4,
+              approval_status: 'approved',
+              is_published: true,
+            },
+          ],
+          reservations: [
+            {
+              id: 'res-1111-2222',
+              student_id: '33333333-3333-4333-8333-333333333333',
+              landlord_id: landlordId,
+              property_id: 'prop-99',
+              amount: 450000,
+              status: 'pending_payment',
+              hold_expires_at: '2026-11-20T10:00:00.000Z',
+              created_at: '2026-11-13T10:00:00.000Z',
+            },
+          ],
+        },
+      });
+
+      const details = await createAdminService({ client }).getUserProfileDetails(landlordId);
+      assert.equal(details.user.id, landlordId);
+      assert.equal(details.user.role, 'landlord');
+      assert.equal(details.landlordProfile?.company_name, 'Ethoppa Property 1');
+      assert.equal(details.landlordSubmissions.length, 1);
+      assert.equal(details.properties.length, 1);
+      assert.equal(details.reservations.length, 1);
+      assert.equal(details.reservations[0].propertyTitle, 'Ethoppa Property');
+    });
+
+    test('adminService.getUserProfileDetails fails closed for non-admin callers', async () => {
+      const studentId = '33333333-3333-4333-8333-333333333333';
+      const client = createMockSupabaseClient({
+        authUser: { id: studentId, email: 'student@buk.edu.ng' },
+        tables: {
+          profiles: [{ id: studentId, email: 'student@buk.edu.ng', role: 'student', account_status: 'active' }],
+        },
+      });
+
+      await assert.rejects(
+        () => createAdminService({ client }).getUserProfileDetails(studentId),
+        (err) => err instanceof AdminServiceError && err.code === 'FORBIDDEN_ROLE'
+      );
+    });
+
+    test('isEdgeFunctionUnavailableError identifies undeployed Edge Function fetch/404 errors without masking business errors', () => {
+      assert.equal(
+        isEdgeFunctionUnavailableError(new Error('Failed to send a request to the Edge Function')),
+        true
+      );
+      assert.equal(
+        isEdgeFunctionUnavailableError(new Error('FunctionsFetchError: Edge Function failed (status 404)')),
+        true
+      );
+      assert.equal(
+        isEdgeFunctionUnavailableError({ code: 'NOT_FOUND', message: 'Requested function was not found' }),
+        true
+      );
+      assert.equal(
+        isEdgeFunctionUnavailableError(new Error('You already have an active reservation')),
+        false
+      );
+      assert.equal(
+        isEdgeFunctionUnavailableError(new Error('No available spaces remaining')),
+        false
+      );
     });
   });
 });

@@ -17,7 +17,7 @@
  *   (`request-receipt-upload`, `finalize-receipt-upload`) ensuring validation before database registration.
  */
 
-import { supabase, invokeEdgeFunction } from './supabaseClient';
+import { supabase, invokeEdgeFunction, isEdgeFunctionUnavailableError } from './supabaseClient';
 
 export interface SupabaseFileUploadResult {
   url: string;
@@ -324,6 +324,75 @@ export class SupabaseStorageService {
       fileSize: params.file.size,
     });
 
+    if (sessionError && isEdgeFunctionUnavailableError(sessionError)) {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      const studentId = authData?.user?.id;
+      if (authErr || !studentId) {
+        throw new Error('Please sign in as the reservation student before uploading a receipt.');
+      }
+
+      const { data: reservation, error: resErr } = await supabase
+        .from('reservations')
+        .select('id, student_id, landlord_id, property_id, status, amount')
+        .eq('id', params.reservationId)
+        .single();
+
+      if (resErr || !reservation) {
+        throw new Error('Reservation record could not be verified for receipt upload.');
+      }
+
+      const { data: invoiceRow } = await supabase
+        .from('invoices')
+        .select('id')
+        .eq('reservation_id', params.reservationId)
+        .maybeSingle();
+
+      const receiptId = crypto.randomUUID();
+      const storagePath = `${reservation.landlord_id}/${studentId}/${params.reservationId}/${receiptId}/${cleanName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('payment-receipts')
+        .upload(storagePath, params.file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`Failed to upload receipt file: ${uploadError.message}`);
+      }
+
+      const { error: insertError } = await supabase.from('payment_receipts').insert({
+        id: receiptId,
+        reservation_id: params.reservationId,
+        invoice_id: invoiceRow?.id ?? null,
+        student_id: studentId,
+        landlord_id: reservation.landlord_id,
+        property_id: reservation.property_id,
+        storage_path: storagePath,
+        file_name: cleanName,
+        content_type: contentType,
+        file_size: params.file.size,
+        amount_paid: params.amountPaid,
+        payment_reference: params.paymentReference || 'DIRECT_TRANSFER',
+        payer_bank_name: params.payerBankName || 'Bank',
+        payment_date: params.paymentDate || new Date().toISOString(),
+        status: 'pending_review',
+      });
+
+      if (insertError) {
+        await this.deletePrivateAsset('payment-receipts', storagePath);
+        throw new Error(`Failed to record payment receipt metadata: ${insertError.message}`);
+      }
+
+      return {
+        receiptId,
+        storagePath,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+      };
+    }
+
     if (sessionError || !sessionData?.receiptId) {
       throw new Error(`Failed to initialize receipt upload: ${sessionError?.message || 'Unknown session error'}`);
     }
@@ -357,6 +426,7 @@ export class SupabaseStorageService {
     });
 
     if (finalizeError) {
+      await this.deletePrivateAsset('payment-receipts', storagePath);
       throw new Error(`Failed to finalize receipt upload: ${finalizeError.message}`);
     }
 
@@ -470,11 +540,83 @@ export class SupabaseStorageService {
       recordId,
     });
 
-    if (error || !data?.downloadUrl) {
-      throw new Error(`Could not retrieve private asset URL: ${error?.message || 'Access denied'}`);
+    if (!error && data?.downloadUrl) {
+      return data.downloadUrl;
     }
 
-    return data.downloadUrl;
+    if (error && isEdgeFunctionUnavailableError(error)) {
+      const cleanId = (recordId || '').trim();
+      let bucketName: 'payment-receipts' | 'chat-attachments' | 'student-docs' | 'landlord-docs' | '' = '';
+      let rawPath = '';
+
+      if (assetType === 'payment-receipt') {
+        const { data: row } = await supabase
+          .from('payment_receipts')
+          .select('storage_path')
+          .eq('id', cleanId)
+          .maybeSingle();
+        bucketName = 'payment-receipts';
+        rawPath = row?.storage_path || '';
+      } else if (assetType === 'chat-attachment') {
+        const { data: row } = await supabase
+          .from('messages')
+          .select('attachment')
+          .eq('id', cleanId)
+          .maybeSingle();
+        bucketName = 'chat-attachments';
+        rawPath = (row as any)?.attachment?.storage_path || '';
+      } else if (assetType === 'student-document') {
+        let { data: row } = await supabase
+          .from('student_verification_documents')
+          .select('storage_path')
+          .eq('id', cleanId)
+          .maybeSingle();
+        if (!row) {
+          const fallback = await supabase
+            .from('student_verification_documents')
+            .select('storage_path')
+            .eq('student_id', cleanId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          row = fallback.data;
+        }
+        bucketName = 'student-docs';
+        rawPath = row?.storage_path || '';
+      } else if (assetType === 'landlord-document') {
+        let { data: row } = await supabase
+          .from('landlord_verification_submissions')
+          .select('storage_path')
+          .eq('id', cleanId)
+          .maybeSingle();
+        if (!row) {
+          const fallback = await supabase
+            .from('landlord_verification_submissions')
+            .select('storage_path')
+            .eq('landlord_id', cleanId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          row = fallback.data;
+        }
+        bucketName = 'landlord-docs';
+        rawPath = row?.storage_path || '';
+      }
+
+      if (bucketName && rawPath) {
+        const normalizedPath = rawPath.startsWith(`${bucketName}/`)
+          ? rawPath.slice(bucketName.length + 1)
+          : rawPath;
+        const { data: signedData, error: signErr } = await supabase.storage
+          .from(bucketName)
+          .createSignedUrl(normalizedPath, 900);
+        if (!signErr && signedData?.signedUrl) {
+          return signedData.signedUrl;
+        }
+      }
+    }
+
+    throw new Error(`Could not retrieve private asset URL: ${error?.message || 'Access denied'}`);
   }
 
   /**

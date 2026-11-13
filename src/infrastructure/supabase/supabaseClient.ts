@@ -34,6 +34,24 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+export function isEdgeFunctionUnavailableError(error: unknown): boolean {
+  const raw =
+    error instanceof Error
+      ? `${error.name} ${error.message}`
+      : typeof error === 'string'
+      ? error
+      : JSON.stringify(error || '');
+  const lower = raw.toLowerCase();
+  return (
+    lower.includes('failed to send a request to the edge function') ||
+    lower.includes('requested function was not found') ||
+    lower.includes('functionsfetcherror') ||
+    lower.includes('not_found') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('status 404')
+  );
+}
+
 /**
  * Invoke a Supabase Edge Function securely passing the authenticated user's session token.
  */
@@ -46,7 +64,15 @@ export async function invokeEdgeFunction<T = any>(
       body,
     });
     if (error) {
-      return { data: null, error: new Error(error.message || `Edge Function ${functionName} failed`) };
+      const status = (error as any)?.context?.status;
+      const baseMessage = error.message || `Edge Function ${functionName} failed`;
+      const enrichedMessage =
+        typeof status === 'number' && !baseMessage.includes(String(status))
+          ? `${baseMessage} (status ${status})`
+          : baseMessage;
+      const wrapped = new Error(enrichedMessage);
+      wrapped.name = error.name || wrapped.name;
+      return { data: null, error: wrapped };
     }
     return { data, error: null };
   } catch (err: any) {

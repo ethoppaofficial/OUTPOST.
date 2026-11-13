@@ -5,13 +5,61 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Ban, Search, ShieldCheck, UserCheck } from 'lucide-react';
-import { adminService, AdminUser } from '../../application/services/adminService';
+import {
+  Ban,
+  Building2,
+  CalendarCheck,
+  ExternalLink,
+  Eye,
+  FileCheck2,
+  GraduationCap,
+  Loader2,
+  Mail,
+  Phone,
+  Search,
+  ShieldCheck,
+  UserCheck,
+} from 'lucide-react';
+import {
+  adminService,
+  AdminRecord,
+  AdminUser,
+  AdminUserProfileDetails,
+} from '../../application/services/adminService';
+import { storageService } from '../../application/services/storageService';
 import { useAdminData } from '../../application/hooks/useAdminData';
-import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
 import { UserRole } from '../../domain/types';
+import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
 import { Badge, VerificationBadge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
+
+type EvidencePreviewKind = 'image' | 'pdf' | null;
+
+function getEvidencePreviewKind(item: AdminRecord): EvidencePreviewKind {
+  const contentType = String(item.content_type || item.contentType || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+  if (contentType) {
+    if (contentType === 'application/pdf') return 'pdf';
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) return 'image';
+    return null;
+  }
+
+  const extension = String(item.file_name || item.fileName || '')
+    .toLowerCase()
+    .split('.')
+    .pop();
+  if (extension === 'pdf') return 'pdf';
+  if (['jpg', 'jpeg', 'png', 'webp'].includes(extension || '')) return 'image';
+  return null;
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return 'Not recorded';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'Not recorded' : parsed.toLocaleString();
+}
 
 export const UsersPage: React.FC = () => {
   const {
@@ -34,6 +82,19 @@ export const UsersPage: React.FC = () => {
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [reason, setReason] = useState('');
 
+  // Profile viewer modal state
+  const [viewingUser, setViewingUser] = useState<AdminUser | null>(null);
+  const [profileDetails, setProfileDetails] = useState<AdminUserProfileDetails | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
+  const [signedPreview, setSignedPreview] = useState<{
+    id: string;
+    url: string;
+    fileName?: string;
+    previewKind: EvidencePreviewKind;
+  } | null>(null);
+
   const users = !loadError && usersData ? usersData : [];
 
   const filtered = useMemo(
@@ -53,6 +114,51 @@ export const UsersPage: React.FC = () => {
     [users, search, roleFilter]
   );
 
+  const openProfileModal = async (user: AdminUser) => {
+    setViewingUser(user);
+    setProfileDetails(null);
+    setProfileError(null);
+    setSignedPreview(null);
+    setProfileLoading(true);
+    try {
+      const details = await adminService.getUserProfileDetails(user.id);
+      setProfileDetails(details);
+    } catch (cause) {
+      setProfileError(cause instanceof Error ? cause.message : 'Unable to load full user profile details.');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const closeProfileModal = () => {
+    setViewingUser(null);
+    setProfileDetails(null);
+    setProfileError(null);
+    setSignedPreview(null);
+  };
+
+  const handleOpenEvidence = async (
+    kind: 'student-document' | 'landlord-document',
+    doc: AdminRecord
+  ) => {
+    setOpeningDocId(doc.id);
+    setProfileError(null);
+    setSignedPreview(null);
+    try {
+      const url = await storageService.getPrivateAssetDownloadUrl(kind, doc.id);
+      setSignedPreview({
+        id: doc.id,
+        url,
+        fileName: doc.file_name || doc.fileName,
+        previewKind: getEvidencePreviewKind(doc),
+      });
+    } catch (cause) {
+      setProfileError(cause instanceof Error ? cause.message : 'Unable to retrieve signed evidence link.');
+    } finally {
+      setOpeningDocId(null);
+    }
+  };
+
   const changeStatus = async (user: AdminUser, status: 'active' | 'suspended', note?: string) => {
     setBusyId(user.id);
     setActionError(null);
@@ -60,6 +166,9 @@ export const UsersPage: React.FC = () => {
     try {
       await adminService.setUserStatus(user.id, status, note);
       await refresh();
+      if (viewingUser?.id === user.id) {
+        void openProfileModal({ ...user, status, accountStatus: status });
+      }
       setSuccess(`${user.email} account ${status === 'suspended' ? 'suspended' : 'reactivated'}; the action was audited.`);
       setTarget(null);
       setReason('');
@@ -69,6 +178,8 @@ export const UsersPage: React.FC = () => {
       setBusyId(null);
     }
   };
+
+  const inspectedUser = profileDetails?.user || viewingUser;
 
   return (
     <div className="space-y-6">
@@ -172,27 +283,37 @@ export const UsersPage: React.FC = () => {
                       {user.role === 'admin' && <Badge variant="danger">Administrator</Badge>}
                     </td>
                     <td className="p-3 text-right">
-                      {user.role !== 'admin' && (
+                      <div className="inline-flex flex-wrap items-center justify-end gap-2">
                         <button
                           type="button"
-                          disabled={busyId === user.id}
-                          onClick={() => {
-                            if (suspended) void changeStatus(user, 'active');
-                            else {
-                              setTarget(user);
-                              setReason('');
-                            }
-                          }}
-                          className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 font-semibold disabled:opacity-50 cursor-pointer ${
-                            suspended
-                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
-                              : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300'
-                          }`}
+                          onClick={() => void openProfileModal(user)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                         >
-                          {suspended ? <UserCheck className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
-                          {busyId === user.id ? 'Saving…' : suspended ? 'Reactivate' : 'Suspend'}
+                          <Eye className="h-3.5 w-3.5" />
+                          View profile
                         </button>
-                      )}
+                        {user.role !== 'admin' && (
+                          <button
+                            type="button"
+                            disabled={busyId === user.id}
+                            onClick={() => {
+                              if (suspended) void changeStatus(user, 'active');
+                              else {
+                                setTarget(user);
+                                setReason('');
+                              }
+                            }}
+                            className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 font-semibold disabled:opacity-50 cursor-pointer ${
+                              suspended
+                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300'
+                            }`}
+                          >
+                            {suspended ? <UserCheck className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+                            {busyId === user.id ? 'Saving…' : suspended ? 'Reactivate' : 'Suspend'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -206,6 +327,527 @@ export const UsersPage: React.FC = () => {
         <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
         Suspensions update the PostgreSQL account record via the privileged <span className="font-mono">admin_set_user_status</span> RPC with audit logging. Administrators cannot be suspended here.
       </div>
+
+      {/* User Profile Inspection Modal */}
+      <Modal
+        isOpen={!!viewingUser}
+        onClose={closeProfileModal}
+        title={inspectedUser ? `${inspectedUser.fullName || inspectedUser.name} — User Profile` : 'User Profile'}
+        maxWidth="3xl"
+      >
+        {inspectedUser && (
+          <div className="space-y-5 text-xs">
+            {/* Account Header */}
+            <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3.5 min-w-0">
+                {inspectedUser.avatarUrl ? (
+                  <img
+                    src={inspectedUser.avatarUrl}
+                    alt={inspectedUser.fullName || inspectedUser.name}
+                    className="h-12 w-12 shrink-0 rounded-full object-cover ring-2 ring-emerald-500/30"
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-base font-bold text-white">
+                    {(inspectedUser.fullName || inspectedUser.name || 'U').trim().charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white truncate">
+                      {inspectedUser.fullName || inspectedUser.name || 'User'}
+                    </h3>
+                    <Badge variant={inspectedUser.role === 'admin' ? 'danger' : inspectedUser.role === 'landlord' ? 'warning' : 'info'}>
+                      {inspectedUser.role}
+                    </Badge>
+                    <Badge variant={(inspectedUser.status || inspectedUser.accountStatus) === 'suspended' ? 'danger' : 'success'}>
+                      {inspectedUser.status || inspectedUser.accountStatus || 'active'}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-slate-600 dark:text-slate-300">
+                    <span className="inline-flex items-center gap-1">
+                      <Mail className="h-3.5 w-3.5 text-slate-400" />
+                      {inspectedUser.email || 'No email'}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Phone className="h-3.5 w-3.5 text-slate-400" />
+                      {inspectedUser.phone || 'No phone supplied'}
+                    </span>
+                  </div>
+                  <p className="break-all font-mono text-[10px] text-slate-400">
+                    UID: {inspectedUser.id} · Joined: {formatDate(inspectedUser.createdAt)}
+                  </p>
+                </div>
+              </div>
+              <div className="shrink-0">
+                {inspectedUser.role === 'student' && (
+                  <VerificationBadge
+                    type="student"
+                    status={Boolean(
+                      profileDetails?.studentProfile?.isProfileVerified ||
+                        profileDetails?.studentProfile?.is_profile_verified ||
+                        inspectedUser.studentProfile?.isProfileVerified
+                    )}
+                  />
+                )}
+                {inspectedUser.role === 'landlord' && (
+                  <VerificationBadge
+                    type="landlord"
+                    status={
+                      profileDetails?.landlordProfile?.verificationStatus ||
+                      profileDetails?.landlordProfile?.verification_status ||
+                      inspectedUser.landlordProfile?.verificationStatus ||
+                      'not_started'
+                    }
+                  />
+                )}
+              </div>
+            </div>
+
+            {profileLoading && (
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 p-4 text-slate-500 dark:border-slate-800">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                <span>Loading full database profile, documents, and activity…</span>
+              </div>
+            )}
+
+            {profileError && (
+              <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                {profileError}
+              </div>
+            )}
+
+            {!profileLoading && profileDetails && inspectedUser.role === 'student' && (
+              <div className="space-y-4">
+                {/* Student Academic Profile */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <GraduationCap className="h-4 w-4 text-emerald-600" /> Student Academic Profile
+                  </h4>
+                  {profileDetails.studentProfile ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <span className="text-slate-400">Registration / Matric No.</span>
+                        <p className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.studentProfile.registration_number || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Institution</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.studentProfile.institution || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Campus</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.studentProfile.campus || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Faculty / Department</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {[profileDetails.studentProfile.faculty, profileDetails.studentProfile.department]
+                            .filter(Boolean)
+                            .join(' · ') || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Study Level</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.studentProfile.study_level || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Gender</span>
+                        <p className="mt-0.5 font-semibold capitalize text-slate-900 dark:text-white">
+                          {String(profileDetails.studentProfile.gender || 'Not supplied').replace(/_/g, ' ')}
+                        </p>
+                      </div>
+                      {profileDetails.studentProfile.verification_date && (
+                        <div className="sm:col-span-2 lg:col-span-3">
+                          <span className="text-slate-400">Verified On</span>
+                          <p className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                            {formatDate(profileDetails.studentProfile.verification_date)}
+                          </p>
+                        </div>
+                      )}
+                      {profileDetails.studentProfile.bio && (
+                        <div className="sm:col-span-2 lg:col-span-3">
+                          <span className="text-slate-400">Bio</span>
+                          <p className="mt-0.5 text-slate-700 dark:text-slate-300">
+                            {profileDetails.studentProfile.bio}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">No student_profiles row recorded yet.</p>
+                  )}
+                </section>
+
+                {/* Roommate Preferences */}
+                {profileDetails.roommatePreferences && (
+                  <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Roommate Preferences</h4>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <span className="text-slate-400">Annual Budget Range</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          ₦{Number(profileDetails.roommatePreferences.budget_min || 0).toLocaleString()} – ₦
+                          {Number(profileDetails.roommatePreferences.budget_max || 0).toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Preferred Areas</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {Array.isArray(profileDetails.roommatePreferences.preferred_area)
+                            ? profileDetails.roommatePreferences.preferred_area.join(', ')
+                            : 'Not set'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Habits</span>
+                        <p className="mt-0.5 font-semibold capitalize text-slate-900 dark:text-white">
+                          {String(profileDetails.roommatePreferences.sleep_habit || '').replace(/_/g, ' ')} ·{' '}
+                          {String(profileDetails.roommatePreferences.study_habit || '').replace(/_/g, ' ')}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {/* Student Verification Documents */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <FileCheck2 className="h-4 w-4 text-amber-600" /> Verification Documents (
+                    {profileDetails.studentDocuments.length})
+                  </h4>
+                  {profileDetails.studentDocuments.length === 0 ? (
+                    <p className="text-slate-500">No verification documents uploaded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {profileDetails.studentDocuments.map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">
+                              {String(doc.document_type || 'Document').replace(/_/g, ' ')} · {doc.file_name}
+                            </p>
+                            <p className="mt-0.5 text-slate-500">
+                              Status: <span className="font-semibold capitalize">{doc.status}</span> · Uploaded{' '}
+                              {formatDate(doc.created_at)}
+                            </p>
+                            {doc.rejection_reason && (
+                              <p className="mt-1 text-rose-600 dark:text-rose-400">
+                                Rejection reason: {doc.rejection_reason}
+                              </p>
+                            )}
+                          </div>
+                          {doc.storage_path && (
+                            <button
+                              type="button"
+                              disabled={openingDocId === doc.id}
+                              onClick={() => void handleOpenEvidence('student-document', doc)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 cursor-pointer"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              {openingDocId === doc.id ? 'Generating…' : 'View file'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {!profileLoading && profileDetails && inspectedUser.role === 'landlord' && (
+              <div className="space-y-4">
+                {/* Landlord Business & KYC Profile */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <Building2 className="h-4 w-4 text-emerald-600" /> Landlord Business &amp; KYC Profile
+                  </h4>
+                  {profileDetails.landlordProfile ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <span className="text-slate-400">Business / Company Name</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.company_name || 'Individual landlord'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Contact / Business Address</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.business_address || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">ID / Tax Reference</span>
+                        <p className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.tax_id || 'Not supplied'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Bank Name</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.bank_name || 'Not configured'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Account Name</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.bank_account_name || 'Not configured'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Account Number</span>
+                        <p className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordProfile.bank_account_number || 'Not configured'}
+                        </p>
+                      </div>
+                      {profileDetails.landlordProfile.verified_at && (
+                        <div className="sm:col-span-2 lg:col-span-3">
+                          <span className="text-slate-400">Verified On</span>
+                          <p className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                            {formatDate(profileDetails.landlordProfile.verified_at)}
+                          </p>
+                        </div>
+                      )}
+                      {profileDetails.landlordProfile.rejection_reason && (
+                        <div className="sm:col-span-2 lg:col-span-3">
+                          <span className="text-slate-400">Last Rejection Reason</span>
+                          <p className="mt-0.5 text-rose-600 dark:text-rose-400">
+                            {profileDetails.landlordProfile.rejection_reason}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">No landlord_profiles row recorded yet.</p>
+                  )}
+                </section>
+
+                {/* Landlord KYC Submissions */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <FileCheck2 className="h-4 w-4 text-amber-600" /> KYC Submissions (
+                    {profileDetails.landlordSubmissions.length})
+                  </h4>
+                  {profileDetails.landlordSubmissions.length === 0 ? (
+                    <p className="text-slate-500">No landlord KYC documents uploaded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {profileDetails.landlordSubmissions.map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">
+                              {String(sub.document_type || 'Document').replace(/_/g, ' ')} · {sub.file_name}
+                            </p>
+                            <p className="mt-0.5 text-slate-500">
+                              Status: <span className="font-semibold capitalize">{sub.status}</span> · Submitted{' '}
+                              {formatDate(sub.created_at)}
+                            </p>
+                            {sub.rejection_reason && (
+                              <p className="mt-1 text-rose-600 dark:text-rose-400">
+                                Rejection reason: {sub.rejection_reason}
+                              </p>
+                            )}
+                          </div>
+                          {sub.storage_path && (
+                            <button
+                              type="button"
+                              disabled={openingDocId === sub.id}
+                              onClick={() => void handleOpenEvidence('landlord-document', sub)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 cursor-pointer"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              {openingDocId === sub.id ? 'Generating…' : 'View file'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Landlord Properties Portfolio */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <Building2 className="h-4 w-4 text-blue-600" /> Submitted Properties (
+                    {profileDetails.properties.length})
+                  </h4>
+                  {profileDetails.properties.length === 0 ? (
+                    <p className="text-slate-500">No properties submitted by this landlord yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {profileDetails.properties.map((prop) => (
+                        <div
+                          key={prop.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">{prop.title}</p>
+                            <p className="mt-0.5 text-slate-500">
+                              {prop.area} · {String(prop.property_type || '').replace(/_/g, ' ')} · ₦
+                              {Number(prop.rental_fee_annual || 0).toLocaleString()}/yr · {prop.available_spaces}/
+                              {prop.total_spaces} spaces available
+                            </p>
+                          </div>
+                          <Badge
+                            variant={
+                              prop.approval_status === 'approved'
+                                ? 'success'
+                                : prop.approval_status === 'rejected' || prop.approval_status === 'archived'
+                                ? 'danger'
+                                : 'warning'
+                            }
+                          >
+                            {prop.approval_status}
+                            {prop.is_published ? ' · published' : ''}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {/* Inline Signed Evidence Preview */}
+            {signedPreview && (
+              <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-emerald-900 dark:text-emerald-200">
+                    Signed preview ready{signedPreview.fileName ? ` (${signedPreview.fileName})` : ''}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <a
+                      href={signedPreview.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-emerald-700 underline dark:text-emerald-300"
+                    >
+                      Open in new tab
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setSignedPreview(null)}
+                      className="text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                    >
+                      Close preview
+                    </button>
+                  </div>
+                </div>
+                {signedPreview.previewKind === 'image' && (
+                  <img
+                    src={signedPreview.url}
+                    alt={signedPreview.fileName || 'Submitted evidence'}
+                    className="max-h-80 w-full rounded-lg border border-emerald-200 bg-white object-contain dark:border-emerald-900 dark:bg-slate-950"
+                  />
+                )}
+                {signedPreview.previewKind === 'pdf' && (
+                  <iframe
+                    src={signedPreview.url}
+                    title={signedPreview.fileName || 'Submitted PDF evidence'}
+                    className="h-80 w-full rounded-lg border border-emerald-200 bg-white dark:border-emerald-900"
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Reservations Activity (for Students & Landlords) */}
+            {!profileLoading && profileDetails && inspectedUser.role !== 'admin' && (
+              <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                <h4 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                  <CalendarCheck className="h-4 w-4 text-purple-600" /> Reservations (
+                  {profileDetails.reservations.length})
+                </h4>
+                {profileDetails.reservations.length === 0 ? (
+                  <p className="text-slate-500">No reservations associated with this account.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {profileDetails.reservations.slice(0, 5).map((res) => (
+                      <div
+                        key={res.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900 dark:text-white">
+                            {res.propertyTitle} · <span className="font-mono">{res.reservationNumber}</span>
+                          </p>
+                          <p className="mt-0.5 text-slate-500">
+                            ₦{Number(res.amount || 0).toLocaleString()} · Hold expires {formatDate(res.holdExpiresAt)}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={
+                            res.status === 'confirmed'
+                              ? 'success'
+                              : res.status === 'rejected' || res.status === 'cancelled' || res.status === 'expired'
+                              ? 'danger'
+                              : 'warning'
+                          }
+                        >
+                          {String(res.status || '').replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Modal Footer Actions */}
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {inspectedUser.role !== 'admin' && (
+                <button
+                  type="button"
+                  disabled={busyId === inspectedUser.id}
+                  onClick={() => {
+                    const isSuspended =
+                      inspectedUser.status === 'suspended' || inspectedUser.accountStatus === 'suspended';
+                    if (isSuspended) {
+                      void changeStatus(inspectedUser, 'active');
+                    } else {
+                      closeProfileModal();
+                      setTarget(inspectedUser);
+                      setReason('');
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 font-semibold disabled:opacity-50 cursor-pointer ${
+                    inspectedUser.status === 'suspended' || inspectedUser.accountStatus === 'suspended'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                      : 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300'
+                  }`}
+                >
+                  {inspectedUser.status === 'suspended' || inspectedUser.accountStatus === 'suspended' ? (
+                    <UserCheck className="h-3.5 w-3.5" />
+                  ) : (
+                    <Ban className="h-3.5 w-3.5" />
+                  )}
+                  {inspectedUser.status === 'suspended' || inspectedUser.accountStatus === 'suspended'
+                    ? 'Reactivate account'
+                    : 'Suspend account'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closeProfileModal}
+                className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={!!target}

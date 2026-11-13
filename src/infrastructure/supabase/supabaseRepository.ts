@@ -16,7 +16,7 @@
  * - Realtime Channels: Subscribes to Supabase Realtime for instant messaging and notification delivery.
  */
 
-import { supabase, invokeEdgeFunction, isSupabaseConfigured } from './supabaseClient';
+import { supabase, invokeEdgeFunction, isSupabaseConfigured, isEdgeFunctionUnavailableError } from './supabaseClient';
 import { supabaseStorageService } from './supabaseStorageService';
 import { appEventBus } from '../events/eventBus';
 import { calculateCompatibility, CompatibilityResult } from '../../domain/matching';
@@ -2919,11 +2919,38 @@ export class SupabaseRepository {
     unitId: string,
     groupId?: string
   ): Promise<{ success: boolean; reservation?: Reservation; invoice?: Invoice; error?: string }> {
-    const { data, error } = await invokeEdgeFunction<any>('create-reservation', {
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `res_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+    let { data, error } = await invokeEdgeFunction<any>('create-reservation', {
       propertyId,
       unitId,
       groupId: groupId || null,
+      idempotencyKey,
     });
+
+    if (error && isEdgeFunctionUnavailableError(error)) {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      const callerId = authData?.user?.id;
+      if (authErr || !callerId) {
+        return { success: false, error: 'Please sign in as a student before reserving an accommodation.' };
+      }
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc('create_reservation_atomic', {
+        p_student_id: callerId,
+        p_property_id: propertyId,
+        p_unit_id: unitId,
+        p_idempotency_key: idempotencyKey,
+      });
+
+      if (rpcError) {
+        return { success: false, error: rpcError.message || 'Failed to place reservation hold.' };
+      }
+      data = rpcData;
+      error = null;
+    }
 
     if (error) {
       return { success: false, error: error.message || 'Failed to place reservation hold.' };
@@ -3002,11 +3029,31 @@ export class SupabaseRepository {
       return { success: false, error: 'A rejection reason of at least 5 characters is required.' };
     }
 
-    const { error } = await invokeEdgeFunction<any>('review-payment-receipt', {
+    let { error } = await invokeEdgeFunction<any>('review-payment-receipt', {
       receiptId,
       decision,
       rejectionReason: rejectionReason?.trim() || undefined,
     });
+
+    if (error && isEdgeFunctionUnavailableError(error)) {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      const reviewerId = authData?.user?.id || landlordId;
+      if (authErr || !reviewerId) {
+        return { success: false, error: 'Please sign in as the property landlord to review receipts.' };
+      }
+
+      const { error: rpcError } = await supabase.rpc('review_payment_receipt_atomic', {
+        p_receipt_id: receiptId,
+        p_decision: decision,
+        p_reviewer_id: reviewerId,
+        p_rejection_reason: rejectionReason?.trim() || null,
+      });
+
+      if (rpcError) {
+        return { success: false, error: rpcError.message || 'Could not record payment receipt review.' };
+      }
+      error = null;
+    }
 
     if (error) {
       return { success: false, error: error.message || 'Could not record payment receipt review.' };

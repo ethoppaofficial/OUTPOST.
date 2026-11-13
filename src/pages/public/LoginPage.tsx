@@ -25,7 +25,7 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
-  const { signInWithGoogle, connected, authUser, signInWithEmail } = useAuth();
+  const { signInWithGoogle, connected, authUser, signInWithEmail, profileStatus, profileError, signOut } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -84,6 +84,21 @@ export const LoginPage: React.FC = () => {
 
       {/* Login Card */}
       <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xl space-y-5">
+        {profileStatus === 'profile_error' && authUser && (
+          <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{profileError || 'Unable to load your OUTPOST account profile.'}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="shrink-0 font-semibold underline hover:no-underline"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">

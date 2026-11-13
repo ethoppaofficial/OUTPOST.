@@ -32,6 +32,17 @@ export type AdminUser = User & {
   landlordProfile?: AdminRecord;
 };
 
+export interface AdminUserProfileDetails {
+  user: AdminUser;
+  studentProfile?: AdminRecord;
+  landlordProfile?: AdminRecord;
+  roommatePreferences?: AdminRecord;
+  studentDocuments: AdminRecord[];
+  landlordSubmissions: AdminRecord[];
+  properties: AdminRecord[];
+  reservations: AdminRecord[];
+}
+
 export interface AdminMetrics {
   totalUsers: number;
   totalStudents: number;
@@ -1154,11 +1165,191 @@ export function createAdminService(deps?: { client?: any }) {
     }
   }
 
+  async function getUserProfileDetails(userId: string): Promise<AdminUserProfileDetails> {
+    await verifyActiveAdmin();
+    const cleanUserId = (userId || '').trim();
+    if (!cleanUserId) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A valid user ID is required.');
+    }
+
+    const { data: profile, error: profileErr } = await client
+      .from('profiles')
+      .select('*')
+      .eq('id', cleanUserId)
+      .maybeSingle();
+
+    if (profileErr) {
+      throw classifySupabaseError(profileErr, 'profiles');
+    }
+    if (!profile) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'User profile not found in public.profiles.', {
+        table: 'profiles',
+      });
+    }
+
+    const role = profile.role === 'landlord' || profile.role === 'admin' ? profile.role : 'student';
+
+    const [
+      studentProfRes,
+      landlordProfRes,
+      studentDocsRes,
+      roommatePrefsRes,
+      landlordSubsRes,
+      propertiesRes,
+      studentReservationsRes,
+      landlordReservationsRes,
+    ] = await Promise.all([
+      client.from('student_profiles').select('*').eq('user_id', cleanUserId).maybeSingle(),
+      client.from('landlord_profiles').select('*').eq('user_id', cleanUserId).maybeSingle(),
+      role === 'student'
+        ? client
+            .from('student_verification_documents')
+            .select('*')
+            .eq('student_id', cleanUserId)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      role === 'student'
+        ? client.from('roommate_preferences').select('*').eq('student_id', cleanUserId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      role === 'landlord'
+        ? client
+            .from('landlord_verification_submissions')
+            .select('*')
+            .eq('landlord_id', cleanUserId)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      role === 'landlord'
+        ? client
+            .from('properties')
+            .select('*')
+            .eq('landlord_id', cleanUserId)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      role === 'student'
+        ? client
+            .from('reservations')
+            .select('*')
+            .eq('student_id', cleanUserId)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      role === 'landlord'
+        ? client
+            .from('reservations')
+            .select('*')
+            .eq('landlord_id', cleanUserId)
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (studentProfRes.error) throw classifySupabaseError(studentProfRes.error, 'student_profiles');
+    if (landlordProfRes.error) throw classifySupabaseError(landlordProfRes.error, 'landlord_profiles');
+    if ((studentDocsRes as any).error) {
+      throw classifySupabaseError((studentDocsRes as any).error, 'student_verification_documents');
+    }
+    if ((roommatePrefsRes as any).error) {
+      throw classifySupabaseError((roommatePrefsRes as any).error, 'roommate_preferences');
+    }
+    if ((landlordSubsRes as any).error) {
+      throw classifySupabaseError((landlordSubsRes as any).error, 'landlord_verification_submissions');
+    }
+    if ((propertiesRes as any).error) {
+      throw classifySupabaseError((propertiesRes as any).error, 'properties');
+    }
+    if ((studentReservationsRes as any).error) {
+      throw classifySupabaseError((studentReservationsRes as any).error, 'reservations');
+    }
+    if ((landlordReservationsRes as any).error) {
+      throw classifySupabaseError((landlordReservationsRes as any).error, 'reservations');
+    }
+
+    const rawStudent = studentProfRes.data || undefined;
+    const rawLandlord = landlordProfRes.data || undefined;
+
+    const studentProfile = rawStudent
+      ? {
+          ...rawStudent,
+          registrationNumber: rawStudent.registration_number || '',
+          isProfileVerified: Boolean(rawStudent.is_profile_verified),
+        }
+      : undefined;
+
+    const landlordProfile = rawLandlord
+      ? {
+          ...rawLandlord,
+          businessName: rawLandlord.company_name || '',
+          verificationStatus: rawLandlord.verification_status || 'not_started',
+        }
+      : undefined;
+
+    const rawReservations: AdminRecord[] =
+      role === 'student'
+        ? ((studentReservationsRes as any).data || [])
+        : role === 'landlord'
+        ? ((landlordReservationsRes as any).data || [])
+        : [];
+
+    const propIds = Array.from(new Set(rawReservations.map((r) => r.property_id).filter(Boolean)));
+    const propertyTitleMap = new Map<string, string>(
+      ((propertiesRes as any).data || []).map((p: AdminRecord) => [p.id, p.title || 'Property'])
+    );
+    const missingPropIds = propIds.filter((id) => !propertyTitleMap.has(id));
+    if (missingPropIds.length > 0) {
+      const { data: resProps } = await client.from('properties').select('id, title').in('id', missingPropIds);
+      for (const p of resProps || []) {
+        propertyTitleMap.set(p.id, p.title || 'Property');
+      }
+    }
+
+    const reservations = rawReservations.map((item) => ({
+      ...item,
+      reservationNumber: String(item.id || '').slice(0, 8).toUpperCase(),
+      propertyTitle: propertyTitleMap.get(item.property_id) || 'Property',
+      holdExpiresAt: displayDate(item.hold_expires_at),
+      createdAt: displayDate(item.created_at),
+    }));
+
+    const name = profile.full_name || landlordProfile?.businessName || profile.email || 'User';
+
+    const user: AdminUser = {
+      ...profile,
+      id: profile.id,
+      email: String(profile.email || ''),
+      role,
+      accountStatus: profile.account_status || 'active',
+      emailVerified: Boolean(
+        profile.is_verified || profile.account_status === 'active' || profile.account_status === 'profile_verified'
+      ),
+      createdAt: displayDate(profile.created_at) || new Date(0).toISOString(),
+      name,
+      fullName: name,
+      avatarUrl: profile.avatar_url || undefined,
+      phone: profile.phone || undefined,
+      status: profile.account_status || 'active',
+      studentProfile,
+      landlordProfile,
+    };
+
+    return {
+      user,
+      studentProfile,
+      landlordProfile,
+      roommatePreferences: (roommatePrefsRes as any).data || undefined,
+      studentDocuments: (studentDocsRes as any).data || [],
+      landlordSubmissions: (landlordSubsRes as any).data || [],
+      properties: ((propertiesRes as any).data || []).map((p: AdminRecord) => ({
+        ...p,
+        createdAt: displayDate(p.created_at),
+      })),
+      reservations,
+    };
+  }
+
   return {
     verifyActiveAdmin,
     getAdminMetrics,
     getDashboardData,
     getUsers,
+    getUserProfileDetails,
     getVerificationQueues,
     getProperties,
     getReservations,
