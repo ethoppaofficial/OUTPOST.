@@ -192,12 +192,6 @@ export const LoginPage: React.FC = () => {
             Register as Student or Landlord
           </Link>
         </div>
-        {/* <div className="text-center text-xs text-slate-500">
-          Administrator?{' '}
-          <Link to="/admin/login" className="font-semibold text-purple-700 hover:underline dark:text-purple-300">
-            Use the restricted admin sign-in
-          </Link>
-        </div> */}
       </div>
     </div>
   );
