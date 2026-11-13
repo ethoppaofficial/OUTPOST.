@@ -17,7 +17,21 @@ export const AdminReportsPage: React.FC = () => {
     isLive,
     lastUpdatedAt,
     refresh,
-  } = useAdminData<AdminMetrics>(() => adminService.getAdminMetrics());
+  } = useAdminData<AdminMetrics>(
+    () => adminService.getAdminMetrics(),
+    [],
+    {
+      realtimeTables: [
+        'profiles',
+        'student_verification_documents',
+        'landlord_verification_submissions',
+        'landlord_profiles',
+        'properties',
+        'reservations',
+        'payment_receipts',
+      ],
+    }
+  );
 
   const activeMetrics = !error ? metrics : null;
 

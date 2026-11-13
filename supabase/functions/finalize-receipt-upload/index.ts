@@ -69,6 +69,14 @@ serve(async (req) => {
       });
     }
 
+    const parsedSize = Number(fileSize ?? 0);
+    if (!Number.isFinite(parsedSize) || parsedSize <= 0 || parsedSize > 10 * 1024 * 1024) {
+      return new Response(JSON.stringify({ error: 'Invalid file size (must be between 1 byte and 10 MB)' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Lookup reservation
     const { data: reservation, error: resError } = await client
       .from('reservations')
@@ -86,6 +94,14 @@ serve(async (req) => {
     if (reservation.student_id !== user.id) {
       return new Response(JSON.stringify({ error: 'Forbidden: ownership mismatch' }), {
         status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const numericAmount = amountPaid !== undefined && amountPaid !== null ? Number(amountPaid) : Number(reservation.amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return new Response(JSON.stringify({ error: 'amountPaid must be a positive number' }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -113,20 +129,36 @@ serve(async (req) => {
       });
     }
 
+    // Resolve authoritative linked invoice_id for review_payment_receipt_atomic compatibility
+    const { data: invoiceRow } = await adminClient
+      .from('invoices')
+      .select('id')
+      .eq('reservation_id', reservationId)
+      .maybeSingle();
+
+    const cleanupOrphanStorage = async () => {
+      try {
+        await adminClient.storage.from('payment-receipts').remove([storagePath]);
+      } catch (cleanupErr) {
+        console.warn('[finalize-receipt-upload] Orphan cleanup warning:', cleanupErr);
+      }
+    };
+
     // Insert canonical receipt record
     const { data: receiptRecord, error: insertError } = await adminClient
       .from('payment_receipts')
       .insert({
         id: receiptId,
         reservation_id: reservationId,
+        invoice_id: invoiceRow?.id ?? null,
         student_id: user.id,
         landlord_id: reservation.landlord_id,
         property_id: reservation.property_id,
         storage_path: storagePath,
         file_name: fileName,
         content_type: contentType || 'application/octet-stream',
-        file_size: fileSize || 0,
-        amount_paid: amountPaid || reservation.amount,
+        file_size: parsedSize,
+        amount_paid: numericAmount,
         payment_reference: paymentReference || 'DIRECT_TRANSFER',
         payer_bank_name: payerBankName || 'Bank',
         payment_date: paymentDate || new Date().toISOString(),
@@ -136,14 +168,15 @@ serve(async (req) => {
       .single();
 
     if (insertError) {
-      return new Response(JSON.stringify({ error: 'Failed to record payment receipt' }), {
+      await cleanupOrphanStorage();
+      return new Response(JSON.stringify({ error: `Failed to record payment receipt: ${insertError.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // Update reservation to payment_submitted
-    await adminClient
+    const { error: resUpdateError } = await adminClient
       .from('reservations')
       .update({
         status: 'payment_submitted',
@@ -151,6 +184,22 @@ serve(async (req) => {
         payment_receipt_submitted_at: new Date().toISOString(),
       })
       .eq('id', reservationId);
+
+    if (resUpdateError) {
+      await adminClient.from('payment_receipts').delete().eq('id', receiptId);
+      await cleanupOrphanStorage();
+      return new Response(JSON.stringify({ error: `Failed to update reservation receipt state: ${resUpdateError.message}` }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (invoiceRow?.id) {
+      await adminClient
+        .from('invoices')
+        .update({ status: 'processing', updated_at: new Date().toISOString() })
+        .eq('id', invoiceRow.id);
+    }
 
     // Create landlord notification
     await adminClient.from('notifications').insert({

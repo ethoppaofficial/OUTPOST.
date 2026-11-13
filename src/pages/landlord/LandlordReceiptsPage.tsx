@@ -10,28 +10,56 @@
  * - Rejection Decision: Landlord declines receipt with a mandatory explanation; restores room capacity and resets status to `pending_payment`.
  */
 
-import React, { useState } from 'react';
-import { CheckCircle2, XCircle, Clock, FileText, ExternalLink, ShieldCheck, AlertCircle, Eye, Loader2 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, ExternalLink, AlertCircle, Eye, Loader2, RefreshCw } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
 import { storageService } from '../../application/services/storageService';
 import { PaymentReceipt } from '../../domain/types';
-import { ReceiptStatusBadge, Badge } from '../../components/ui/Badge';
+import { ReceiptStatusBadge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
+import { useAuth } from '../../application/context/AuthContext';
 
 export const LandlordReceiptsPage: React.FC = () => {
+  const { currentUser, loading: authLoading } = useAuth();
   const session = authService.getSession();
-  const [receipts, setReceipts] = useState<PaymentReceipt[]>(() =>
-    reservationService.getLandlordReceipts(session.user.id)
-  );
+  const landlordId = currentUser?.id || session.user.id;
 
+  const [receipts, setReceipts] = useState<PaymentReceipt[]>(() =>
+    landlordId && landlordId !== 'anonymous' ? reservationService.getLandlordReceipts(landlordId) : []
+  );
+  const [loadingList, setLoadingList] = useState(true);
+  const [processingId, setProcessingId] = useState<string | null>(null);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('Payment reference not reflecting in bank statement');
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<{ id: string; url: string; studentName: string } | null>(null);
   const [loadingReceiptId, setLoadingReceiptId] = useState<string | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
+
+  const loadReceipts = useCallback(async () => {
+    if (authLoading) return;
+    if (!landlordId || landlordId === 'anonymous') {
+      setLoadingList(false);
+      return;
+    }
+    setLoadingList(true);
+    setActionError(null);
+    try {
+      const live = await reservationService.loadLandlordReceipts(landlordId);
+      setReceipts(live);
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not load student payment receipts.');
+    } finally {
+      setLoadingList(false);
+    }
+  }, [authLoading, landlordId]);
+
+  useEffect(() => {
+    void loadReceipts();
+  }, [loadReceipts]);
 
   const handleViewReceipt = async (receipt: PaymentReceipt) => {
     setLoadingReceiptId(receipt.id);
@@ -46,38 +74,84 @@ export const LandlordReceiptsPage: React.FC = () => {
     }
   };
 
-  const handleApprove = (receiptId: string) => {
-    const res = reservationService.reviewPaymentReceipt(receiptId, 'approved');
-    if (res.success) {
-      setReceipts(reservationService.getLandlordReceipts(session.user.id));
-      setActionSuccess('Receipt confirmed! Student reservation status is now CONFIRMED.');
-      setTimeout(() => setActionSuccess(null), 4000);
+  const handleApprove = async (receiptId: string) => {
+    setProcessingId(receiptId);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const res = await reservationService.reviewPaymentReceiptPersisted(receiptId, 'approved', landlordId);
+      if (res.success) {
+        await loadReceipts();
+        setActionSuccess('Receipt confirmed! Student reservation status is now CONFIRMED.');
+        setTimeout(() => setActionSuccess(null), 4000);
+      } else {
+        setActionError(res.error || 'Could not approve receipt.');
+      }
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not approve receipt.');
+    } finally {
+      setProcessingId(null);
     }
   };
 
-  const handleRejectSubmit = (e: React.FormEvent) => {
+  const handleRejectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedReceiptId) return;
 
-    const res = reservationService.reviewPaymentReceipt(selectedReceiptId, 'rejected', rejectionReason);
-    if (res.success) {
-      setReceipts(reservationService.getLandlordReceipts(session.user.id));
-      setRejectModalOpen(false);
-      setActionSuccess('Receipt rejected with student notification.');
-      setTimeout(() => setActionSuccess(null), 4000);
+    setProcessingId(selectedReceiptId);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const res = await reservationService.reviewPaymentReceiptPersisted(
+        selectedReceiptId,
+        'rejected',
+        landlordId,
+        rejectionReason
+      );
+      if (res.success) {
+        await loadReceipts();
+        setRejectModalOpen(false);
+        setActionSuccess('Receipt rejected with student notification.');
+        setTimeout(() => setActionSuccess(null), 4000);
+      } else {
+        setActionError(res.error || 'Could not reject receipt.');
+      }
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not reject receipt.');
+    } finally {
+      setProcessingId(null);
     }
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-          Student Payment Receipts & Verification
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Review external bank transfers submitted by students holding rooms in your accommodations.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            Student Payment Receipts & Verification
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Review external bank transfers submitted by students holding rooms in your accommodations.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void loadReceipts()}
+          disabled={loadingList}
+          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
       </div>
+
+      {actionError && (
+        <div role="alert" className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{actionError}</span>
+        </div>
+      )}
 
       {actionSuccess && (
         <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
@@ -86,7 +160,12 @@ export const LandlordReceiptsPage: React.FC = () => {
         </div>
       )}
 
-      {receipts.length === 0 ? (
+      {loadingList && receipts.length === 0 ? (
+        <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-500">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+          <span>Loading payment receipts…</span>
+        </div>
+      ) : receipts.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-400">
           No student payment receipts submitted yet.
         </div>
@@ -168,21 +247,29 @@ export const LandlordReceiptsPage: React.FC = () => {
                   {isPending && (
                     <>
                       <button
+                        type="button"
+                        disabled={Boolean(processingId)}
                         onClick={() => {
                           setSelectedReceiptId(rec.id);
                           setRejectModalOpen(true);
                         }}
-                        className="px-4 py-2 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-medium"
+                        className="px-4 py-2 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Reject Receipt
                       </button>
 
                       <button
+                        type="button"
+                        disabled={Boolean(processingId)}
                         onClick={() => handleApprove(rec.id)}
-                        className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5"
+                        className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Confirm Receipt & Lock Reservation</span>
+                        {processingId === rec.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                        <span>{processingId === rec.id ? 'Confirming...' : 'Confirm Receipt & Lock Reservation'}</span>
                       </button>
                     </>
                   )}
@@ -225,16 +312,18 @@ export const LandlordReceiptsPage: React.FC = () => {
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={Boolean(processingId)}
               onClick={() => setRejectModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold"
+              disabled={Boolean(processingId)}
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Confirm Rejection
+              {processingId ? 'Rejecting...' : 'Confirm Rejection'}
             </button>
           </div>
         </form>

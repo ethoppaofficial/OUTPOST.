@@ -8,12 +8,12 @@
  * - Displays active reservations associated with the property to prevent double-booking or over-commitment.
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Bed, ArrowLeft, Plus, Minus, ShieldCheck, Clock, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, RefreshCw, Loader2 } from 'lucide-react';
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
-import { Reservation } from '../../domain/types';
+import { Property, Reservation } from '../../domain/types';
 
 /**
  * ManageAvailabilityPage Component
@@ -22,13 +22,48 @@ import { Reservation } from '../../domain/types';
  */
 export const ManageAvailabilityPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
-  const [property, setProperty] = useState(() => propertyService.getPropertyById(propertyId || ''));
+  const [property, setProperty] = useState<Property | undefined>(() =>
+    propertyService.getPropertyById(propertyId || '')
+  );
   const [reservations, setReservations] = useState<Reservation[]>(() =>
     reservationService.getLandlordReservations(property?.landlordId || '')
       .filter((r) => r.propertyId === propertyId)
   );
-
+  const [loading, setLoading] = useState(!property);
   const [message, setMessage] = useState<string | null>(null);
+
+  const loadAvailability = useCallback(async () => {
+    if (!propertyId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const liveProp = await propertyService.fetchPropertyByIdOrSlug(propertyId);
+      if (liveProp) {
+        setProperty(liveProp);
+        const liveRes = await reservationService.loadLandlordReservations(liveProp.landlordId);
+        setReservations(liveRes.filter((r) => r.propertyId === liveProp.id));
+      }
+    } catch {
+      // Keep current snapshot on transient network error
+    } finally {
+      setLoading(false);
+    }
+  }, [propertyId]);
+
+  useEffect(() => {
+    void loadAvailability();
+  }, [loadAvailability]);
+
+  if (loading && !property) {
+    return (
+      <div className="py-12 flex items-center justify-center gap-2 text-xs text-slate-500">
+        <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+        <span>Loading room availability…</span>
+      </div>
+    );
+  }
 
   if (!property) {
     return <div className="text-center py-12 text-slate-500">Property not found.</div>;
@@ -65,13 +100,25 @@ export const ManageAvailabilityPage: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <Link
-        to="/landlord/properties"
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        <span>Back to Properties</span>
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          to="/landlord/properties"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Back to Properties</span>
+        </Link>
+
+        <button
+          type="button"
+          onClick={() => void loadAvailability()}
+          disabled={loading}
+          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
+      </div>
 
       <div>
         <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">

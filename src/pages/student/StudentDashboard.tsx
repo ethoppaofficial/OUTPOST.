@@ -9,19 +9,18 @@
  * - Quick navigational shortcuts to discovery, preferences, groups, and messaging.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Compass,
   Users,
   CalendarCheck,
-  ShieldCheck,
-  AlertTriangle,
   Clock,
   ArrowRight,
   MessageSquare,
   FileCheck,
   Search,
+  RefreshCw,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
@@ -29,6 +28,7 @@ import { roommateService } from '../../application/services/roommateService';
 import { verificationService } from '../../application/services/verificationService';
 import { VerificationBadge, ReservationStatusBadge } from '../../components/ui/Badge';
 import { useAuth } from '../../application/context/AuthContext';
+import { Reservation, StudentVerificationDocument } from '../../domain/types';
 
 /**
  * StudentDashboard Component
@@ -37,13 +37,42 @@ import { useAuth } from '../../application/context/AuthContext';
  * active reservation holds, verification notices, and navigation to student actions.
  */
 export const StudentDashboard: React.FC = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const session = authService.getSession();
+  const studentId = currentUser?.id || session.user.id;
   const student = authService.getCurrentStudentProfile();
-  const reservations = reservationService.getStudentReservations(session.user.id);
+
+  const [reservations, setReservations] = useState<Reservation[]>(() =>
+    studentId && studentId !== 'anonymous' ? reservationService.getStudentReservations(studentId) : []
+  );
+  const [documents, setDocuments] = useState<StudentVerificationDocument[]>(() =>
+    studentId && studentId !== 'anonymous' ? verificationService.getStudentDocuments(studentId) : []
+  );
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadDashboard = useCallback(async () => {
+    if (authLoading || !studentId || studentId === 'anonymous') return;
+    setRefreshing(true);
+    try {
+      const [liveRes, liveDocs] = await Promise.all([
+        reservationService.loadStudentReservations(studentId),
+        verificationService.loadStudentDocuments(studentId),
+      ]);
+      setReservations(liveRes);
+      setDocuments(liveDocs);
+    } catch {
+      // Keep cached items if a background sync temporarily fails
+    } finally {
+      setRefreshing(false);
+    }
+  }, [authLoading, studentId]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
   const activeReservations = reservations.filter((r) => r.status === 'pending_payment' || r.status === 'receipt_submitted');
-  const roommateRequests = roommateService.getReceivedRequests(session.user.id).filter((r) => r.status === 'pending');
-  const documents = verificationService.getStudentDocuments(session.user.id);
+  const roommateRequests = roommateService.getReceivedRequests(studentId).filter((r) => r.status === 'pending');
 
   const isVerified = student?.isProfileVerified;
   const isPendingReview = documents.some((d) => d.status === 'pending');
@@ -96,6 +125,15 @@ export const StudentDashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void loadDashboard()}
+            disabled={refreshing}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
           <Link
             to="/student/properties"
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5"

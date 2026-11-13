@@ -58,6 +58,14 @@ serve(async (req) => {
       });
     }
 
+    const parsedSize = Number(fileSize ?? 0);
+    if (!Number.isFinite(parsedSize) || parsedSize <= 0 || parsedSize > 10 * 1024 * 1024) {
+      return new Response(JSON.stringify({ error: 'Invalid attachment size (must be between 1 byte and 10 MB)' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Verify conversation participant
     const { data: participant, error: partError } = await client
       .from('conversation_participants')
@@ -101,7 +109,7 @@ serve(async (req) => {
       storage_path: storagePath,
       file_name: fileName,
       content_type: contentType || 'application/octet-stream',
-      file_size: fileSize || 0,
+      file_size: parsedSize,
       uploaded_by: user.id,
       uploaded_at: new Date().toISOString(),
     };
@@ -120,20 +128,29 @@ serve(async (req) => {
       .single();
 
     if (msgError) {
-      return new Response(JSON.stringify({ error: 'Failed to record chat message' }), {
+      try {
+        await adminClient.storage.from('chat-attachments').remove([storagePath]);
+      } catch (cleanupErr) {
+        console.warn('[finalize-chat-attachment-upload] Orphan cleanup warning:', cleanupErr);
+      }
+      return new Response(JSON.stringify({ error: `Failed to record chat message: ${msgError.message}` }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // Update conversation last message
-    await adminClient
+    const { error: convUpdateErr } = await adminClient
       .from('conversations')
       .update({
         last_message_text: messageText,
         last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId);
+    if (convUpdateErr) {
+      console.warn('[finalize-chat-attachment-upload] Conversation timestamp update warning:', convUpdateErr.message);
+    }
 
     return new Response(
       JSON.stringify({ success: true, message }),

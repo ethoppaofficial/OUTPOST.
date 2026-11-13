@@ -655,17 +655,45 @@ export function createAdminService(deps?: { client?: any }) {
     };
   }
 
+  async function readOptionalPropertyImages(): Promise<AdminRecord[]> {
+    const { data, error } = await client
+      .from('property_images')
+      .select('property_id, public_url, is_cover, sort_order, created_at');
+    if (error) {
+      const code = String(error?.code || '');
+      const msg = String(error?.message || '').toLowerCase();
+      if (
+        code === '42P01' ||
+        code === 'PGRST205' ||
+        msg.includes('does not exist') ||
+        msg.includes('could not find the table')
+      ) {
+        return [];
+      }
+      throw classifySupabaseError(error, 'property_images');
+    }
+    return Array.isArray(data) ? (data as AdminRecord[]) : [];
+  }
+
   async function getProperties(): Promise<AdminRecord[]> {
     await verifyActiveAdmin();
 
-    const [properties, locations, profiles] = await Promise.all([
+    const [properties, locations, profiles, propertyImages] = await Promise.all([
       readTable('properties'),
       readTable('property_locations'),
       readTable('profiles', 'id, full_name, email'),
+      readOptionalPropertyImages(),
     ]);
 
     const locationByProperty = new Map(locations.map((item) => [item.property_id, item]));
     const landlordById = new Map(profiles.map((item) => [item.id, item]));
+    const imagesByProperty = new Map<string, AdminRecord[]>();
+    for (const img of propertyImages) {
+      if (!img.property_id) continue;
+      const list = imagesByProperty.get(img.property_id) || [];
+      list.push(img);
+      imagesByProperty.set(img.property_id, list);
+    }
 
     return properties
       .map((property) => {
@@ -673,6 +701,24 @@ export function createAdminService(deps?: { client?: any }) {
         const landlord = landlordById.get(property.landlord_id);
         const approvalStatus = property.approval_status || 'pending';
         const locStatus = loc?.verification_status || 'not_submitted';
+
+        const relationalUrls = (imagesByProperty.get(property.id) || [])
+          .slice()
+          .sort((a, b) => {
+            const coverDiff = Number(Boolean(b.is_cover)) - Number(Boolean(a.is_cover));
+            if (coverDiff !== 0) return coverDiff;
+            return Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+          })
+          .map((row) => String(row.public_url || '').trim());
+
+        const rawFallbackUrls: string[] = [
+          ...relationalUrls,
+          ...(Array.isArray(property.images) ? property.images.map((u: unknown) => String(u || '').trim()) : []),
+          ...(property.featured_image_url ? [String(property.featured_image_url).trim()] : []),
+        ];
+        const mergedImages = Array.from(
+          new Set(rawFallbackUrls.filter((u) => Boolean(u) && !/^(data:|blob:)/i.test(u)))
+        );
 
         return {
           ...property,
@@ -685,9 +731,8 @@ export function createAdminService(deps?: { client?: any }) {
           landlordName: landlord?.full_name || landlord?.email || property.landlord_id,
           adminReviewReason: property.rejection_reason || undefined,
           createdAt: displayDate(property.created_at),
-          images: Array.isArray(property.images) && property.images.length > 0
-            ? property.images
-            : (property.featured_image_url ? [property.featured_image_url] : []),
+          images: mergedImages,
+          featuredImageUrl: mergedImages[0],
           submittedLocation: loc
             ? {
                 ...loc,

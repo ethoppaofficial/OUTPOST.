@@ -19,6 +19,7 @@ import { validateUploadFile, LANDLORD_DOCUMENT_UPLOAD_RULES } from '../../applic
 import { normalizeError } from '../../application/utils/errorUtils';
 import { useAuth } from '../../application/context/AuthContext';
 import { LandlordProfile, VerificationReviewStatus } from '../../domain/types';
+import { ProfileAvatarUploader } from '../../components/common/ProfileAvatarUploader';
 
 export const LandlordVerificationPage: React.FC = () => {
   const { currentUser, loading: authLoading, landlordProfile, refreshAuthProfile } = useAuth();
@@ -200,6 +201,8 @@ export const LandlordVerificationPage: React.FC = () => {
           <VerificationBadge type="landlord" status={status} />
         </div>
       </div>
+
+      <ProfileAvatarUploader title="Landlord Host Profile Photo" />
 
       {loadError && (
         <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ShieldCheck, KeyRound, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../application/context/AuthContext';
 import { authService } from '../../application/services/authService';
+import { ProfileAvatarUploader } from '../../components/common/ProfileAvatarUploader';
 
 export const AdminAccountPage: React.FC = () => {
   const { currentUser, authUser } = useAuth();
@@ -72,6 +73,8 @@ export const AdminAccountPage: React.FC = () => {
           </div>
         </dl>
       </div>
+
+      <ProfileAvatarUploader title="Administrator Profile Photo" />
 
       {/* Password Management & Reset Card */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">

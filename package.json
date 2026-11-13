@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "npx tsx --test functions/test/geometry.test.mjs functions/test/storageSecurity.test.mjs test/security-regression.test.mjs test/supabase-security.test.mjs test/database-runtime.test.mjs test/edge-functions-execution.test.mjs test/frontend-security.test.mjs test/map-enhancements.test.mjs test/auth-role-assignment.test.mjs test/auth-integration.test.mjs test/admin-live-metrics.test.mjs test/chat-system.test.mjs test/end-to-end-remediation.test.mjs"
+    "test": "npx tsx --test functions/test/geometry.test.mjs functions/test/storageSecurity.test.mjs test/security-regression.test.mjs test/supabase-security.test.mjs test/database-runtime.test.mjs test/edge-functions-execution.test.mjs test/frontend-security.test.mjs test/map-enhancements.test.mjs test/auth-role-assignment.test.mjs test/auth-integration.test.mjs test/admin-live-metrics.test.mjs test/chat-system.test.mjs test/end-to-end-remediation.test.mjs test/migration-09-and-upload-integrity.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

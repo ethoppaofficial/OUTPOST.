@@ -13,11 +13,46 @@
  * - Concurrency & Invariants: All inventory modifications delegate to database stored procedures (`create_reservation_atomic`, `review_payment_receipt_atomic`) to prevent double-booking.
  */
 
-import { Reservation, Invoice, PaymentReceipt, ReservationStatus } from '../../domain/types';
+import { Reservation, Invoice, PaymentReceipt } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
+import { storageService } from './storageService';
 
 class ReservationService {
+  public async loadStudentReservations(studentId?: string): Promise<Reservation[]> {
+    const id = studentId || repository.getActiveUserId();
+    return repository.fetchStudentReservationsFromSupabase(id);
+  }
+
+  public async loadReservationDetail(reservationId: string): Promise<{
+    reservation: Reservation;
+    invoice?: Invoice;
+    receipt?: PaymentReceipt;
+  } | null> {
+    const bundle = await repository.fetchReservationDetailFromSupabase(reservationId);
+    if (!bundle) return null;
+    return {
+      reservation: bundle.reservation,
+      invoice: bundle.invoice ? this.enrichInvoice(bundle.invoice) : undefined,
+      receipt: bundle.receipt,
+    };
+  }
+
+  public async loadInvoiceById(invoiceId: string): Promise<Invoice | null> {
+    const inv = await repository.fetchInvoiceByIdFromSupabase(invoiceId);
+    return inv ? this.enrichInvoice(inv) : null;
+  }
+
+  public async loadLandlordReservations(landlordId?: string): Promise<Reservation[]> {
+    const id = landlordId || repository.getActiveUserId();
+    return repository.fetchLandlordReservationsFromSupabase(id);
+  }
+
+  public async loadLandlordReceipts(landlordId?: string): Promise<PaymentReceipt[]> {
+    const id = landlordId || repository.getActiveUserId();
+    return repository.fetchLandlordReceiptsFromSupabase(id);
+  }
+
   public getReservationsForStudent(studentId: string): Reservation[] {
     return repository.getReservationsForStudent(studentId);
   }
@@ -59,7 +94,7 @@ class ReservationService {
 
     return {
       ...inv,
-      registrationNumber: inv.registrationNumber || student?.registrationNumber || 'STU-2026-4821',
+      registrationNumber: inv.registrationNumber || student?.registrationNumber || '',
       university: inv.university || student?.university || student?.institutionName || 'Higher Institution',
       landlordName: inv.landlordName || landlord?.legalName || 'Verified Property Manager',
       propertyTitle: inv.propertyTitle || property?.title || inv.propertyName,
@@ -85,6 +120,13 @@ class ReservationService {
     return repository.getReceiptByReservationId(resId);
   }
 
+  public async cancelReservationPersisted(
+    reservationId: string,
+    reason?: string
+  ): Promise<{ success: boolean; message?: string }> {
+    return repository.cancelReservationPersisted(reservationId, reason);
+  }
+
   public cancelReservation(reservationId: string, reason?: string): { success: boolean; message?: string } {
     return repository.cancelReservation(reservationId, reason);
   }
@@ -95,9 +137,9 @@ class ReservationService {
       const student = repository.getStudentProfile(rc.studentId);
       return {
         ...rc,
-        propertyTitle: rc.propertyName,
-        roomName: res?.unitName || 'Standard Room',
-        registrationNumber: student?.registrationNumber || 'STU-2026-4821',
+        propertyTitle: rc.propertyTitle || rc.propertyName,
+        roomName: rc.roomName || res?.unitName || 'Standard Room',
+        registrationNumber: rc.registrationNumber || student?.registrationNumber || '',
       };
     });
   }
@@ -112,8 +154,44 @@ class ReservationService {
     return this.getReservationsForLandlord(id);
   }
 
+  public async createReservationPersisted(
+    studentId: string,
+    propertyId: string,
+    unitId: string,
+    groupId?: string
+  ) {
+    return repository.createReservationPersisted(studentId, propertyId, unitId, groupId);
+  }
+
   public createReservation(studentId: string, propertyId: string, unitId: string, groupId?: string) {
     return repository.createReservation(studentId, propertyId, unitId, groupId);
+  }
+
+  public async submitPaymentReceiptWithStorage(params: {
+    reservationId: string;
+    file: File | Blob;
+    originalFileName: string;
+    amountPaid: number;
+    paymentReference: string;
+    payerBankName: string;
+    paymentDate?: string;
+  }): Promise<{ success: boolean; receipt?: PaymentReceipt; error?: string }> {
+    const paymentDate = params.paymentDate || new Date().toISOString();
+    await storageService.uploadPaymentReceiptWithSession({
+      reservationId: params.reservationId,
+      file: params.file,
+      originalFileName: params.originalFileName,
+      amountPaid: params.amountPaid,
+      paymentReference: params.paymentReference,
+      payerBankName: params.payerBankName,
+      paymentDate,
+    });
+
+    const bundle = await this.loadReservationDetail(params.reservationId);
+    return {
+      success: Boolean(bundle?.receipt),
+      receipt: bundle?.receipt,
+    };
   }
 
   public uploadPaymentReceipt(data: {
@@ -146,6 +224,15 @@ class ReservationService {
 
   public uploadReceipt(data: any) {
     return this.uploadPaymentReceipt(data);
+  }
+
+  public async reviewPaymentReceiptPersisted(
+    receiptId: string,
+    decision: 'approved' | 'rejected',
+    landlordId: string,
+    rejectionReason?: string
+  ): Promise<{ success: boolean; receipt?: PaymentReceipt; error?: string }> {
+    return repository.reviewPaymentReceiptPersisted(receiptId, decision, landlordId, rejectionReason);
   }
 
   public reviewPaymentReceipt(

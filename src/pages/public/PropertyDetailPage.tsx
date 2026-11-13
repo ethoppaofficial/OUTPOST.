@@ -71,6 +71,7 @@ export const PropertyDetailPage: React.FC = () => {
   const [reportReason, setReportReason] = useState<any>('Misleading photos');
   const [reportDetails, setReportDetails] = useState('');
   const [reportSubmitted, setReportSubmitted] = useState(false);
+  const [submittingReservation, setSubmittingReservation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const loadProperty = React.useCallback(async () => {
@@ -193,7 +194,7 @@ export const PropertyDetailPage: React.FC = () => {
 
   const selectedRoom = property.rooms.find((r) => r.id === selectedUnitId) || property.rooms[0];
 
-  const handleConfirmReservation = () => {
+  const handleConfirmReservation = async () => {
     setErrorMsg(null);
     if (!currentUser) {
       navigate('/login');
@@ -210,17 +211,24 @@ export const PropertyDetailPage: React.FC = () => {
       return;
     }
 
-    const result = reservationService.createReservation(
-      currentUser.id,
-      property.id,
-      selectedRoom.id
-    );
+    setSubmittingReservation(true);
+    try {
+      const result = await reservationService.createReservationPersisted(
+        currentUser.id,
+        property.id,
+        selectedRoom.id
+      );
 
-    if (result.success && result.reservation) {
-      setReserveModalOpen(false);
-      navigate(`/student/reservations/${result.reservation.id}`);
-    } else {
-      setErrorMsg(result.error || 'Failed to place reservation hold.');
+      if (result.success && result.reservation) {
+        setReserveModalOpen(false);
+        navigate(`/student/reservations/${result.reservation.id}`);
+      } else {
+        setErrorMsg(result.error || 'Failed to place reservation hold.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to place reservation hold.');
+    } finally {
+      setSubmittingReservation(false);
     }
   };
 
@@ -668,16 +676,20 @@ export const PropertyDetailPage: React.FC = () => {
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
             <button
+              type="button"
+              disabled={submittingReservation}
               onClick={() => setReserveModalOpen(false)}
-              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium"
+              className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              onClick={handleConfirmReservation}
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs"
+              type="button"
+              disabled={submittingReservation}
+              onClick={() => void handleConfirmReservation()}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs disabled:opacity-60 cursor-pointer"
             >
-              Confirm & Generate Invoice
+              {submittingReservation ? 'Placing Hold…' : 'Confirm & Generate Invoice'}
             </button>
           </div>
         </div>

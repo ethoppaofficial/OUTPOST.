@@ -19,6 +19,7 @@ import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { StudentProfile, User } from '../../domain/types';
 import { CompatibilityResult } from '../../domain/matching';
+import { Avatar } from '../../components/common/Avatar';
 
 /** Represents a candidate roommate with user record and compatibility score calculation */
 interface MatchItem {
@@ -153,10 +154,12 @@ export const RoommatesPage: React.FC = () => {
                 {/* Header: Photo, Name, Score Badge */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <img
-                      src={usr.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                      alt={st.fullName}
-                      className="w-12 h-12 rounded-2xl object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                    <Avatar
+                      name={st.fullName}
+                      avatarUrl={usr.avatarUrl}
+                      avatarPresetId={usr.avatarPresetId}
+                      size="lg"
+                      className="rounded-2xl"
                     />
                     <div>
                       <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">

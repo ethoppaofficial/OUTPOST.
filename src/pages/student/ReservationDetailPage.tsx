@@ -13,19 +13,19 @@
  *   or `receipt_submitted` within the 7-day hold window. Expired or cancelled holds reject uploads.
  */
 
-import React, { useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import {
   Clock,
   FileText,
   Upload,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   ArrowLeft,
   Building,
-  CreditCard,
   Loader2,
+  RefreshCw,
+  Eye,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
@@ -33,6 +33,7 @@ import { reservationService } from '../../application/services/reservationServic
 import { storageService } from '../../application/services/storageService';
 import { ReservationStatusBadge, ReceiptStatusBadge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
+import { Invoice, PaymentReceipt, Reservation } from '../../domain/types';
 import {
   validateUploadFile,
   PAYMENT_RECEIPT_UPLOAD_RULES,
@@ -45,21 +46,27 @@ import { normalizeError } from '../../application/utils/errorUtils';
 
 export const ReservationDetailPage: React.FC = () => {
   const { reservationId } = useParams<{ reservationId: string }>();
-  const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const fallbackSession = authService.getSession();
   const activeUser = currentUser || fallbackSession.user;
 
-  const [reservation, setReservation] = useState(() =>
+  const [reservation, setReservation] = useState<Reservation | undefined>(() =>
     reservationService.getReservationById(reservationId || '')
   );
-
-  const [receipt, setReceipt] = useState(() =>
+  const [liveInvoice, setLiveInvoice] = useState<Invoice | undefined>(() =>
+    reservation?.invoiceId
+      ? reservationService.getInvoiceById(reservation.invoiceId)
+      : reservationService.getInvoiceByReservationId(reservationId || '')
+  );
+  const [receipt, setReceipt] = useState<PaymentReceipt | undefined>(() =>
     reservationService.getReceiptForReservation(reservationId || '')
   );
+  const [loadingPage, setLoadingPage] = useState<boolean>(!reservation);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [payerBank, setPayerBank] = useState('GTBank');
   const [reference, setReference] = useState('');
   const [amountPaid, setAmountPaid] = useState<number>(reservation?.amount || 0);
@@ -68,11 +75,46 @@ export const ReservationDetailPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
+  const [loadingReceiptPreview, setLoadingReceiptPreview] = useState(false);
+
+  const loadDetail = useCallback(async () => {
+    if (!reservationId || authLoading) return;
+    setLoadingPage(true);
+    setLoadError(null);
+    try {
+      const bundle = await reservationService.loadReservationDetail(reservationId);
+      if (bundle) {
+        setReservation(bundle.reservation);
+        setLiveInvoice(bundle.invoice);
+        setReceipt(bundle.receipt);
+        setAmountPaid((prev) => (prev > 0 ? prev : bundle.reservation.amount));
+      }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not load reservation details.');
+      setLoadError(normalized.userMessage);
+    } finally {
+      setLoadingPage(false);
+    }
+  }, [reservationId, authLoading]);
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
+
+  if (loadingPage && !reservation) {
+    return (
+      <div className="max-w-3xl mx-auto py-12 flex items-center justify-center gap-2 text-xs text-slate-500">
+        <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+        <span>Loading reservation details…</span>
+      </div>
+    );
+  }
 
   if (!reservation) {
     return (
       <div className="text-center py-12 space-y-3">
-        <p className="text-sm text-slate-500">Reservation not found.</p>
+        <p className="text-sm text-slate-500">{loadError || 'Reservation not found.'}</p>
         <Link to="/student/reservations" className="text-xs text-emerald-600 font-semibold underline">
           Back to my reservations
         </Link>
@@ -94,9 +136,11 @@ export const ReservationDetailPage: React.FC = () => {
   }
 
   // Authoritative invoice & direct landlord payment details
-  const invoice = reservation.invoiceId
-    ? reservationService.getInvoiceById(reservation.invoiceId)
-    : reservationService.getInvoiceByReservationId(reservation.id);
+  const invoice =
+    liveInvoice ||
+    (reservation.invoiceId
+      ? reservationService.getInvoiceById(reservation.invoiceId)
+      : reservationService.getInvoiceByReservationId(reservation.id));
 
   const bankDetails = invoice?.bankDetails;
   const hasVerifiedBankDetails = Boolean(
@@ -148,35 +192,18 @@ export const ReservationDetailPage: React.FC = () => {
     setUploading(true);
 
     try {
-      // Direct upload through tenant-isolated storage service
-      const uploadRes = await storageService.uploadPaymentReceipt(
-        reservation.id,
-        receiptFile,
-        fileValidation.sanitizedFileName || receiptFile.name,
-        reservation.landlordId,
-        activeUser.id
-      );
-
-      if (!uploadRes || !uploadRes.url) {
-        throw new Error('Failed to obtain authenticated storage location for the receipt.');
-      }
-
-      const res = await reservationService.uploadPaymentReceipt({
+      const res = await reservationService.submitPaymentReceiptWithStorage({
         reservationId: reservation.id,
-        invoiceId: reservation.invoiceId || invoice?.id || `inv-${reservation.id}`,
-        studentId: activeUser.id,
-        landlordId: reservation.landlordId,
-        fileUrl: uploadRes.url,
-        fileName: uploadRes.fileName,
-        fileSize: uploadRes.fileSize,
+        file: receiptFile,
+        originalFileName: fileValidation.sanitizedFileName || receiptFile.name,
+        amountPaid: Number(amountPaid),
         paymentReference: reference.trim(),
         payerBankName: payerBank,
-        amountPaid: Number(amountPaid),
       });
 
       if (res.success && res.receipt) {
         setReceipt(res.receipt);
-        setReservation(reservationService.getReservationById(reservation.id));
+        await loadDetail();
         setUploadModalOpen(false);
         setReceiptFile(null);
         setFileName('');
@@ -193,21 +220,68 @@ export const ReservationDetailPage: React.FC = () => {
     }
   };
 
-  const handleCancelReservation = () => {
-    reservationService.cancelReservation(reservation.id);
-    setReservation(reservationService.getReservationById(reservation.id));
-    setConfirmCancel(false);
+  const handleViewReceiptEvidence = async () => {
+    if (!receipt?.id) return;
+    setLoadingReceiptPreview(true);
+    setError(null);
+    try {
+      const signedUrl = await storageService.getPrivateAssetDownloadUrl('payment-receipt', receipt.id);
+      setViewingReceiptUrl(signedUrl);
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Unable to load private receipt preview.');
+      setError(normalized.userMessage);
+    } finally {
+      setLoadingReceiptPreview(false);
+    }
+  };
+
+  const handleCancelReservation = async () => {
+    setCancelling(true);
+    setError(null);
+    try {
+      const res = await reservationService.cancelReservationPersisted(reservation.id);
+      if (res.success) {
+        await loadDetail();
+        setConfirmCancel(false);
+        setSuccess(res.message || 'Reservation cancelled and bed-space released.');
+      } else {
+        setError(res.message || 'Could not cancel reservation hold.');
+      }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not cancel reservation hold.');
+      setError(normalized.userMessage);
+    } finally {
+      setCancelling(false);
+    }
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <Link
-        to="/student/reservations"
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        <span>Back to My Reservations</span>
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          to="/student/reservations"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Back to My Reservations</span>
+        </Link>
+
+        <button
+          type="button"
+          onClick={() => void loadDetail()}
+          disabled={loadingPage}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingPage ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      {loadError && (
+        <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 text-xs">
+          {loadError}
+        </div>
+      )}
 
       {/* Header */}
       <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
@@ -387,6 +461,18 @@ export const ReservationDetailPage: React.FC = () => {
                 {receipt.rejectionReason}
               </div>
             )}
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleViewReceiptEvidence()}
+                disabled={loadingReceiptPreview}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+              >
+                {loadingReceiptPreview ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5 text-emerald-600" />}
+                <span>View Uploaded Receipt</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -408,10 +494,11 @@ export const ReservationDetailPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={handleCancelReservation}
-                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer"
+                disabled={cancelling}
+                onClick={() => void handleCancelReservation()}
+                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer disabled:opacity-50"
               >
-                Confirm Cancel
+                {cancelling ? 'Cancelling…' : 'Confirm Cancel'}
               </button>
             </div>
           ) : (
@@ -545,6 +632,32 @@ export const ReservationDetailPage: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Signed Private Receipt Viewer Modal */}
+      <Modal
+        isOpen={Boolean(viewingReceiptUrl)}
+        onClose={() => setViewingReceiptUrl(null)}
+        title="Uploaded Payment Receipt"
+      >
+        <div className="space-y-3 text-xs">
+          <div className="rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 min-h-[240px] max-h-[65vh] flex items-center justify-center p-2">
+            {viewingReceiptUrl?.toLowerCase().includes('.pdf') ? (
+              <iframe src={viewingReceiptUrl} className="w-full h-96 rounded-xl border-0" title="Uploaded Receipt PDF" />
+            ) : (
+              <img src={viewingReceiptUrl || ''} alt="Uploaded Payment Receipt" className="max-h-[60vh] object-contain rounded-xl" />
+            )}
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setViewingReceiptUrl(null)}
+              className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

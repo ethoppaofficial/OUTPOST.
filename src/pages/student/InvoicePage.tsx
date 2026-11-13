@@ -9,20 +9,54 @@
  * - Print-Optimized Layout: Formatted with print media queries (`no-print` classes) for physical receipting or PDF export.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Printer, ArrowLeft, Building2, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Printer, ArrowLeft, Building2, Loader2, RefreshCw } from 'lucide-react';
 import { reservationService } from '../../application/services/reservationService';
-import { authService } from '../../application/services/authService';
+import { Invoice } from '../../domain/types';
 
 export const InvoicePage: React.FC = () => {
   const { invoiceId } = useParams<{ invoiceId: string }>();
-  const invoice = reservationService.getInvoiceById(invoiceId || '');
+  const [invoice, setInvoice] = useState<Invoice | undefined>(() =>
+    reservationService.getInvoiceById(invoiceId || '')
+  );
+  const [loading, setLoading] = useState<boolean>(!invoice);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadInvoice = useCallback(async () => {
+    if (!invoiceId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const live = await reservationService.loadInvoiceById(invoiceId);
+      if (live) setInvoice(live);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load invoice document.');
+    } finally {
+      setLoading(false);
+    }
+  }, [invoiceId]);
+
+  useEffect(() => {
+    void loadInvoice();
+  }, [loadInvoice]);
+
+  if (loading && !invoice) {
+    return (
+      <div className="py-12 flex items-center justify-center gap-2 text-xs text-slate-500">
+        <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+        <span>Loading official invoice…</span>
+      </div>
+    );
+  }
 
   if (!invoice) {
     return (
       <div className="text-center py-12 space-y-3">
-        <p className="text-sm text-slate-500">Invoice document not found.</p>
+        <p className="text-sm text-slate-500">{loadError || 'Invoice document not found.'}</p>
         <Link to="/student/reservations" className="text-xs text-emerald-600 font-semibold underline">
           Back to Reservations
         </Link>
@@ -51,13 +85,25 @@ export const InvoicePage: React.FC = () => {
           <span>Back to Reservation</span>
         </Link>
 
-        <button
-          onClick={handlePrint}
-          className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs"
-        >
-          <Printer className="w-4 h-4" />
-          <span>Print / Save PDF</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void loadInvoice()}
+            disabled={loading}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print / Save PDF</span>
+          </button>
+        </div>
       </div>
 
       {/* Printable Invoice Paper Sheet */}

@@ -9,29 +9,82 @@
  * - Receipt Status: Tracks whether bank transfer receipts have been submitted, approved, or rejected.
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck, Clock, FileText, ArrowRight, CheckCircle2, XCircle } from 'lucide-react';
+import { CalendarCheck, FileText, ArrowRight, RefreshCw, Loader2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
 import { ReservationStatusBadge } from '../../components/ui/Badge';
+import { useAuth } from '../../application/context/AuthContext';
+import { Reservation } from '../../domain/types';
 
 export const ReservationsPage: React.FC = () => {
+  const { currentUser, loading: authLoading } = useAuth();
   const session = authService.getSession();
-  const reservations = reservationService.getStudentReservations(session.user.id);
+  const studentId = currentUser?.id || session.user.id;
+
+  const [reservations, setReservations] = useState<Reservation[]>(() =>
+    studentId && studentId !== 'anonymous' ? reservationService.getStudentReservations(studentId) : []
+  );
+  const [loadingList, setLoadingList] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadReservations = useCallback(async () => {
+    if (authLoading) return;
+    if (!studentId || studentId === 'anonymous') {
+      setLoadingList(false);
+      return;
+    }
+    setLoadingList(true);
+    setLoadError(null);
+    try {
+      const live = await reservationService.loadStudentReservations(studentId);
+      setReservations(live);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Could not load reservations.');
+    } finally {
+      setLoadingList(false);
+    }
+  }, [authLoading, studentId]);
+
+  useEffect(() => {
+    void loadReservations();
+  }, [loadReservations]);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-          My Accommodation Reservations & Holds
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Track active 7-day holds, review issued invoices, and monitor landlord payment receipt confirmations.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            My Accommodation Reservations & Holds
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Track active 7-day holds, review issued invoices, and monitor landlord payment receipt confirmations.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadReservations()}
+          disabled={loadingList}
+          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
       </div>
 
-      {reservations.length === 0 ? (
+      {loadError && (
+        <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 text-xs">
+          {loadError}
+        </div>
+      )}
+
+      {loadingList && reservations.length === 0 ? (
+        <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-500">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+          <span>Loading your reservations…</span>
+        </div>
+      ) : reservations.length === 0 ? (
         <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 space-y-3">
           <CalendarCheck className="w-8 h-8 text-slate-400 mx-auto" />
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Active Reservations</h3>

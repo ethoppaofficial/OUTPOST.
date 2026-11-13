@@ -23,7 +23,7 @@ import { VerificationBadge, Badge } from '../../components/ui/Badge';
 import { validateUploadFile, STUDENT_DOCUMENT_UPLOAD_RULES } from '../../application/utils/uploadValidation';
 import { normalizeError } from '../../application/utils/errorUtils';
 import { useAuth } from '../../application/context/AuthContext';
-
+import { ProfileAvatarUploader } from '../../components/common/ProfileAvatarUploader';
 import { supabase } from '../../infrastructure/supabase/supabaseClient';
 
 export const StudentVerificationPage: React.FC = () => {
@@ -168,6 +168,9 @@ export const StudentVerificationPage: React.FC = () => {
           Upload authentic proof of active university enrolment to obtain your verified student badge.
         </p>
       </div>
+
+      {/* Profile Picture Uploader */}
+      <ProfileAvatarUploader title="Student Profile Photo" />
 
       {/* Overview status box */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">

@@ -421,7 +421,21 @@ export class SupabaseRepository {
         ? Math.max(0, Number(row.available_spaces))
         : rooms.reduce((acc, r) => acc + r.availableSpaces, 0);
 
-    const images = this.sanitizeMediaUrls(row.images, row.featured_image_url);
+    const sortedRelationalUrls = Array.isArray(row.property_images)
+      ? [...row.property_images]
+          .sort((a: any, b: any) => {
+            const coverDiff = Number(Boolean(b?.is_cover)) - Number(Boolean(a?.is_cover));
+            if (coverDiff !== 0) return coverDiff;
+            return Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0);
+          })
+          .map((img: any) => String(img?.public_url || '').trim())
+          .filter(Boolean)
+      : [];
+
+    const images = this.sanitizeMediaUrls(
+      [...sortedRelationalUrls, ...(Array.isArray(row.images) ? row.images : [])],
+      row.featured_image_url
+    );
     const titleStr = String(row.title || 'Student Accommodation');
     const slug = titleStr.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || row.id;
 
@@ -507,6 +521,92 @@ export class SupabaseRepository {
     };
   }
 
+  private static readonly PROPERTY_SELECT_BASE = `
+    id,
+    landlord_id,
+    title,
+    description,
+    address,
+    landmark,
+    area,
+    city,
+    state,
+    country,
+    property_type,
+    rental_fee_annual,
+    caution_deposit,
+    service_charge,
+    total_spaces,
+    available_spaces,
+    approval_status,
+    is_published,
+    rejection_reason,
+    featured_image_url,
+    images,
+    amenities,
+    created_at,
+    updated_at,
+    property_locations (
+      id,
+      property_id,
+      submitted_by,
+      latitude,
+      longitude,
+      public_latitude,
+      public_longitude,
+      precision,
+      verification_status,
+      formatted_address
+    ),
+    units (
+      id,
+      property_id,
+      name,
+      unit_type,
+      capacity,
+      available_spaces,
+      price_annual,
+      is_active
+    )
+  `;
+
+  private static readonly PROPERTY_SELECT_WITH_IMAGES = `
+    ${SupabaseRepository.PROPERTY_SELECT_BASE},
+    property_images (
+      id,
+      storage_path,
+      public_url,
+      file_name,
+      content_type,
+      file_size,
+      is_cover,
+      sort_order
+    )
+  `;
+
+  private isMissingPropertyImagesError(error: any): boolean {
+    const code = String(error?.code || '');
+    const msg = String(error?.message || '').toLowerCase();
+    return code === 'PGRST200' || code === 'PGRST205' || code === '42P01' || msg.includes('property_images');
+  }
+
+  private async selectPropertiesResilient(
+    applyQuery: (selectClause: string) => Promise<{ data: any; error: any }>
+  ): Promise<any[]> {
+    const primary = await applyQuery(SupabaseRepository.PROPERTY_SELECT_WITH_IMAGES);
+    if (!primary.error) {
+      return Array.isArray(primary.data) ? primary.data : primary.data ? [primary.data] : [];
+    }
+    if (this.isMissingPropertyImagesError(primary.error)) {
+      const fallback = await applyQuery(SupabaseRepository.PROPERTY_SELECT_BASE);
+      if (fallback.error) {
+        throw fallback.error;
+      }
+      return Array.isArray(fallback.data) ? fallback.data : fallback.data ? [fallback.data] : [];
+    }
+    throw primary.error;
+  }
+
   private mergePropertiesIntoCache(nextProps: Property[], replaceApproved: boolean = false): void {
     const incomingIds = new Set(nextProps.map((p) => p.id));
     const retained = this.properties.filter((existing) => {
@@ -525,61 +625,19 @@ export class SupabaseRepository {
   }
 
   public async fetchApprovedPropertiesFromSupabase(): Promise<Property[]> {
-    const { data: propsData, error: propsError } = await supabase
-      .from('properties')
-      .select(`
-        id,
-        landlord_id,
-        title,
-        description,
-        address,
-        landmark,
-        area,
-        city,
-        state,
-        country,
-        property_type,
-        rental_fee_annual,
-        caution_deposit,
-        service_charge,
-        total_spaces,
-        available_spaces,
-        approval_status,
-        is_published,
-        rejection_reason,
-        featured_image_url,
-        images,
-        amenities,
-        created_at,
-        updated_at,
-        property_locations (
-          id,
-          property_id,
-          submitted_by,
-          latitude,
-          longitude,
-          public_latitude,
-          public_longitude,
-          precision,
-          verification_status,
-          formatted_address
-        ),
-        units (
-          id,
-          property_id,
-          name,
-          unit_type,
-          capacity,
-          available_spaces,
-          price_annual,
-          is_active
+    let propsData: any[];
+    try {
+      propsData = await this.selectPropertiesResilient((selectClause) =>
+        Promise.resolve(
+          supabase
+            .from('properties')
+            .select(selectClause)
+            .eq('is_published', true)
+            .eq('approval_status', 'approved')
         )
-      `)
-      .eq('is_published', true)
-      .eq('approval_status', 'approved');
-
-    if (propsError) {
-      throw new Error(`Could not load accommodation directory: ${propsError.message}`);
+      );
+    } catch (propsError: any) {
+      throw new Error(`Could not load accommodation directory: ${propsError?.message || propsError}`);
     }
 
     const mapped = (propsData || []).map((row: any) =>
@@ -591,20 +649,18 @@ export class SupabaseRepository {
 
   public async fetchLandlordPropertiesFromSupabase(landlordId: string): Promise<Property[]> {
     if (!landlordId) return [];
-    const { data, error } = await supabase
-      .from('properties')
-      .select(`
-        id, landlord_id, title, description, address, landmark, area, city, state, country,
-        property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
-        available_spaces, approval_status, is_published, rejection_reason,
-        featured_image_url, images, amenities, created_at, updated_at,
-        property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
-        units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
-      `)
-      .eq('landlord_id', landlordId);
-
-    if (error) {
-      throw new Error(`Could not load landlord properties: ${error.message}`);
+    let data: any[];
+    try {
+      data = await this.selectPropertiesResilient((selectClause) =>
+        Promise.resolve(
+          supabase
+            .from('properties')
+            .select(selectClause)
+            .eq('landlord_id', landlordId)
+        )
+      );
+    } catch (error: any) {
+      throw new Error(`Could not load landlord properties: ${error?.message || error}`);
     }
 
     const { data: lp } = await supabase
@@ -631,22 +687,21 @@ export class SupabaseRepository {
     const isUuidLookup = this.isUuid(lookupKey);
 
     if (isUuidLookup) {
-      const { data, error } = await supabase
-        .from('properties')
-        .select(`
-          id, landlord_id, title, description, address, landmark, area, city, state, country,
-          property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
-          available_spaces, approval_status, is_published, rejection_reason,
-          featured_image_url, images, amenities, created_at, updated_at,
-          property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
-          units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
-        `)
-        .eq('id', lookupKey)
-        .maybeSingle();
-
-      if (error) {
-        throw new Error(`Could not load property record: ${error.message}`);
+      let rows: any[];
+      try {
+        rows = await this.selectPropertiesResilient((selectClause) =>
+          Promise.resolve(
+            supabase
+              .from('properties')
+              .select(selectClause)
+              .eq('id', lookupKey)
+              .maybeSingle()
+          )
+        );
+      } catch (error: any) {
+        throw new Error(`Could not load property record: ${error?.message || error}`);
       }
+      const data = rows[0];
       if (!data) return null;
       const mapped = this.mapSupabasePropertyRow(data);
       this.mergePropertiesIntoCache([mapped]);
@@ -819,6 +874,56 @@ export class SupabaseRepository {
     return user;
   }
 
+  public async updateUserAvatarPersisted(
+    userId: string,
+    avatarUrl: string,
+    previousAvatarUrl?: string
+  ): Promise<User> {
+    if (!userId || /^(data:|blob:)/i.test(avatarUrl)) {
+      throw new Error('A permanent public Storage avatar URL is required.');
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      throw new Error(`Could not update profile photo in Supabase: ${error.message}`);
+    }
+
+    if (previousAvatarUrl && previousAvatarUrl !== avatarUrl) {
+      await supabaseStorageService.deletePublicMediaAsset('profile-pictures', previousAvatarUrl);
+    }
+
+    let updatedUser: User | undefined;
+    this.users = this.users.map((u) => {
+      if (u.id === userId) {
+        updatedUser = { ...u, avatarUrl };
+        return updatedUser;
+      }
+      return u;
+    });
+
+    if (!updatedUser) {
+      updatedUser = {
+        id: userId,
+        email: '',
+        role: 'student',
+        accountStatus: 'active',
+        emailVerified: true,
+        avatarUrl,
+        createdAt: new Date().toISOString(),
+      };
+      this.users.push(updatedUser);
+    }
+
+    return updatedUser;
+  }
+
   public getActiveUserId(): string {
     return this.activeUserId;
   }
@@ -840,19 +945,16 @@ export class SupabaseRepository {
   private async hydrateUserSessionContext(userId: string): Promise<void> {
     if (!userId) return;
     try {
-      const [{ data: landlordProps }, { data: groupRows }, { data: studentProf }, { data: landlordProf }] =
+      const [landlordProps, { data: groupRows }, { data: studentProf }, { data: landlordProf }] =
         await Promise.all([
-          supabase
-            .from('properties')
-            .select(`
-              id, landlord_id, title, description, address, landmark, area, city, state, country,
-              property_type, rental_fee_annual, caution_deposit, service_charge, total_spaces,
-              available_spaces, approval_status, is_published, rejection_reason,
-              featured_image_url, images, amenities, created_at, updated_at,
-              property_locations (id, property_id, submitted_by, latitude, longitude, public_latitude, public_longitude, precision, verification_status, formatted_address),
-              units (id, property_id, name, unit_type, capacity, available_spaces, price_annual, is_active)
-            `)
-            .eq('landlord_id', userId),
+          this.selectPropertiesResilient((selectClause) =>
+            Promise.resolve(
+              supabase
+                .from('properties')
+                .select(selectClause)
+                .eq('landlord_id', userId)
+            )
+          ).catch(() => []),
           supabase
             .from('accommodation_groups')
             .select('*, group_members(user_id, role, joined_at, profiles(full_name))')
@@ -872,6 +974,16 @@ export class SupabaseRepository {
         const existingOther = this.properties.filter((p) => p.landlordId !== userId);
         this.properties = [...mappedProps, ...existingOther];
         appEventBus.publish('propertiesUpdated', this.properties);
+      }
+
+      const role = this.getUserById(userId)?.role;
+      if (role === 'student') {
+        this.fetchStudentReservationsFromSupabase(userId).catch(() => []);
+      } else if (role === 'landlord') {
+        Promise.all([
+          this.fetchLandlordReservationsFromSupabase(userId),
+          this.fetchLandlordReceiptsFromSupabase(userId),
+        ]).catch(() => {});
       }
 
       if (Array.isArray(groupRows) && groupRows.length > 0) {
@@ -1605,6 +1717,12 @@ export class SupabaseRepository {
       throw new Error('At least one uploaded property photo is required.');
     }
 
+    const cleanupUploadedImages = async () => {
+      for (const url of cleanImages) {
+        await supabaseStorageService.deletePublicMediaAsset('property-images', url).catch(() => {});
+      }
+    };
+
     const validId = this.isUuid(prop.id) ? prop.id : crypto.randomUUID();
     const normalizedProp: Property = { ...prop, id: validId, images: cleanImages };
 
@@ -1640,6 +1758,7 @@ export class SupabaseRepository {
       });
 
     if (propErr) {
+      await cleanupUploadedImages();
       throw new Error(`Could not save property listing to Supabase: ${propErr.message}`);
     }
 
@@ -1657,6 +1776,7 @@ export class SupabaseRepository {
       const { error: unitsErr } = await supabase.from('units').insert(unitsToInsert);
       if (unitsErr) {
         await supabase.from('properties').delete().eq('id', validId);
+        await cleanupUploadedImages();
         throw new Error(`Property room inventory insert failed: ${unitsErr.message}`);
       }
     }
@@ -1685,12 +1805,13 @@ export class SupabaseRepository {
         );
       if (locErr) {
         await supabase.from('properties').delete().eq('id', validId);
+        await cleanupUploadedImages();
         throw new Error(`Property location record failed: ${locErr.message}`);
       }
       this.savePropertyLocation({ ...loc, propertyId: validId });
     }
 
-    // Persist relational property_images metadata rows (gracefully ignores missing table if Migration 08 not pushed remotely yet)
+    // Persist relational property_images metadata rows (gracefully ignores missing table if Migration 08/09 not pushed remotely yet)
     const imageRows = cleanImages.map((url, idx) => {
       const storagePath = this.extractPropertyImageStoragePath(url, normalizedProp.landlordId, validId, idx);
       const fileName = storagePath.split('/').pop() || `photo_${idx + 1}.jpg`;
@@ -1713,11 +1834,9 @@ export class SupabaseRepository {
       .from('property_images')
       .upsert(imageRows, { onConflict: 'property_id,storage_path' });
     if (imgsErr) {
-      const code = String((imgsErr as any).code || '');
-      const msg = String(imgsErr.message || '').toLowerCase();
-      const missingTable = code === '42P01' || code === 'PGRST205' || msg.includes('property_images');
-      if (!missingTable) {
+      if (!this.isMissingPropertyImagesError(imgsErr)) {
         await supabase.from('properties').delete().eq('id', validId);
+        await cleanupUploadedImages();
         throw new Error(`Property image metadata insert failed: ${imgsErr.message}`);
       }
     }
@@ -1728,42 +1847,76 @@ export class SupabaseRepository {
   }
 
   public updateProperty(prop: Property): Property {
-    this.properties = this.properties.map((p) => (p.id === prop.id ? prop : p));
+    const cleanImages = this.sanitizeMediaUrls(prop.images);
+    const updatedProp: Property = {
+      ...prop,
+      images: cleanImages.length > 0 ? cleanImages : prop.images.filter((u) => !/^(data:|blob:)/i.test(String(u || ''))),
+    };
+    this.properties = this.properties.map((p) => (p.id === updatedProp.id ? updatedProp : p));
+    appEventBus.publish('propertiesUpdated', this.properties);
 
     supabase
       .from('properties')
       .update({
-        title: prop.title,
-        description: prop.description,
-        rental_fee_annual: prop.pricePerSession,
-        caution_deposit: prop.depositAmount,
-        featured_image_url: prop.images?.[0] || null,
-        images: prop.images || [],
-        amenities: prop.amenities || [],
-        total_spaces: prop.totalCapacity || prop.rooms?.reduce((acc, r) => acc + (r.totalCapacity || 1), 0),
-        available_spaces: prop.availableSpaces ?? prop.rooms?.reduce((acc, r) => acc + (r.availableSpaces ?? r.totalCapacity ?? 1), 0),
+        title: updatedProp.title,
+        description: updatedProp.description,
+        rental_fee_annual: updatedProp.pricePerSession,
+        caution_deposit: updatedProp.depositAmount,
+        featured_image_url: updatedProp.images?.[0] || null,
+        images: updatedProp.images || [],
+        amenities: updatedProp.amenities || [],
+        total_spaces: updatedProp.totalCapacity || updatedProp.rooms?.reduce((acc, r) => acc + (r.totalCapacity || 1), 0),
+        available_spaces: updatedProp.availableSpaces ?? updatedProp.rooms?.reduce((acc, r) => acc + (r.availableSpaces ?? r.totalCapacity ?? 1), 0),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', prop.id)
+      .eq('id', updatedProp.id)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] updateProperty warning:', error.message);
       });
 
+    if (cleanImages.length > 0 && updatedProp.landlordId && this.isUuid(updatedProp.id)) {
+      const imageRows = cleanImages.map((url, idx) => {
+        const storagePath = this.extractPropertyImageStoragePath(url, updatedProp.landlordId, updatedProp.id, idx);
+        const fileName = storagePath.split('/').pop() || `photo_${idx + 1}.jpg`;
+        return {
+          id: crypto.randomUUID(),
+          property_id: updatedProp.id,
+          landlord_id: updatedProp.landlordId,
+          storage_bucket: 'property-images',
+          storage_path: storagePath,
+          public_url: url,
+          file_name: fileName,
+          content_type: 'image/jpeg',
+          file_size: 1,
+          is_cover: idx === 0,
+          sort_order: idx,
+        };
+      });
+      supabase
+        .from('property_images')
+        .upsert(imageRows, { onConflict: 'property_id,storage_path' })
+        .then(({ error }) => {
+          if (error && !this.isMissingPropertyImagesError(error)) {
+            console.warn('[SupabaseRepository] updateProperty property_images warning:', error.message);
+          }
+        });
+    }
+
     // Synchronize units / rooms if provided
-    if (prop.rooms && prop.rooms.length > 0) {
-      prop.rooms.forEach((u) => {
+    if (updatedProp.rooms && updatedProp.rooms.length > 0) {
+      updatedProp.rooms.forEach((u) => {
         const isSyntheticId = u.id.startsWith('room-') || u.id.startsWith('unit-');
         if (!isSyntheticId) {
           supabase
             .from('units')
             .upsert({
               id: u.id,
-              property_id: prop.id,
+              property_id: updatedProp.id,
               name: u.name,
               unit_type: u.type || 'room',
               capacity: u.totalCapacity || 1,
               available_spaces: u.availableSpaces ?? (u.totalCapacity || 1),
-              price_annual: u.pricePerSession || prop.pricePerSession || 250000,
+              price_annual: u.pricePerSession || updatedProp.pricePerSession || 250000,
               is_active: (u.availableSpaces ?? 1) > 0,
             })
             .then(({ error }) => {
@@ -1773,7 +1926,7 @@ export class SupabaseRepository {
       });
     }
 
-    return prop;
+    return updatedProp;
   }
 
   public updatePropertyAvailability(propertyId: string, unitId: string, availableSpaces: number): void {
@@ -2343,6 +2496,506 @@ export class SupabaseRepository {
     return this.receipts.filter((r) => r.landlordId === landlordId);
   }
 
+  private mapDbReservationStatus(raw: unknown): Reservation['status'] {
+    if (raw === 'payment_submitted' || raw === 'receipt_submitted') return 'receipt_submitted';
+    if (raw === 'confirmed' || raw === 'rejected' || raw === 'cancelled' || raw === 'expired') return raw;
+    return 'pending_payment';
+  }
+
+  private mapDbInvoiceStatus(raw: unknown): Invoice['status'] {
+    if (raw === 'processing' || raw === 'payment_submitted') return 'payment_submitted';
+    if (raw === 'paid') return 'paid';
+    if (raw === 'cancelled' || raw === 'expired') return 'expired';
+    return 'unpaid';
+  }
+
+  private upsertReservationCache(res: Reservation): void {
+    this.reservations = [res, ...this.reservations.filter((r) => r.id !== res.id)];
+  }
+
+  private upsertInvoiceCache(inv: Invoice): void {
+    this.invoices = [inv, ...this.invoices.filter((i) => i.id !== inv.id)];
+  }
+
+  private upsertReceiptCache(rc: PaymentReceipt): void {
+    this.receipts = [rc, ...this.receipts.filter((r) => r.id !== rc.id)];
+  }
+
+  private mapSupabaseReservationBundle(
+    row: any,
+    context?: {
+      studentProfileMap?: Map<string, any>;
+      landlordProfileMap?: Map<string, any>;
+      userMap?: Map<string, any>;
+    }
+  ): { reservation: Reservation; invoice?: Invoice; receipt?: PaymentReceipt } {
+    const propObj = Array.isArray(row.properties) ? row.properties[0] : row.properties;
+    const unitObj = Array.isArray(row.units) ? row.units[0] : row.units;
+    const invArr = Array.isArray(row.invoices) ? row.invoices : row.invoices ? [row.invoices] : [];
+    const invObj = invArr[0];
+    const rcArr = Array.isArray(row.payment_receipts)
+      ? row.payment_receipts
+      : row.payment_receipts
+      ? [row.payment_receipts]
+      : [];
+    const rcObj = rcArr
+      .slice()
+      .sort((a: any, b: any) => new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime())[0];
+
+    const studentUser = context?.userMap?.get(row.student_id) || this.getUserById(row.student_id);
+    const landlordUser = context?.userMap?.get(row.landlord_id) || this.getUserById(row.landlord_id);
+    const studentMeta = context?.studentProfileMap?.get(row.student_id) || this.getStudentProfile(row.student_id);
+    const landlordMeta = context?.landlordProfileMap?.get(row.landlord_id);
+    const cachedProp = this.getPropertyById(row.property_id);
+
+    const propertyTitle = propObj?.title || cachedProp?.title || 'Accommodation Listing';
+    const propertyAddress = propObj?.address || cachedProp?.address || '';
+    const unitName = unitObj?.name || cachedProp?.rooms?.find((u) => u.id === row.unit_id)?.name || 'Room Space';
+    const landlordName =
+      landlordMeta?.company_name ||
+      landlordUser?.full_name ||
+      landlordUser?.fullName ||
+      cachedProp?.landlordName ||
+      'Verified Property Manager';
+    const studentName =
+      studentUser?.full_name ||
+      studentUser?.fullName ||
+      studentMeta?.fullName ||
+      'Student';
+    const reservationNumber = `RES-${String(row.id || '').slice(0, 8).toUpperCase()}`;
+
+    const reservation: Reservation = {
+      id: row.id,
+      reservationNumber,
+      studentId: row.student_id,
+      studentName,
+      studentEmail: studentUser?.email || '',
+      studentPhone: studentUser?.phone || '',
+      landlordId: row.landlord_id,
+      landlordName,
+      propertyId: row.property_id,
+      propertyName: propertyTitle,
+      propertyTitle,
+      propertyAddress,
+      unitId: row.unit_id || '',
+      unitName,
+      roomName: unitName,
+      groupId: row.group_id || undefined,
+      invoiceId: invObj?.id || undefined,
+      status: this.mapDbReservationStatus(row.status),
+      amount: Number(row.amount ?? invObj?.amount_due ?? 0),
+      currency: 'NGN',
+      holdExpiresAt: row.hold_expires_at,
+      createdAt: row.created_at,
+      confirmedAt: row.status === 'confirmed' ? row.updated_at : undefined,
+      cancellationReason: row.notes || undefined,
+    };
+
+    let invoice: Invoice | undefined;
+    if (invObj?.id) {
+      invoice = {
+        id: invObj.id,
+        invoiceNumber: invObj.invoice_number || `INV-${String(invObj.id).slice(0, 8).toUpperCase()}`,
+        reservationId: row.id,
+        studentId: row.student_id,
+        studentName,
+        registrationNumber: studentMeta?.registration_number || studentMeta?.registrationNumber || '',
+        university: studentMeta?.institution || studentMeta?.university || 'Bayero University Kano',
+        landlordName,
+        propertyId: row.property_id,
+        propertyName: propertyTitle,
+        propertyTitle,
+        unitName,
+        roomName: unitName,
+        amount: Number(invObj.amount_due ?? row.amount ?? 0),
+        totalAmount: Number(invObj.amount_due ?? row.amount ?? 0),
+        currency: 'NGN',
+        dueDate: invObj.due_at || row.hold_expires_at,
+        status: this.mapDbInvoiceStatus(invObj.status),
+        bankDetails: {
+          bankName: landlordMeta?.bank_name || '',
+          accountNumber: landlordMeta?.bank_account_number || '',
+          accountName: landlordMeta?.bank_account_name || landlordName,
+          paymentInstructions: `Include invoice ${invObj.invoice_number || reservationNumber} as your bank transfer narration.`,
+        },
+        createdAt: invObj.created_at || row.created_at,
+      };
+    }
+
+    let receipt: PaymentReceipt | undefined;
+    if (rcObj?.id) {
+      receipt = {
+        id: rcObj.id,
+        reservationId: row.id,
+        invoiceId: rcObj.invoice_id || invObj?.id || '',
+        studentId: rcObj.student_id || row.student_id,
+        studentName,
+        registrationNumber: studentMeta?.registration_number || studentMeta?.registrationNumber || '',
+        landlordId: rcObj.landlord_id || row.landlord_id,
+        propertyId: rcObj.property_id || row.property_id,
+        propertyName: propertyTitle,
+        propertyTitle,
+        roomName: unitName,
+        fileUrl: rcObj.storage_path || '',
+        storagePath: rcObj.storage_path || '',
+        fileName: rcObj.file_name || 'receipt.pdf',
+        fileSize: Number(rcObj.file_size || 0),
+        paymentReference: rcObj.payment_reference || '',
+        payerBankName: rcObj.payer_bank_name || '',
+        paymentDate: rcObj.payment_date || rcObj.created_at,
+        amountPaid: Number(rcObj.amount_paid ?? row.amount ?? 0),
+        status: (rcObj.status as any) || 'pending_review',
+        rejectionReason: rcObj.rejection_reason || undefined,
+        reviewedBy: rcObj.reviewer_id || undefined,
+        reviewedAt: rcObj.reviewed_at || undefined,
+        uploadedAt: rcObj.created_at,
+      };
+    }
+
+    this.upsertReservationCache(reservation);
+    if (invoice) this.upsertInvoiceCache(invoice);
+    if (receipt) this.upsertReceiptCache(receipt);
+
+    return { reservation, invoice, receipt };
+  }
+
+  private async hydrateRelatedEntitiesForReservations(rows: any[]): Promise<{
+    studentProfileMap: Map<string, any>;
+    landlordProfileMap: Map<string, any>;
+    userMap: Map<string, any>;
+  }> {
+    const studentIds = Array.from(new Set(rows.map((r) => r.student_id).filter(Boolean)));
+    const landlordIds = Array.from(new Set(rows.map((r) => r.landlord_id).filter(Boolean)));
+    const profileIds = Array.from(new Set([...studentIds, ...landlordIds]));
+
+    const [{ data: spRows }, { data: lpRows }, { data: profRows }] = await Promise.all([
+      studentIds.length > 0
+        ? supabase.from('student_profiles').select('user_id, registration_number, institution').in('user_id', studentIds)
+        : Promise.resolve({ data: [] }),
+      landlordIds.length > 0
+        ? supabase
+            .from('landlord_profiles')
+            .select('user_id, company_name, bank_name, bank_account_number, bank_account_name')
+            .in('user_id', landlordIds)
+        : Promise.resolve({ data: [] }),
+      profileIds.length > 0
+        ? supabase.from('profiles').select('id, full_name, email, phone').in('id', profileIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    return {
+      studentProfileMap: new Map((spRows || []).map((s: any) => [s.user_id, s])),
+      landlordProfileMap: new Map((lpRows || []).map((l: any) => [l.user_id, l])),
+      userMap: new Map((profRows || []).map((u: any) => [u.id, u])),
+    };
+  }
+
+  public async fetchStudentReservationsFromSupabase(studentId: string): Promise<Reservation[]> {
+    if (!studentId) return [];
+    const { data, error } = await supabase
+      .from('reservations')
+      .select(`
+        id, student_id, landlord_id, property_id, unit_id, group_id,
+        status, amount, hold_expires_at, notes, created_at, updated_at,
+        properties (id, title, address),
+        units (id, name),
+        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at),
+        payment_receipts!payment_receipts_reservation_id_fkey (
+          id, reservation_id, invoice_id, student_id, landlord_id, property_id,
+          storage_path, file_name, file_size, payment_reference, payer_bank_name,
+          payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at
+        )
+      `)
+      .eq('student_id', studentId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Could not load your reservations: ${error.message}`);
+    }
+
+    const rows = data || [];
+    const context = await this.hydrateRelatedEntitiesForReservations(rows);
+    const mapped = rows.map((row: any) => this.mapSupabaseReservationBundle(row, context).reservation);
+    const otherRes = this.reservations.filter((r) => r.studentId !== studentId);
+    this.reservations = [...mapped, ...otherRes];
+    return mapped;
+  }
+
+  public async fetchLandlordReservationsFromSupabase(landlordId: string): Promise<Reservation[]> {
+    if (!landlordId) return [];
+    const { data, error } = await supabase
+      .from('reservations')
+      .select(`
+        id, student_id, landlord_id, property_id, unit_id, group_id,
+        status, amount, hold_expires_at, notes, created_at, updated_at,
+        properties (id, title, address),
+        units (id, name),
+        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at)
+      `)
+      .eq('landlord_id', landlordId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Could not load landlord reservations: ${error.message}`);
+    }
+
+    const rows = data || [];
+    const context = await this.hydrateRelatedEntitiesForReservations(rows);
+    const mapped = rows.map((row: any) => this.mapSupabaseReservationBundle(row, context).reservation);
+    const otherRes = this.reservations.filter((r) => r.landlordId !== landlordId);
+    this.reservations = [...mapped, ...otherRes];
+    return mapped;
+  }
+
+  public async fetchLandlordReceiptsFromSupabase(landlordId: string): Promise<PaymentReceipt[]> {
+    if (!landlordId) return [];
+    const { data, error } = await supabase
+      .from('payment_receipts')
+      .select(`
+        id, reservation_id, invoice_id, student_id, landlord_id, property_id,
+        storage_path, file_name, file_size, payment_reference, payer_bank_name,
+        payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at,
+        properties (id, title),
+        reservations!payment_receipts_reservation_id_fkey (id, unit_id, units (id, name))
+      `)
+      .eq('landlord_id', landlordId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Could not load payment receipts: ${error.message}`);
+    }
+
+    const rows = data || [];
+    const studentIds = Array.from(new Set(rows.map((r: any) => r.student_id).filter(Boolean)));
+    const [{ data: spRows }, { data: profRows }] = await Promise.all([
+      studentIds.length > 0
+        ? supabase.from('student_profiles').select('user_id, registration_number').in('user_id', studentIds)
+        : Promise.resolve({ data: [] }),
+      studentIds.length > 0
+        ? supabase.from('profiles').select('id, full_name, email').in('id', studentIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const spMap = new Map((spRows || []).map((s: any) => [s.user_id, s]));
+    const userMap = new Map((profRows || []).map((u: any) => [u.id, u]));
+
+    const mapped: PaymentReceipt[] = rows.map((rc: any) => {
+      const propObj = Array.isArray(rc.properties) ? rc.properties[0] : rc.properties;
+      const resObj = Array.isArray(rc.reservations) ? rc.reservations[0] : rc.reservations;
+      const unitObj = Array.isArray(resObj?.units) ? resObj.units[0] : resObj?.units;
+      const userObj = userMap.get(rc.student_id);
+      const spObj = spMap.get(rc.student_id);
+      const propTitle = propObj?.title || this.getPropertyById(rc.property_id)?.title || 'Accommodation Listing';
+
+      const receipt: PaymentReceipt = {
+        id: rc.id,
+        reservationId: rc.reservation_id,
+        invoiceId: rc.invoice_id || '',
+        studentId: rc.student_id,
+        studentName: userObj?.full_name || userObj?.email || 'Student',
+        registrationNumber: spObj?.registration_number || '',
+        landlordId: rc.landlord_id,
+        propertyId: rc.property_id,
+        propertyName: propTitle,
+        propertyTitle: propTitle,
+        roomName: unitObj?.name || 'Room Space',
+        fileUrl: rc.storage_path || '',
+        storagePath: rc.storage_path || '',
+        fileName: rc.file_name || 'receipt.pdf',
+        fileSize: Number(rc.file_size || 0),
+        paymentReference: rc.payment_reference || '',
+        payerBankName: rc.payer_bank_name || '',
+        paymentDate: rc.payment_date || rc.created_at,
+        amountPaid: Number(rc.amount_paid ?? 0),
+        status: (rc.status as any) || 'pending_review',
+        rejectionReason: rc.rejection_reason || undefined,
+        reviewedBy: rc.reviewer_id || undefined,
+        reviewedAt: rc.reviewed_at || undefined,
+        uploadedAt: rc.created_at,
+      };
+      this.upsertReceiptCache(receipt);
+      return receipt;
+    });
+
+    const otherReceipts = this.receipts.filter((r) => r.landlordId !== landlordId);
+    this.receipts = [...mapped, ...otherReceipts];
+    return mapped;
+  }
+
+  public async fetchReservationDetailFromSupabase(reservationId: string): Promise<{
+    reservation: Reservation;
+    invoice?: Invoice;
+    receipt?: PaymentReceipt;
+  } | null> {
+    if (!reservationId || !this.isUuid(reservationId)) {
+      const existing = this.getReservationById(reservationId);
+      return existing
+        ? {
+            reservation: existing,
+            invoice: this.getInvoiceByReservationId(reservationId),
+            receipt: this.getReceiptByReservationId(reservationId),
+          }
+        : null;
+    }
+
+    const { data, error } = await supabase
+      .from('reservations')
+      .select(`
+        id, student_id, landlord_id, property_id, unit_id, group_id,
+        status, amount, hold_expires_at, notes, created_at, updated_at,
+        properties (id, title, address),
+        units (id, name),
+        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at),
+        payment_receipts!payment_receipts_reservation_id_fkey (
+          id, reservation_id, invoice_id, student_id, landlord_id, property_id,
+          storage_path, file_name, file_size, payment_reference, payer_bank_name,
+          payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at
+        )
+      `)
+      .eq('id', reservationId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Could not load reservation details: ${error.message}`);
+    }
+    if (!data) return null;
+
+    const context = await this.hydrateRelatedEntitiesForReservations([data]);
+    return this.mapSupabaseReservationBundle(data, context);
+  }
+
+  public async fetchInvoiceByIdFromSupabase(invoiceId: string): Promise<Invoice | null> {
+    if (!invoiceId || !this.isUuid(invoiceId)) {
+      return this.getInvoiceById(invoiceId) || null;
+    }
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('id, reservation_id')
+      .eq('id', invoiceId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Could not load invoice: ${error.message}`);
+    }
+    if (!data?.reservation_id) return null;
+
+    const bundle = await this.fetchReservationDetailFromSupabase(data.reservation_id);
+    return bundle?.invoice || null;
+  }
+
+  /**
+   * Create reservation with 7-day hold via Edge Function -> create_reservation_atomic.
+   */
+  public async createReservationPersisted(
+    _studentId: string,
+    propertyId: string,
+    unitId: string,
+    groupId?: string
+  ): Promise<{ success: boolean; reservation?: Reservation; invoice?: Invoice; error?: string }> {
+    const { data, error } = await invokeEdgeFunction<any>('create-reservation', {
+      propertyId,
+      unitId,
+      groupId: groupId || null,
+    });
+
+    if (error) {
+      return { success: false, error: error.message || 'Failed to place reservation hold.' };
+    }
+
+    const reservationId = data?.reservation_id || data?.reservationId || data?.id;
+    if (!reservationId) {
+      return {
+        success: false,
+        error: data?.error || 'Reservation service returned without creating a reservation record.',
+      };
+    }
+
+    const bundle = await this.fetchReservationDetailFromSupabase(reservationId).catch(() => null);
+    await this.fetchPropertyByIdOrSlugFromSupabase(propertyId).catch(() => null);
+
+    if (bundle?.reservation) {
+      return {
+        success: true,
+        reservation: bundle.reservation,
+        invoice: bundle.invoice,
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Reservation was created, but its details could not be reloaded. Please refresh My Reservations.',
+    };
+  }
+
+  public async cancelReservationPersisted(
+    reservationId: string,
+    reason?: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const { data, error } = await supabase.rpc('cancel_reservation_atomic', {
+      p_reservation_id: reservationId,
+      p_reason: reason?.trim() || null,
+    });
+
+    if (error) {
+      const code = String((error as any)?.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      const missingRpc = code === '42883' || code === 'PGRST202' || msg.includes('cancel_reservation_atomic');
+      if (!missingRpc) {
+        return { success: false, message: error.message };
+      }
+
+      const { error: updErr } = await supabase
+        .from('reservations')
+        .update({ status: 'cancelled', notes: reason?.trim() || null, updated_at: new Date().toISOString() })
+        .eq('id', reservationId);
+      if (updErr) {
+        return { success: false, message: updErr.message };
+      }
+    }
+
+    const res = this.getReservationById(reservationId);
+    const bundle = await this.fetchReservationDetailFromSupabase(reservationId).catch(() => null);
+    if (res?.propertyId) {
+      await this.fetchPropertyByIdOrSlugFromSupabase(res.propertyId).catch(() => null);
+    }
+
+    return {
+      success: true,
+      message: (data as any)?.message || (bundle ? 'Reservation hold cancelled and bed-space released.' : 'Reservation cancelled.'),
+    };
+  }
+
+  public async reviewPaymentReceiptPersisted(
+    receiptId: string,
+    decision: 'approved' | 'rejected',
+    landlordId: string,
+    rejectionReason?: string
+  ): Promise<{ success: boolean; receipt?: PaymentReceipt; error?: string }> {
+    if (decision === 'rejected' && (!rejectionReason || rejectionReason.trim().length < 5)) {
+      return { success: false, error: 'A rejection reason of at least 5 characters is required.' };
+    }
+
+    const { error } = await invokeEdgeFunction<any>('review-payment-receipt', {
+      receiptId,
+      decision,
+      rejectionReason: rejectionReason?.trim() || undefined,
+    });
+
+    if (error) {
+      return { success: false, error: error.message || 'Could not record payment receipt review.' };
+    }
+
+    await Promise.all([
+      this.fetchLandlordReceiptsFromSupabase(landlordId).catch(() => []),
+      this.fetchLandlordReservationsFromSupabase(landlordId).catch(() => []),
+      this.fetchLandlordPropertiesFromSupabase(landlordId).catch(() => []),
+    ]);
+
+    const updated = this.receipts.find((r) => r.id === receiptId);
+    return { success: true, receipt: updated };
+  }
+
   /**
    * Create reservation with 7-day hold, atomic availability update, and invoice creation.
    */
@@ -2362,8 +3015,8 @@ export class SupabaseRepository {
     const holdExpires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const resId = crypto.randomUUID();
     const invId = crypto.randomUUID();
-    const resNum = `RES-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const invNum = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const resNum = `RES-${resId.slice(0, 8).toUpperCase()}`;
+    const invNum = `INV-${invId.slice(0, 8).toUpperCase()}`;
 
     const newRes: Reservation = {
       id: resId,
@@ -2404,9 +3057,9 @@ export class SupabaseRepository {
       totalAmount: unit.pricePerSession,
       currency: 'NGN',
       bankDetails: {
-        bankName: 'First Bank Nigeria',
+        bankName: '',
         accountName: prop.landlordName,
-        accountNumber: '3012948571',
+        accountNumber: '',
         paymentInstructions: `Include reservation reference ${resNum} in your transfer narration.`,
       },
       createdAt: now.toISOString(),
@@ -2445,13 +3098,12 @@ export class SupabaseRepository {
     const inv = this.getInvoiceByReservationId(reservationId);
     if (inv) inv.status = 'expired';
 
-    supabase
-      .from('reservations')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('id', reservationId)
-      .then(({ error }) => {
-        if (error) console.warn('[SupabaseRepository] cancelReservation warning:', error.message);
-      });
+    supabase.rpc('cancel_reservation_atomic', {
+      p_reservation_id: reservationId,
+      p_reason: reason || null,
+    }).then(({ error }) => {
+      if (error) console.warn('[SupabaseRepository] cancelReservation warning:', error.message);
+    });
 
     return { success: true, message: 'Reservation cancelled.' };
   }
