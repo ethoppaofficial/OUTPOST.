@@ -1454,7 +1454,19 @@ export class SupabaseRepository {
     });
 
     if (rpcError) {
-      // If migration 07 RPC is not deployed yet, attempt direct submission insert before updating editable fields
+      const rpcCode = String((rpcError as any)?.code || '');
+      const rpcMsg = String(rpcError.message || '').toLowerCase();
+      const isMissingRpc =
+        rpcCode === '42883' ||
+        rpcCode === 'PGRST202' ||
+        rpcMsg.includes('could not find the function') ||
+        rpcMsg.includes('does not exist');
+
+      if (!isMissingRpc) {
+        throw new Error(`Could not submit landlord verification: ${rpcError.message}`);
+      }
+
+      // If migration 07/09 RPC is not deployed yet, attempt direct submission insert before updating editable fields
       const { error: subError } = await supabase
         .from('landlord_verification_submissions')
         .insert({
@@ -1484,7 +1496,7 @@ export class SupabaseRepository {
         );
 
       if (lpError) {
-        // Fallback when trigger blocks non-admin status update prior to migration 07: update company/address at least
+        // Fallback when trigger blocks non-admin status update prior to migration 07/09: update company/address at least
         const { error: lpFallbackError } = await supabase
           .from('landlord_profiles')
           .update({
@@ -1495,6 +1507,20 @@ export class SupabaseRepository {
         if (lpFallbackError) {
           throw new Error(`Could not update landlord profile details: ${lpFallbackError.message}`);
         }
+      }
+    }
+
+    if (profile.idReference && profile.idReference !== 'NIN-REQUIRED') {
+      try {
+        const { error: taxIdErr } = await supabase
+          .from('landlord_profiles')
+          .update({ tax_id: profile.idReference })
+          .eq('user_id', profile.userId);
+        if (taxIdErr) {
+          console.warn('[SupabaseRepository] Optional tax_id sync notice:', taxIdErr.message);
+        }
+      } catch (taxIdEx: any) {
+        console.warn('[SupabaseRepository] Optional tax_id sync warning:', taxIdEx?.message || taxIdEx);
       }
     }
 

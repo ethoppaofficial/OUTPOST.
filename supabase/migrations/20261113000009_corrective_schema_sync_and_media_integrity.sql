@@ -170,6 +170,61 @@ CREATE POLICY "Users can insert own profile"
     AND is_verified = false
   );
 
+-- Backfill any pre-Migration-06 auth.users missing public.profiles or role sub-profiles
+DO $$
+DECLARE
+  u RECORD;
+  v_role public.user_role;
+  v_status public.account_status;
+  v_full_name TEXT;
+BEGIN
+  FOR u IN
+    SELECT au.id, au.email, au.email_confirmed_at, au.raw_user_meta_data
+    FROM auth.users au
+    LEFT JOIN public.profiles p ON p.id = au.id
+    WHERE p.id IS NULL
+      AND au.email IS NOT NULL
+  LOOP
+    v_role := CASE
+      WHEN LOWER(COALESCE(u.raw_user_meta_data->>'role', '')) = 'landlord' THEN 'landlord'::public.user_role
+      ELSE 'student'::public.user_role
+    END;
+    v_status := CASE
+      WHEN v_role = 'landlord' THEN 'profile_pending'::public.account_status
+      WHEN u.email_confirmed_at IS NOT NULL THEN 'active'::public.account_status
+      ELSE 'email_unverified'::public.account_status
+    END;
+    v_full_name := COALESCE(
+      NULLIF(TRIM(u.raw_user_meta_data->>'full_name'), ''),
+      NULLIF(TRIM(u.raw_user_meta_data->>'name'), ''),
+      split_part(u.email, '@', 1),
+      'OUTPOST User'
+    );
+
+    INSERT INTO public.profiles (
+      id, email, full_name, role, account_status, is_verified, created_at, updated_at
+    )
+    VALUES (
+      u.id, u.email, v_full_name, v_role, v_status, false, timezone('utc'::text, now()), timezone('utc'::text, now())
+    )
+    ON CONFLICT (id) DO NOTHING;
+  END LOOP;
+
+  INSERT INTO public.student_profiles (user_id, institution, campus, created_at, updated_at)
+  SELECT p.id, 'Bayero University Kano', 'New Campus', timezone('utc'::text, now()), timezone('utc'::text, now())
+  FROM public.profiles p
+  LEFT JOIN public.student_profiles sp ON sp.user_id = p.id
+  WHERE p.role = 'student' AND sp.user_id IS NULL
+  ON CONFLICT (user_id) DO NOTHING;
+
+  INSERT INTO public.landlord_profiles (user_id, verification_status, created_at, updated_at)
+  SELECT p.id, 'not_started'::public.verification_status, timezone('utc'::text, now()), timezone('utc'::text, now())
+  FROM public.profiles p
+  LEFT JOIN public.landlord_profiles lp ON lp.user_id = p.id
+  WHERE p.role = 'landlord' AND lp.user_id IS NULL
+  ON CONFLICT (user_id) DO NOTHING;
+END $$;
+
 -- ============================================================================
 -- 3. Re-assert Migration 07 RLS Hardening & Atomic Governance RPCs
 --    (Preserves Migration 08's 19-metric admin_get_dashboard_metrics below)

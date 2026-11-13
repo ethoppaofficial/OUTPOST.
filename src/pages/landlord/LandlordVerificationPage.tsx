@@ -169,6 +169,7 @@ export const LandlordVerificationPage: React.FC = () => {
         setError('Failed to submit verification request.');
       }
     } catch (err: unknown) {
+      console.error('[LandlordVerificationPage] Verification submission failed:', err);
       const normalized = normalizeError(err, 'Failed to upload verification document.');
       setError(normalized.userMessage);
     } finally {
