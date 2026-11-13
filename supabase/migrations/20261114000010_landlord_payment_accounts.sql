@@ -571,3 +571,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) FROM anon;
 GRANT EXECUTE ON FUNCTION public.create_reservation_atomic(UUID, UUID, UUID, TEXT) TO authenticated, service_role;
+
+-- Refresh PostgREST schema cache immediately so new table/columns/RPCs are visible
+NOTIFY pgrst, 'reload schema';
+
