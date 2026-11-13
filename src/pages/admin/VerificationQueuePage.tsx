@@ -138,9 +138,6 @@ export const VerificationQueuePage: React.FC = () => {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Review live Student and Landlord submissions stored in Supabase. Private files are accessed exclusively via short-lived signed URLs from <span className="font-mono text-xs">get-private-asset-url</span>.
-        </p>
       </header>
 
       <AdminStatusBar
