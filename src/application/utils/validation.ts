@@ -172,3 +172,151 @@ export function validateQueryParams(
   return sanitized;
 }
 
+export const NIGERIAN_BANKS = [
+  'Access Bank',
+  'Ecobank Nigeria',
+  'Fidelity Bank',
+  'First Bank of Nigeria',
+  'First City Monument Bank (FCMB)',
+  'Globus Bank',
+  'Guaranty Trust Bank (GTBank)',
+  'Heritage Bank',
+  'Jaiz Bank',
+  'Keystone Bank',
+  'Kuda Microfinance Bank',
+  'Lotus Bank',
+  'Moniepoint Microfinance Bank',
+  'OPay Digital Services',
+  'Optimus Bank',
+  'PalmPay',
+  'Parallex Bank',
+  'Polaris Bank',
+  'Providus Bank',
+  'Stanbic IBTC Bank',
+  'Standard Chartered Bank',
+  'Sterling Bank',
+  'SunTrust Bank',
+  'TAJBank',
+  'Titan Trust Bank',
+  'Union Bank of Nigeria',
+  'United Bank for Africa (UBA)',
+  'Unity Bank',
+  'VFD Microfinance Bank',
+  'Wema Bank',
+  'Zenith Bank',
+] as const;
+
+export function normalizeBankText(raw: string): string {
+  return (raw || '').trim().replace(/\s+/g, ' ');
+}
+
+export function normalizeBankAccountNumber(raw: string): string {
+  return (raw || '').trim().replace(/[\s\-]/g, '');
+}
+
+/**
+ * Masks a bank account number cleanly for UI display and safe logging (e.g. ******7890).
+ */
+export function maskAccountNumber(accountNumber: string | null | undefined): string {
+  const digits = normalizeBankAccountNumber(accountNumber || '');
+  if (!digits) return 'Not configured';
+  if (digits.length <= 4) return '•'.repeat(digits.length);
+  const visible = digits.slice(-4);
+  return `${'•'.repeat(Math.max(4, digits.length - 4))}${visible}`;
+}
+
+export interface BankDetailsValidationResult {
+  isValid: boolean;
+  error?: string;
+  fieldErrors: Partial<Record<'accountHolderName' | 'bankName' | 'accountNumber' | 'accountType' | 'paymentInstructions', string>>;
+  normalized: {
+    accountHolderName: string;
+    bankName: string;
+    accountNumber: string;
+    accountType?: 'savings' | 'current' | 'corporate';
+    paymentInstructions?: string;
+  };
+}
+
+/**
+ * Validates and normalizes Nigerian landlord bank transfer details.
+ * Never includes the raw account number inside returned error strings.
+ */
+export function validateLandlordPaymentDetails(input: {
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  accountType?: string | null;
+  paymentInstructions?: string | null;
+}): BankDetailsValidationResult {
+  const accountHolderName = normalizeBankText(input.accountHolderName || '');
+  const bankName = normalizeBankText(input.bankName || '');
+  const accountNumber = normalizeBankAccountNumber(input.accountNumber || '');
+  const rawType = (input.accountType || '').trim().toLowerCase();
+  const paymentInstructions = normalizeBankText(input.paymentInstructions || '');
+
+  const fieldErrors: BankDetailsValidationResult['fieldErrors'] = {};
+
+  if (!accountHolderName) {
+    fieldErrors.accountHolderName = 'Account holder name is required.';
+  } else if (accountHolderName.length < 2 || accountHolderName.length > 120) {
+    fieldErrors.accountHolderName = 'Account holder name must be between 2 and 120 characters.';
+  } else if (/^\d+$/.test(accountHolderName)) {
+    fieldErrors.accountHolderName = 'Account holder name cannot contain only numbers.';
+  } else if (/[<>]/.test(accountHolderName)) {
+    fieldErrors.accountHolderName = 'Account holder name contains unsupported characters.';
+  }
+
+  if (!bankName) {
+    fieldErrors.bankName = 'Bank name is required.';
+  } else if (bankName.length < 2 || bankName.length > 100) {
+    fieldErrors.bankName = 'Bank name must be between 2 and 100 characters.';
+  } else if (/^\d+$/.test(bankName)) {
+    fieldErrors.bankName = 'Please enter a valid bank name.';
+  } else if (/[<>]/.test(bankName)) {
+    fieldErrors.bankName = 'Bank name contains unsupported characters.';
+  }
+
+  if (!accountNumber) {
+    fieldErrors.accountNumber = 'Bank account number is required.';
+  } else if (!/^\d+$/.test(accountNumber)) {
+    fieldErrors.accountNumber = 'Bank account number must contain digits only (spaces or hyphens are stripped automatically).';
+  } else if (accountNumber.length < 10 || accountNumber.length > 12) {
+    fieldErrors.accountNumber = 'Enter a valid Nigerian bank account number (standard 10-digit NUBAN, or 10–12 digits where applicable).';
+  }
+
+  let validAccountType: 'savings' | 'current' | 'corporate' | undefined;
+  if (rawType) {
+    if (rawType === 'savings' || rawType === 'current' || rawType === 'corporate') {
+      validAccountType = rawType;
+    } else {
+      fieldErrors.accountType = 'Account type must be Savings, Current, or Corporate.';
+    }
+  }
+
+  if (paymentInstructions.length > 500) {
+    fieldErrors.paymentInstructions = 'Payment instructions cannot exceed 500 characters.';
+  } else if (/[<>]/.test(paymentInstructions)) {
+    fieldErrors.paymentInstructions = 'Payment instructions contain unsupported characters.';
+  }
+
+  const firstError =
+    fieldErrors.accountHolderName ||
+    fieldErrors.bankName ||
+    fieldErrors.accountNumber ||
+    fieldErrors.accountType ||
+    fieldErrors.paymentInstructions;
+
+  return {
+    isValid: Object.keys(fieldErrors).length === 0,
+    error: firstError,
+    fieldErrors,
+    normalized: {
+      accountHolderName,
+      bankName,
+      accountNumber,
+      accountType: validAccountType,
+      paymentInstructions: paymentInstructions || undefined,
+    },
+  };
+}

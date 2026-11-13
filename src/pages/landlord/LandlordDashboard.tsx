@@ -15,6 +15,7 @@ import { Building2, Receipt, ShieldCheck, Clock, Plus, Users, ArrowRight, AlertC
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
 import { VerificationBadge } from '../../components/ui/Badge';
+import { PaymentAccountDetailsSection } from '../../components/landlord/PaymentAccountDetailsSection';
 import { useAuth } from '../../application/context/AuthContext';
 import { Property } from '../../domain/types';
 
@@ -238,6 +239,9 @@ export const LandlordDashboard: React.FC = () => {
           </p>
         </div>
       )}
+
+      {/* Landlord Direct Bank Transfer Account Settings */}
+      <PaymentAccountDetailsSection landlordId={landlordId} />
 
       {/* Managed Accommodations Table */}
       <div className="space-y-4">

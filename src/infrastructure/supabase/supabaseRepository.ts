@@ -21,6 +21,7 @@ import { supabaseStorageService } from './supabaseStorageService';
 import { appEventBus } from '../events/eventBus';
 import { calculateCompatibility, CompatibilityResult } from '../../domain/matching';
 import { encodeGeohash } from '../../domain/geoUtils';
+import { validateLandlordPaymentDetails } from '../../application/utils/validation';
 import {
   User,
   StudentProfile,
@@ -28,6 +29,10 @@ import {
   StudentDocumentType,
   VerificationReviewStatus,
   LandlordProfile,
+  LandlordPaymentAccount,
+  LandlordPaymentAccountInput,
+  BankAccountType,
+  ReservationPaymentDetails,
   HousingArea,
   Property,
   PropertyLocation,
@@ -65,6 +70,7 @@ export class SupabaseRepository {
   private studentProfiles: StudentProfile[] = [];
   private studentDocs: StudentVerificationDocument[] = [];
   private landlordProfiles: LandlordProfile[] = [];
+  private landlordPaymentAccounts: LandlordPaymentAccount[] = [];
   private properties: Property[] = [];
   private propertyLocations: PropertyLocation[] = [];
   private roommatePreferences: RoommatePreference[] = [];
@@ -805,6 +811,7 @@ export class SupabaseRepository {
     this.loadSeedProfiles();
     this.studentProfiles = [];
     this.landlordProfiles = [];
+    this.landlordPaymentAccounts = [];
     this.properties = [];
     this.reservations = [];
     this.invoices = [];
@@ -983,6 +990,7 @@ export class SupabaseRepository {
         Promise.all([
           this.fetchLandlordReservationsFromSupabase(userId),
           this.fetchLandlordReceiptsFromSupabase(userId),
+          this.fetchLandlordPaymentAccountFromSupabase(userId),
         ]).catch(() => {});
       }
 
@@ -1070,6 +1078,7 @@ export class SupabaseRepository {
     this.receipts = [];
     this.reservations = [];
     this.invoices = [];
+    this.landlordPaymentAccounts = [];
     this.messages = {};
     this.conversations = [];
     this.studentDocs = [];
@@ -2522,6 +2531,254 @@ export class SupabaseRepository {
     return this.receipts.filter((r) => r.landlordId === landlordId);
   }
 
+  private mapPaymentAccountRow(row: any): LandlordPaymentAccount {
+    return {
+      id: row.id,
+      landlordId: row.landlord_id || row.landlordId,
+      accountHolderName: row.account_holder_name || row.accountHolderName || '',
+      bankName: row.bank_name || row.bankName || '',
+      accountNumber: row.account_number || row.accountNumber || '',
+      accountType: (row.account_type ?? row.accountType ?? null) as BankAccountType | null,
+      paymentInstructions: row.payment_instructions ?? row.paymentInstructions ?? null,
+      isActive: row.is_active ?? row.isActive ?? true,
+      createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+      updatedAt: row.updated_at || row.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  public getLandlordPaymentAccount(landlordId: string): LandlordPaymentAccount | undefined {
+    return this.landlordPaymentAccounts.find((a) => a.landlordId === landlordId && a.isActive);
+  }
+
+  public async fetchLandlordPaymentAccountFromSupabase(landlordId: string): Promise<LandlordPaymentAccount | null> {
+    if (!landlordId) return null;
+    if (!this.isUuid(landlordId)) {
+      return this.getLandlordPaymentAccount(landlordId) || null;
+    }
+
+    const { data, error } = await supabase
+      .from('landlord_payment_accounts')
+      .select('id, landlord_id, account_holder_name, bank_name, account_number, account_type, payment_instructions, is_active, created_at, updated_at')
+      .eq('landlord_id', landlordId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Could not load landlord payment account details: ${error.message}`);
+    }
+
+    if (!data) {
+      this.landlordPaymentAccounts = this.landlordPaymentAccounts.filter((a) => a.landlordId !== landlordId);
+      return null;
+    }
+
+    const mapped = this.mapPaymentAccountRow(data);
+    this.landlordPaymentAccounts = [
+      mapped,
+      ...this.landlordPaymentAccounts.filter((a) => a.landlordId !== landlordId),
+    ];
+    return mapped;
+  }
+
+  public async upsertLandlordPaymentAccountPersisted(
+    landlordId: string,
+    input: LandlordPaymentAccountInput
+  ): Promise<LandlordPaymentAccount> {
+    const validation = validateLandlordPaymentDetails(input);
+    if (!validation.isValid) {
+      throw new Error(validation.error || 'Please verify all required bank account fields.');
+    }
+
+    const normalized = validation.normalized;
+    const { accountHolderName, bankName, accountNumber, accountType, paymentInstructions } = normalized;
+
+    if (!this.isUuid(landlordId)) {
+      const now = new Date().toISOString();
+      const existing = this.getLandlordPaymentAccount(landlordId);
+      const localRecord: LandlordPaymentAccount = {
+        id: existing?.id || crypto.randomUUID(),
+        landlordId,
+        accountHolderName,
+        bankName,
+        accountNumber,
+        accountType: accountType || null,
+        paymentInstructions: paymentInstructions || null,
+        isActive: true,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+      this.landlordPaymentAccounts = [
+        localRecord,
+        ...this.landlordPaymentAccounts.filter((a) => a.landlordId !== landlordId),
+      ];
+      return localRecord;
+    }
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc('upsert_landlord_payment_account', {
+      p_account_holder_name: accountHolderName,
+      p_bank_name: bankName,
+      p_account_number: accountNumber,
+      p_account_type: accountType || null,
+      p_payment_instructions: paymentInstructions || null,
+    });
+
+    let savedRow: any = rpcData;
+
+    if (rpcError) {
+      const code = String((rpcError as any)?.code || '');
+      const msg = String(rpcError.message || '').toLowerCase();
+      const missingRpc =
+        code === '42883' || code === 'PGRST202' || msg.includes('upsert_landlord_payment_account');
+
+      if (!missingRpc) {
+        throw new Error(rpcError.message || 'Could not save payment account details.');
+      }
+
+      // Direct RLS-backed fallback if RPC is not yet deployed
+      const { data: existing, error: fetchErr } = await supabase
+        .from('landlord_payment_accounts')
+        .select('id, account_number')
+        .eq('landlord_id', landlordId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (fetchErr) {
+        throw new Error(`Could not verify existing payment account: ${fetchErr.message}`);
+      }
+
+      if (existing?.id && existing.account_number === accountNumber) {
+        const { data: updated, error: updErr } = await supabase
+          .from('landlord_payment_accounts')
+          .update({
+            account_holder_name: accountHolderName,
+            bank_name: bankName,
+            account_type: accountType || null,
+            payment_instructions: paymentInstructions || null,
+          })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (updErr) throw new Error(`Could not update payment account details: ${updErr.message}`);
+        savedRow = updated;
+      } else {
+        if (existing?.id) {
+          const { error: deactErr } = await supabase
+            .from('landlord_payment_accounts')
+            .update({ is_active: false })
+            .eq('id', existing.id);
+
+          if (deactErr) throw new Error(`Could not replace previous payment account: ${deactErr.message}`);
+        }
+
+        const { data: inserted, error: insErr } = await supabase
+          .from('landlord_payment_accounts')
+          .insert({
+            landlord_id: landlordId,
+            account_holder_name: accountHolderName,
+            bank_name: bankName,
+            account_number: accountNumber,
+            account_type: accountType || null,
+            payment_instructions: paymentInstructions || null,
+            is_active: true,
+          })
+          .select()
+          .single();
+
+        if (insErr) throw new Error(`Could not save payment account details: ${insErr.message}`);
+        savedRow = inserted;
+      }
+    }
+
+    const mapped = this.mapPaymentAccountRow(savedRow);
+    this.landlordPaymentAccounts = [
+      mapped,
+      ...this.landlordPaymentAccounts.filter((a) => a.landlordId !== landlordId),
+    ];
+    return mapped;
+  }
+
+  public async fetchReservationPaymentDetailsFromSupabase(
+    reservationId: string
+  ): Promise<ReservationPaymentDetails | null> {
+    if (!reservationId) {
+      return { configured: false, source: 'none' };
+    }
+
+    const cachedRes = this.getReservationById(reservationId);
+    const cachedInv = this.getInvoiceByReservationId(reservationId);
+    const isLocalOnly =
+      !this.isUuid(reservationId) ||
+      Boolean(cachedRes && (!this.isUuid(cachedRes.landlordId) || !this.isUuid(cachedRes.studentId)));
+
+    if (isLocalOnly) {
+      if (cachedInv?.bankDetails?.bankName && cachedInv?.bankDetails?.accountNumber) {
+        return {
+          configured: true,
+          source: cachedInv.bankDetails.source || 'snapshot',
+          invoiceId: cachedInv.id,
+          invoiceNumber: cachedInv.invoiceNumber,
+          accountHolderName: cachedInv.bankDetails.accountName,
+          bankName: cachedInv.bankDetails.bankName,
+          accountNumber: cachedInv.bankDetails.accountNumber,
+          accountType: cachedInv.bankDetails.accountType ?? null,
+          paymentInstructions: cachedInv.bankDetails.paymentInstructions || null,
+          capturedAt: cachedInv.bankDetails.snapshotCapturedAt,
+        };
+      }
+      if (
+        cachedRes &&
+        (cachedRes.status === 'pending_payment' || cachedRes.status === 'receipt_submitted')
+      ) {
+        const activeAcct = this.getLandlordPaymentAccount(cachedRes.landlordId);
+        if (activeAcct) {
+          return {
+            configured: true,
+            source: 'active_account',
+            invoiceId: cachedInv?.id,
+            invoiceNumber: cachedInv?.invoiceNumber,
+            accountHolderName: activeAcct.accountHolderName,
+            bankName: activeAcct.bankName,
+            accountNumber: activeAcct.accountNumber,
+            accountType: activeAcct.accountType ?? null,
+            paymentInstructions: activeAcct.paymentInstructions ?? null,
+            capturedAt: activeAcct.updatedAt,
+          };
+        }
+      }
+      return { configured: false, source: 'none' };
+    }
+
+    const { data, error } = await supabase.rpc('get_reservation_payment_details', {
+      p_reservation_id: reservationId,
+    });
+
+    if (error) {
+      const code = String((error as any)?.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      const missingRpc =
+        code === '42883' || code === 'PGRST202' || msg.includes('get_reservation_payment_details');
+      if (!missingRpc) {
+        throw new Error(`Could not retrieve reservation payment details: ${error.message}`);
+      }
+      return null;
+    }
+
+    if (!data) return { configured: false, source: 'none' };
+    return {
+      configured: Boolean(data.configured),
+      source: data.source || 'none',
+      invoiceId: data.invoiceId,
+      invoiceNumber: data.invoiceNumber,
+      accountHolderName: data.accountHolderName || undefined,
+      bankName: data.bankName || undefined,
+      accountNumber: data.accountNumber || undefined,
+      accountType: (data.accountType ?? null) as BankAccountType | null,
+      paymentInstructions: data.paymentInstructions ?? null,
+      capturedAt: data.capturedAt || undefined,
+    };
+  }
+
   private mapDbReservationStatus(raw: unknown): Reservation['status'] {
     if (raw === 'payment_submitted' || raw === 'receipt_submitted') return 'receipt_submitted';
     if (raw === 'confirmed' || raw === 'rejected' || raw === 'cancelled' || raw === 'expired') return raw;
@@ -2552,6 +2809,7 @@ export class SupabaseRepository {
     context?: {
       studentProfileMap?: Map<string, any>;
       landlordProfileMap?: Map<string, any>;
+      paymentAccountMap?: Map<string, any>;
       userMap?: Map<string, any>;
     }
   ): { reservation: Reservation; invoice?: Invoice; receipt?: PaymentReceipt } {
@@ -2589,6 +2847,8 @@ export class SupabaseRepository {
       studentMeta?.fullName ||
       'Student';
     const reservationNumber = `RES-${String(row.id || '').slice(0, 8).toUpperCase()}`;
+    const mappedStatus = this.mapDbReservationStatus(row.status);
+    const resolvedAmount = Number(row.amount ?? invObj?.amount ?? invObj?.amount_due ?? 0);
 
     const reservation: Reservation = {
       id: row.id,
@@ -2608,17 +2868,48 @@ export class SupabaseRepository {
       roomName: unitName,
       groupId: row.group_id || undefined,
       invoiceId: invObj?.id || undefined,
-      status: this.mapDbReservationStatus(row.status),
-      amount: Number(row.amount ?? invObj?.amount_due ?? 0),
+      status: mappedStatus,
+      amount: resolvedAmount,
       currency: 'NGN',
       holdExpiresAt: row.hold_expires_at,
       createdAt: row.created_at,
-      confirmedAt: row.status === 'confirmed' ? row.updated_at : undefined,
-      cancellationReason: row.notes || undefined,
+      confirmedAt: row.confirmed_at || (row.status === 'confirmed' ? row.updated_at : undefined),
+      cancellationReason: row.cancellation_reason || row.notes || undefined,
     };
 
     let invoice: Invoice | undefined;
     if (invObj?.id) {
+      const snapshot = invObj.payment_account_snapshot;
+      const hasSnapshot = Boolean(
+        snapshot &&
+        typeof snapshot === 'object' &&
+        String(snapshot.bank_name || snapshot.bankName || '').trim() &&
+        String(snapshot.account_number || snapshot.accountNumber || '').trim()
+      );
+      const isEligibleForLiveAccount =
+        mappedStatus === 'pending_payment' || mappedStatus === 'receipt_submitted';
+      const activeAcct = !hasSnapshot && isEligibleForLiveAccount
+        ? context?.paymentAccountMap?.get(row.landlord_id)
+        : null;
+
+      const resolvedBankName = hasSnapshot
+        ? String(snapshot.bank_name || snapshot.bankName || '')
+        : String(activeAcct?.bank_name || '');
+      const resolvedAccountNumber = hasSnapshot
+        ? String(snapshot.account_number || snapshot.accountNumber || '')
+        : String(activeAcct?.account_number || '');
+      const resolvedAccountName = hasSnapshot
+        ? String(snapshot.account_holder_name || snapshot.accountName || landlordName)
+        : String(activeAcct?.account_holder_name || '');
+      const resolvedAccountType = (hasSnapshot
+        ? snapshot.account_type ?? snapshot.accountType ?? null
+        : activeAcct?.account_type ?? null) as BankAccountType | null;
+      const customInstructions = hasSnapshot
+        ? String(snapshot.payment_instructions || snapshot.paymentInstructions || '').trim()
+        : String(activeAcct?.payment_instructions || '').trim();
+      const configured = Boolean(resolvedBankName && resolvedAccountNumber);
+      const invoiceAmount = Number(invObj.amount ?? invObj.amount_due ?? row.amount ?? 0);
+
       invoice = {
         id: invObj.id,
         invoiceNumber: invObj.invoice_number || `INV-${String(invObj.id).slice(0, 8).toUpperCase()}`,
@@ -2633,16 +2924,22 @@ export class SupabaseRepository {
         propertyTitle,
         unitName,
         roomName: unitName,
-        amount: Number(invObj.amount_due ?? row.amount ?? 0),
-        totalAmount: Number(invObj.amount_due ?? row.amount ?? 0),
+        amount: invoiceAmount,
+        totalAmount: invoiceAmount,
         currency: 'NGN',
-        dueDate: invObj.due_at || row.hold_expires_at,
+        dueDate: invObj.due_date || invObj.due_at || row.hold_expires_at,
         status: this.mapDbInvoiceStatus(invObj.status),
         bankDetails: {
-          bankName: landlordMeta?.bank_name || '',
-          accountNumber: landlordMeta?.bank_account_number || '',
-          accountName: landlordMeta?.bank_account_name || landlordName,
-          paymentInstructions: `Include invoice ${invObj.invoice_number || reservationNumber} as your bank transfer narration.`,
+          bankName: resolvedBankName,
+          accountNumber: resolvedAccountNumber,
+          accountName: resolvedAccountName,
+          accountType: resolvedAccountType,
+          paymentInstructions: customInstructions || (configured
+            ? `Include invoice ${invObj.invoice_number || reservationNumber} as your bank transfer narration.`
+            : ''),
+          configured,
+          source: hasSnapshot ? 'snapshot' : activeAcct ? 'active_account' : 'none',
+          snapshotCapturedAt: hasSnapshot ? String(snapshot.captured_at || invObj.created_at || '') : undefined,
         },
         createdAt: invObj.created_at || row.created_at,
       };
@@ -2672,7 +2969,7 @@ export class SupabaseRepository {
         amountPaid: Number(rcObj.amount_paid ?? row.amount ?? 0),
         status: (rcObj.status as any) || 'pending_review',
         rejectionReason: rcObj.rejection_reason || undefined,
-        reviewedBy: rcObj.reviewer_id || undefined,
+        reviewedBy: rcObj.reviewed_by || rcObj.reviewer_id || undefined,
         reviewedAt: rcObj.reviewed_at || undefined,
         uploadedAt: rcObj.created_at,
       };
@@ -2688,21 +2985,45 @@ export class SupabaseRepository {
   private async hydrateRelatedEntitiesForReservations(rows: any[]): Promise<{
     studentProfileMap: Map<string, any>;
     landlordProfileMap: Map<string, any>;
+    paymentAccountMap: Map<string, any>;
     userMap: Map<string, any>;
   }> {
     const studentIds = Array.from(new Set(rows.map((r) => r.student_id).filter(Boolean)));
     const landlordIds = Array.from(new Set(rows.map((r) => r.landlord_id).filter(Boolean)));
     const profileIds = Array.from(new Set([...studentIds, ...landlordIds]));
 
-    const [{ data: spRows }, { data: lpRows }, { data: profRows }] = await Promise.all([
+    // Only look up active landlord_payment_accounts for eligible reservations lacking an invoice snapshot
+    const liveBankLandlordIds = Array.from(
+      new Set(
+        rows
+          .filter((r) => {
+            const invArr = Array.isArray(r.invoices) ? r.invoices : r.invoices ? [r.invoices] : [];
+            const invObj = invArr[0];
+            const hasSnapshot = Boolean(invObj?.payment_account_snapshot?.account_number);
+            const eligible = r.status === 'pending_payment' || r.status === 'payment_submitted';
+            return eligible && !hasSnapshot;
+          })
+          .map((r) => r.landlord_id)
+          .filter(Boolean)
+      )
+    );
+
+    const [{ data: spRows }, { data: lpRows }, { data: paRows }, { data: profRows }] = await Promise.all([
       studentIds.length > 0
         ? supabase.from('student_profiles').select('user_id, registration_number, institution').in('user_id', studentIds)
         : Promise.resolve({ data: [] }),
       landlordIds.length > 0
         ? supabase
             .from('landlord_profiles')
-            .select('user_id, company_name, bank_name, bank_account_number, bank_account_name')
+            .select('user_id, company_name')
             .in('user_id', landlordIds)
+        : Promise.resolve({ data: [] }),
+      liveBankLandlordIds.length > 0
+        ? supabase
+            .from('landlord_payment_accounts')
+            .select('id, landlord_id, account_holder_name, bank_name, account_number, account_type, payment_instructions, is_active')
+            .in('landlord_id', liveBankLandlordIds)
+            .eq('is_active', true)
         : Promise.resolve({ data: [] }),
       profileIds.length > 0
         ? supabase.from('profiles').select('id, full_name, email, phone').in('id', profileIds)
@@ -2712,6 +3033,7 @@ export class SupabaseRepository {
     return {
       studentProfileMap: new Map((spRows || []).map((s: any) => [s.user_id, s])),
       landlordProfileMap: new Map((lpRows || []).map((l: any) => [l.user_id, l])),
+      paymentAccountMap: new Map((paRows || []).map((a: any) => [a.landlord_id, a])),
       userMap: new Map((profRows || []).map((u: any) => [u.id, u])),
     };
   }
@@ -2721,15 +3043,15 @@ export class SupabaseRepository {
     const { data, error } = await supabase
       .from('reservations')
       .select(`
-        id, student_id, landlord_id, property_id, unit_id, group_id,
-        status, amount, hold_expires_at, notes, created_at, updated_at,
+        id, student_id, landlord_id, property_id, unit_id,
+        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
         properties (id, title, address),
         units (id, name),
-        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at),
+        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
         payment_receipts!payment_receipts_reservation_id_fkey (
           id, reservation_id, invoice_id, student_id, landlord_id, property_id,
           storage_path, file_name, file_size, payment_reference, payer_bank_name,
-          payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at
+          payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
         )
       `)
       .eq('student_id', studentId)
@@ -2752,11 +3074,11 @@ export class SupabaseRepository {
     const { data, error } = await supabase
       .from('reservations')
       .select(`
-        id, student_id, landlord_id, property_id, unit_id, group_id,
-        status, amount, hold_expires_at, notes, created_at, updated_at,
+        id, student_id, landlord_id, property_id, unit_id,
+        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
         properties (id, title, address),
         units (id, name),
-        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at)
+        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at)
       `)
       .eq('landlord_id', landlordId)
       .order('created_at', { ascending: false });
@@ -2780,7 +3102,7 @@ export class SupabaseRepository {
       .select(`
         id, reservation_id, invoice_id, student_id, landlord_id, property_id,
         storage_path, file_name, file_size, payment_reference, payer_bank_name,
-        payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at,
+        payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at,
         properties (id, title),
         reservations!payment_receipts_reservation_id_fkey (id, unit_id, units (id, name))
       `)
@@ -2835,7 +3157,7 @@ export class SupabaseRepository {
         amountPaid: Number(rc.amount_paid ?? 0),
         status: (rc.status as any) || 'pending_review',
         rejectionReason: rc.rejection_reason || undefined,
-        reviewedBy: rc.reviewer_id || undefined,
+        reviewedBy: rc.reviewed_by || rc.reviewer_id || undefined,
         reviewedAt: rc.reviewed_at || undefined,
         uploadedAt: rc.created_at,
       };
@@ -2867,15 +3189,15 @@ export class SupabaseRepository {
     const { data, error } = await supabase
       .from('reservations')
       .select(`
-        id, student_id, landlord_id, property_id, unit_id, group_id,
-        status, amount, hold_expires_at, notes, created_at, updated_at,
+        id, student_id, landlord_id, property_id, unit_id,
+        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
         properties (id, title, address),
         units (id, name),
-        invoices (id, invoice_number, reservation_id, amount_due, status, due_at, paid_at, created_at),
+        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
         payment_receipts!payment_receipts_reservation_id_fkey (
           id, reservation_id, invoice_id, student_id, landlord_id, property_id,
           storage_path, file_name, file_size, payment_reference, payer_bank_name,
-          payment_date, amount_paid, status, rejection_reason, reviewer_id, reviewed_at, created_at
+          payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
         )
       `)
       .eq('id', reservationId)
@@ -2887,7 +3209,39 @@ export class SupabaseRepository {
     if (!data) return null;
 
     const context = await this.hydrateRelatedEntitiesForReservations([data]);
-    return this.mapSupabaseReservationBundle(data, context);
+    const bundle = this.mapSupabaseReservationBundle(data, context);
+
+    if (
+      bundle.invoice &&
+      !bundle.invoice.bankDetails?.configured &&
+      (bundle.reservation.status === 'pending_payment' || bundle.reservation.status === 'receipt_submitted')
+    ) {
+      try {
+        const liveDetails = await this.fetchReservationPaymentDetailsFromSupabase(reservationId);
+        if (liveDetails?.configured && liveDetails.bankName && liveDetails.accountNumber) {
+          bundle.invoice = {
+            ...bundle.invoice,
+            bankDetails: {
+              bankName: liveDetails.bankName,
+              accountNumber: liveDetails.accountNumber,
+              accountName: liveDetails.accountHolderName || bundle.invoice.landlordName || 'Verified Landlord',
+              accountType: liveDetails.accountType ?? null,
+              paymentInstructions:
+                liveDetails.paymentInstructions ||
+                `Include invoice ${bundle.invoice.invoiceNumber} as your bank transfer narration.`,
+              configured: true,
+              source: liveDetails.source,
+              snapshotCapturedAt: liveDetails.capturedAt,
+            },
+          };
+          this.upsertInvoiceCache(bundle.invoice);
+        }
+      } catch {
+        // Leave unconfigured state cleanly without failing reservation load
+      }
+    }
+
+    return bundle;
   }
 
   public async fetchInvoiceByIdFromSupabase(invoiceId: string): Promise<Invoice | null> {
@@ -3112,6 +3466,11 @@ export class SupabaseRepository {
       createdAt: now.toISOString(),
     };
 
+    const activeLandlordPaymentAcct = this.getLandlordPaymentAccount(prop.landlordId);
+    const hasConfiguredAcct = Boolean(
+      activeLandlordPaymentAcct?.bankName && activeLandlordPaymentAcct?.accountNumber
+    );
+
     const newInv: Invoice = {
       id: invId,
       invoiceNumber: invNum,
@@ -3130,10 +3489,18 @@ export class SupabaseRepository {
       totalAmount: unit.pricePerSession,
       currency: 'NGN',
       bankDetails: {
-        bankName: '',
-        accountName: prop.landlordName,
-        accountNumber: '',
-        paymentInstructions: `Include reservation reference ${resNum} in your transfer narration.`,
+        bankName: activeLandlordPaymentAcct?.bankName || '',
+        accountName: activeLandlordPaymentAcct?.accountHolderName || '',
+        accountNumber: activeLandlordPaymentAcct?.accountNumber || '',
+        accountType: activeLandlordPaymentAcct?.accountType ?? null,
+        paymentInstructions:
+          activeLandlordPaymentAcct?.paymentInstructions ||
+          (hasConfiguredAcct
+            ? `Include reservation reference ${resNum} in your transfer narration.`
+            : ''),
+        configured: hasConfiguredAcct,
+        source: hasConfiguredAcct ? 'snapshot' : 'none',
+        snapshotCapturedAt: hasConfiguredAcct ? now.toISOString() : undefined,
       },
       createdAt: now.toISOString(),
       dueDate: holdExpires.toISOString(),

@@ -547,6 +547,42 @@ export interface InvoiceItem {
   amount: number;
 }
 
+export type BankAccountType = 'savings' | 'current' | 'corporate';
+
+export interface LandlordPaymentAccount {
+  id: string;
+  landlordId: string;
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  accountType?: BankAccountType | null;
+  paymentInstructions?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LandlordPaymentAccountInput {
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  accountType?: BankAccountType | '';
+  paymentInstructions?: string;
+}
+
+export interface ReservationPaymentDetails {
+  configured: boolean;
+  source: 'snapshot' | 'active_account' | 'none';
+  invoiceId?: string;
+  invoiceNumber?: string;
+  accountHolderName?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountType?: BankAccountType | null;
+  paymentInstructions?: string | null;
+  capturedAt?: string;
+}
+
 export interface Invoice {
   id: string;
   invoiceNumber: string; // "INV-2026-4819"
@@ -571,8 +607,12 @@ export interface Invoice {
     bankName: string;
     accountNumber: string;
     accountName: string;
+    accountType?: BankAccountType | null;
     routingOrSortCode?: string;
     paymentInstructions: string;
+    configured?: boolean;
+    source?: 'snapshot' | 'active_account' | 'none';
+    snapshotCapturedAt?: string;
   };
   createdAt: string;
 }

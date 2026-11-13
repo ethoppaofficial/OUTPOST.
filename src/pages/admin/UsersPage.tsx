@@ -592,21 +592,27 @@ export const UsersPage: React.FC = () => {
                         </p>
                       </div>
                       <div>
+                        <span className="text-slate-400">Payment Account Status</span>
+                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                          {profileDetails.landlordPaymentAccount?.configured ? (
+                            <span className="text-emerald-700 dark:text-emerald-400">Configured</span>
+                          ) : (
+                            <span className="text-amber-700 dark:text-amber-400">Not configured</span>
+                          )}
+                        </p>
+                      </div>
+                      <div>
                         <span className="text-slate-400">Bank Name</span>
                         <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
-                          {profileDetails.landlordProfile.bank_name || 'Not configured'}
+                          {profileDetails.landlordPaymentAccount?.bankName || 'Not configured'}
                         </p>
                       </div>
                       <div>
-                        <span className="text-slate-400">Account Name</span>
+                        <span className="text-slate-400">Account Holder &amp; Number</span>
                         <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
-                          {profileDetails.landlordProfile.bank_account_name || 'Not configured'}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Account Number</span>
-                        <p className="mt-0.5 font-mono font-semibold text-slate-900 dark:text-white">
-                          {profileDetails.landlordProfile.bank_account_number || 'Not configured'}
+                          {profileDetails.landlordPaymentAccount?.configured
+                            ? `${profileDetails.landlordPaymentAccount.accountHolderName || 'Landlord'} (${profileDetails.landlordPaymentAccount.maskedAccountNumber})`
+                            : 'Not configured'}
                         </p>
                       </div>
                       {profileDetails.landlordProfile.verified_at && (

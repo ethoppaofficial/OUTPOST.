@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Printer, ArrowLeft, Building2, Loader2, RefreshCw } from 'lucide-react';
+import { Printer, ArrowLeft, Building2, Loader2, RefreshCw, Copy, Check, AlertTriangle } from 'lucide-react';
 import { reservationService } from '../../application/services/reservationService';
 import { Invoice } from '../../domain/types';
 
@@ -22,6 +22,7 @@ export const InvoicePage: React.FC = () => {
   );
   const [loading, setLoading] = useState<boolean>(!invoice);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [copiedAccount, setCopiedAccount] = useState<boolean>(false);
 
   const loadInvoice = useCallback(async () => {
     if (!invoiceId) {
@@ -71,6 +72,24 @@ export const InvoicePage: React.FC = () => {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const hasVerifiedBankDetails = Boolean(
+    invoice.bankDetails?.bankName && invoice.bankDetails?.accountNumber
+  );
+
+  const handleCopyAccountNumber = async () => {
+    const acct = invoice.bankDetails?.accountNumber;
+    if (!acct) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(acct);
+      }
+      setCopiedAccount(true);
+      setTimeout(() => setCopiedAccount(false), 2500);
+    } catch {
+      // Clipboard unavailable
+    }
   };
 
   return (
@@ -197,32 +216,76 @@ export const InvoicePage: React.FC = () => {
         </div>
 
         {/* Direct Landlord Bank Payment Details */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-          <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5 text-xs">
+          <div className="flex items-center gap-2 text-slate-900 font-bold">
             <Building2 className="w-4 h-4 text-emerald-600" />
             <span>Landlord Direct Bank Transfer Instructions</span>
           </div>
-          <p className="text-[11px] text-slate-600 dark:text-slate-400">
-            Please make transfer directly to the verified landlord account below:
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs pt-1">
-            <div>
-              <span className="text-slate-400 text-[10px] block">Bank:</span>
-              <span className="font-bold">{invoice.bankDetails?.bankName || 'Direct Landlord Bank'}</span>
+
+          {hasVerifiedBankDetails ? (
+            <>
+              <p className="text-[11px] text-slate-600">
+                Please verify the beneficiary details in your banking app before transferring{' '}
+                <strong>₦{totalAmount.toLocaleString()}</strong> directly to the landlord account below:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs pt-1">
+                <div>
+                  <span className="text-slate-400 text-[10px] block font-sans">Bank:</span>
+                  <span className="font-bold text-slate-900">{invoice.bankDetails.bankName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block font-sans">Account Number:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-emerald-700">{invoice.bankDetails.accountNumber}</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyAccountNumber()}
+                      className="no-print inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-slate-200 font-sans text-[10px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                    >
+                      {copiedAccount ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-600">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block font-sans">Payment Ref:</span>
+                  <span className="font-bold text-slate-900">{invoice.invoiceNumber}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px] text-slate-600 pt-1">
+                {invoice.bankDetails.accountName && (
+                  <p>
+                    Account Name: <strong className="text-slate-900">{invoice.bankDetails.accountName}</strong>
+                  </p>
+                )}
+                {invoice.bankDetails.accountType && (
+                  <p className="capitalize">
+                    Account Type: <strong className="text-slate-900">{invoice.bankDetails.accountType}</strong>
+                  </p>
+                )}
+              </div>
+              {invoice.bankDetails.paymentInstructions && (
+                <p className="text-[11px] text-slate-600 pt-1 border-t border-slate-200/70">
+                  <strong>Instructions:</strong> {invoice.bankDetails.paymentInstructions}
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Payment Account Not Yet Configured:</strong> The landlord has not yet added active direct bank transfer details. Please message the landlord on OUTPOST before initiating any transfer.
+              </span>
             </div>
-            <div>
-              <span className="text-slate-400 text-[10px] block">Account No:</span>
-              <span className="font-bold text-emerald-600 dark:text-emerald-400">{invoice.bankDetails?.accountNumber || 'Contact Landlord'}</span>
-            </div>
-            <div>
-              <span className="text-slate-400 text-[10px] block">Payment Ref:</span>
-              <span className="font-bold">{invoice.invoiceNumber}</span>
-            </div>
-          </div>
-          {invoice.bankDetails?.accountName && (
-            <p className="text-[11px] text-slate-500 pt-1">
-              Account Name: <strong className="text-slate-700 dark:text-slate-300">{invoice.bankDetails.accountName}</strong>
-            </p>
           )}
         </div>
 

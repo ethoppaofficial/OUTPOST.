@@ -26,6 +26,9 @@ import {
   Loader2,
   RefreshCw,
   Eye,
+  Copy,
+  Check,
+  ShieldAlert,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
@@ -77,6 +80,32 @@ export const ReservationDetailPage: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
   const [loadingReceiptPreview, setLoadingReceiptPreview] = useState(false);
+  const [copiedField, setCopiedField] = useState<'account' | 'reference' | null>(null);
+
+  const handleCopyText = async (value: string, field: 'account' | 'reference') => {
+    if (!value) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else if (typeof document !== 'undefined') {
+        const el = document.createElement('textarea');
+        el.value = value;
+        el.setAttribute('readonly', '');
+        el.style.position = 'absolute';
+        el.style.left = '-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      setCopiedField(field);
+      setTimeout(() => {
+        setCopiedField((prev) => (prev === field ? null : prev));
+      }, 2500);
+    } catch {
+      // Clipboard API unavailable
+    }
+  };
 
   const loadDetail = useCallback(async () => {
     if (!reservationId || authLoading) return;
@@ -382,16 +411,35 @@ export const ReservationDetailPage: React.FC = () => {
 
         {hasVerifiedBankDetails && bankDetails ? (
           <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 text-xs">
               <div>
                 <span className="text-slate-400 text-[11px] block">Beneficiary Bank:</span>
                 <span className="font-bold text-slate-800 dark:text-slate-200">{bankDetails.bankName}</span>
               </div>
               <div>
                 <span className="text-slate-400 text-[11px] block">Account Number:</span>
-                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                  {bankDetails.accountNumber}
-                </span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                    {bankDetails.accountNumber}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyText(bankDetails.accountNumber, 'account')}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    {copiedField === 'account' ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-600" />
+                        <span className="text-emerald-600">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
               <div>
                 <span className="text-slate-400 text-[11px] block">Beneficiary Name:</span>
@@ -399,24 +447,61 @@ export const ReservationDetailPage: React.FC = () => {
                   {bankDetails.accountName}
                 </span>
               </div>
+              <div>
+                <span className="text-slate-400 text-[11px] block">Amount &amp; Reference:</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    ₦{reservation.amount.toLocaleString()}
+                  </span>
+                  <span className="text-slate-400">•</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleCopyText(invoice?.invoiceNumber || reservation.reservationNumber, 'reference')
+                    }
+                    className="inline-flex items-center gap-1 font-mono font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                    title="Copy transfer reference"
+                  >
+                    <span>{invoice?.invoiceNumber || reservation.reservationNumber}</span>
+                    {copiedField === 'reference' ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              {bankDetails.accountType && (
+                <div className="sm:col-span-2 lg:col-span-4 pt-2 border-t border-slate-200/70 dark:border-slate-700/70">
+                  <span className="text-slate-400 text-[11px]">Account Type: </span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-200 capitalize">
+                    {bankDetails.accountType} Account
+                  </span>
+                </div>
+              )}
             </div>
 
             {bankDetails.paymentInstructions && (
-              <p className="text-[11px] text-slate-500 leading-relaxed italic">
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50/70 dark:bg-slate-800/40 px-3.5 py-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                <strong className="text-slate-800 dark:text-slate-200">Landlord Instructions: </strong>
                 {bankDetails.paymentInstructions}
               </p>
             )}
 
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Please transfer exact amount <strong>₦{reservation.amount.toLocaleString()}</strong> using reference code{' '}
-              <strong className="font-mono text-emerald-600">{reservation.reservationNumber}</strong>. Once payment completes on your mobile banking app, upload your receipt below.
-            </p>
+            <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/50 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                Verify that the beneficiary name (<strong className="font-semibold">{bankDetails.accountName}</strong>) and bank (<strong className="font-semibold">{bankDetails.bankName}</strong>) match in your banking app before transferring{' '}
+                <strong>₦{reservation.amount.toLocaleString()}</strong> using reference{' '}
+                <strong className="font-mono">{invoice?.invoiceNumber || reservation.reservationNumber}</strong>, then upload your receipt below.
+              </span>
+            </div>
           </div>
         ) : (
           <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 text-xs text-amber-800 dark:text-amber-300 space-y-1">
             <p className="font-bold">Landlord Payment Information Unavailable</p>
             <p className="text-[11px]">
-              Direct bank details have not yet been synchronized for this listing. Please communicate with the landlord via chat before making an external bank transfer.
+              The landlord has not yet configured active direct bank transfer details for this reservation. Do not transfer funds to an unverified account — contact the landlord via OUTPOST chat until payment details are configured.
             </p>
           </div>
         )}

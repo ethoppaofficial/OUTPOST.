@@ -21,6 +21,7 @@
 
 import { AuditLog, User } from '../../domain/types';
 import { computePublicCoordinates } from '../../domain/geoUtils';
+import { maskAccountNumber } from '../utils/validation';
 import { supabase as defaultSupabase } from '../../infrastructure/supabase/supabaseClient';
 
 export type AdminRecord = Record<string, any> & { id: string };
@@ -32,10 +33,20 @@ export type AdminUser = User & {
   landlordProfile?: AdminRecord;
 };
 
+export interface AdminLandlordPaymentAccountSummary {
+  configured: boolean;
+  bankName?: string;
+  accountHolderName?: string;
+  maskedAccountNumber?: string;
+  accountType?: string | null;
+  updatedAt?: string;
+}
+
 export interface AdminUserProfileDetails {
   user: AdminUser;
   studentProfile?: AdminRecord;
   landlordProfile?: AdminRecord;
+  landlordPaymentAccount?: AdminLandlordPaymentAccountSummary;
   roommatePreferences?: AdminRecord;
   studentDocuments: AdminRecord[];
   landlordSubmissions: AdminRecord[];
@@ -1198,6 +1209,7 @@ export function createAdminService(deps?: { client?: any }) {
       propertiesRes,
       studentReservationsRes,
       landlordReservationsRes,
+      landlordPaymentAcctRes,
     ] = await Promise.all([
       client.from('student_profiles').select('*').eq('user_id', cleanUserId).maybeSingle(),
       client.from('landlord_profiles').select('*').eq('user_id', cleanUserId).maybeSingle(),
@@ -1239,6 +1251,14 @@ export function createAdminService(deps?: { client?: any }) {
             .eq('landlord_id', cleanUserId)
             .order('created_at', { ascending: false })
         : Promise.resolve({ data: [], error: null }),
+      role === 'landlord'
+        ? client
+            .from('landlord_payment_accounts')
+            .select('id, landlord_id, account_holder_name, bank_name, account_number, account_type, is_active, updated_at')
+            .eq('landlord_id', cleanUserId)
+            .eq('is_active', true)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
     if (studentProfRes.error) throw classifySupabaseError(studentProfRes.error, 'student_profiles');
@@ -1264,6 +1284,31 @@ export function createAdminService(deps?: { client?: any }) {
 
     const rawStudent = studentProfRes.data || undefined;
     const rawLandlord = landlordProfRes.data || undefined;
+    const rawPaymentAcct = !(landlordPaymentAcctRes as any)?.error
+      ? (landlordPaymentAcctRes as any)?.data || null
+      : null;
+
+    const landlordPaymentAccount: AdminLandlordPaymentAccountSummary | undefined =
+      role === 'landlord'
+        ? rawPaymentAcct
+          ? {
+              configured: true,
+              bankName: rawPaymentAcct.bank_name,
+              accountHolderName: rawPaymentAcct.account_holder_name,
+              maskedAccountNumber: maskAccountNumber(rawPaymentAcct.account_number),
+              accountType: rawPaymentAcct.account_type || null,
+              updatedAt: displayDate(rawPaymentAcct.updated_at),
+            }
+          : rawLandlord?.bank_name && rawLandlord?.bank_account_number
+          ? {
+              configured: true,
+              bankName: rawLandlord.bank_name,
+              accountHolderName: rawLandlord.bank_account_name || '',
+              maskedAccountNumber: maskAccountNumber(rawLandlord.bank_account_number),
+              accountType: null,
+            }
+          : { configured: false }
+        : undefined;
 
     const studentProfile = rawStudent
       ? {
@@ -1333,6 +1378,7 @@ export function createAdminService(deps?: { client?: any }) {
       user,
       studentProfile,
       landlordProfile,
+      landlordPaymentAccount,
       roommatePreferences: (roommatePrefsRes as any).data || undefined,
       studentDocuments: (studentDocsRes as any).data || [],
       landlordSubmissions: (landlordSubsRes as any).data || [],
