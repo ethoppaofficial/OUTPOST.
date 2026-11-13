@@ -10,7 +10,7 @@ export const HomePage: React.FC = () => {
   const { currentUser, loading, profileStatus, profileError, landlordProfile, signOut, refreshAuthProfile } = useAuth();
 
   const campuses = [
-    { label: 'Both case-study areas', value: 'All' },
+    { label: 'Off-campus', value: 'All' },
     { label: 'Dambare', value: 'Dambare' },
     { label: 'Rimin Gata', value: 'Rimin Gata' },
   ];
