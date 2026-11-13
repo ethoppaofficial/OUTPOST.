@@ -84,7 +84,7 @@ export const AdminAuditLogsPage: React.FC = () => {
                 <th className="p-3">Actor</th>
                 <th className="p-3">Action</th>
                 <th className="p-3">Affected record</th>
-                <th className="p-3">Details</th>
+                {/* <th className="p-3">Details</th> */}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

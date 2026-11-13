@@ -90,12 +90,7 @@ export const AdminReportsPage: React.FC = () => {
       ) : null}
 
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-        <strong className="font-semibold text-slate-800 dark:text-slate-200">Uploaded Evidence Scope: </strong>
-        Identity and financial file counts track authorized metadata rows in{' '}
-        <span className="font-mono">student_verification_documents</span>,{' '}
-        <span className="font-mono">landlord_verification_submissions</span>, and{' '}
-        <span className="font-mono">payment_receipts</span>. Property listing photos and chat attachments are
-        excluded, and unlinked Storage objects without metadata records are never counted as verified evidence.
+        <strong className="font-semibold text-slate-800 dark:text-slate-200">OUTPOST</strong>
       </div>
     </div>
   );
