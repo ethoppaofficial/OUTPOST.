@@ -127,6 +127,10 @@ describe('OUTPOST: End-to-End Remediation Verification Suite', () => {
       assert.doesNotMatch(landlordVerif, /\{submitted \?/, 'Stale submitted variable must not remain');
       assert.match(queuePage, /const evidenceRecordId = activeTab === 'student' \? item\.id : item\.submissionId \|\| item\.userId \|\| item\.id/, 'Landlord verification cards must use unique submissionId keys');
       assert.match(queuePage, /key=\{evidenceRecordId\}/, 'Verification queue cards must key on evidenceRecordId');
+      assert.match(queuePage, /getEvidencePreviewKind/, 'VerificationQueuePage must select safe inline preview types');
+      assert.match(queuePage, /activeSigned\.previewKind === 'image'/, 'VerificationQueuePage must preview supported images');
+      assert.match(queuePage, /activeSigned\.previewKind === 'pdf'/, 'VerificationQueuePage must preview supported PDFs');
+      assert.match(queuePage, /href=\{activeSigned\.url\}/, 'VerificationQueuePage must retain the expiring signed URL link');
     });
 
     test('supabaseRepository & propertyService preserve corridor area, exact zero spaces, and sync property_images', () => {

@@ -27,6 +27,22 @@ function maskIdentifier(value: unknown): string {
   return `${'•'.repeat(Math.min(8, Math.max(4, identifier.length - 4)))}${identifier.slice(-4)}`;
 }
 
+type EvidencePreviewKind = 'image' | 'pdf' | null;
+
+function getEvidencePreviewKind(item: AdminRecord): EvidencePreviewKind {
+  const contentType = String(item.content_type || item.contentType || '').split(';', 1)[0].trim().toLowerCase();
+  if (contentType) {
+    if (contentType === 'application/pdf') return 'pdf';
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) return 'image';
+    return null;
+  }
+
+  const extension = String(item.file_name || item.fileName || '').toLowerCase().split('.').pop();
+  if (extension === 'pdf') return 'pdf';
+  if (['jpg', 'jpeg', 'png', 'webp'].includes(extension || '')) return 'image';
+  return null;
+}
+
 export const VerificationQueuePage: React.FC = () => {
   const {
     data: queuesData,
@@ -48,7 +64,12 @@ export const VerificationQueuePage: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openingEvidenceId, setOpeningEvidenceId] = useState<string | null>(null);
-  const [signedEvidence, setSignedEvidence] = useState<{ id: string; url: string; fileName?: string } | null>(null);
+  const [signedEvidence, setSignedEvidence] = useState<{
+    id: string;
+    url: string;
+    fileName?: string;
+    previewKind: EvidencePreviewKind;
+  } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
   const [reason, setReason] = useState('');
@@ -71,7 +92,12 @@ export const VerificationQueuePage: React.FC = () => {
         kind === 'student' ? 'student-document' : 'landlord-document',
         recordId
       );
-      setSignedEvidence({ id: recordId, url: signedUrl, fileName: item.file_name || item.fileName });
+      setSignedEvidence({
+        id: recordId,
+        url: signedUrl,
+        fileName: item.file_name || item.fileName,
+        previewKind: getEvidencePreviewKind(item),
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error
         ? err.message
@@ -246,6 +272,27 @@ export const VerificationQueuePage: React.FC = () => {
                         Open / Download Evidence
                       </a>
                     </div>
+                    {activeSigned.previewKind === 'image' ? (
+                      <div className="mt-3 overflow-hidden rounded-lg border border-emerald-200 bg-white dark:border-emerald-900">
+                        <img
+                          src={activeSigned.url}
+                          alt={activeSigned.fileName || 'Verification document'}
+                          referrerPolicy="no-referrer"
+                          className="mx-auto max-h-[70vh] max-w-full object-contain"
+                        />
+                      </div>
+                    ) : activeSigned.previewKind === 'pdf' ? (
+                      <iframe
+                        src={activeSigned.url}
+                        title={activeSigned.fileName || 'Verification document preview'}
+                        referrerPolicy="no-referrer"
+                        className="mt-3 h-[70vh] min-h-96 max-h-[48rem] w-full rounded-lg border border-emerald-200 bg-white dark:border-emerald-900"
+                      />
+                    ) : (
+                      <p className="mt-3 text-emerald-800 dark:text-emerald-300">
+                        Inline preview is unavailable for this file type. Use the signed link to view or download it.
+                      </p>
+                    )}
                   </div>
                 )}
 
