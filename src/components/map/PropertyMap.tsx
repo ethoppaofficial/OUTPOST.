@@ -58,6 +58,7 @@ interface PropertyMapProps {
   height?: string;
   zoomToFit?: boolean;
   showFilters?: boolean;
+  hideUnavailable?: boolean;
 }
 
 export type BudgetFilter = 'all' | 'under150k' | '150k-250k' | '250k-400k' | 'above400k';
@@ -83,6 +84,7 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
   height = '100%',
   zoomToFit = false,
   showFilters = true,
+  hideUnavailable = true,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
@@ -120,11 +122,12 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
     setAreaFilter('all');
   }, []);
 
-  // Filter approved properties with valid coordinates according to active spatial filters
+  // Filter approved, available properties with valid coordinates according to active spatial filters
   const filteredProperties = useMemo(() => {
     return properties.filter((p) => {
-      // Must be approved listing for student search
+      // Must be approved and (when hideUnavailable) have at least one available bed space
       if (p.verificationStatus !== 'approved') return false;
+      if (hideUnavailable && typeof p.availableSpaces === 'number' && p.availableSpaces <= 0) return false;
 
       const loc = p.location;
       if (!loc) return false;
@@ -167,7 +170,7 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
 
       return true;
     });
-  }, [properties, areaFilter, budgetFilter, typeFilter, genderFilter]);
+  }, [properties, areaFilter, budgetFilter, typeFilter, genderFilter, hideUnavailable]);
 
   // Convert filtered properties into GeoJSON FeatureCollection for MapLibre Native Vector Clustering
   const geojsonData = useMemo(() => {

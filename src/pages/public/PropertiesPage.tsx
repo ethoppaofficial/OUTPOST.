@@ -109,7 +109,7 @@ export const PropertiesPage: React.FC = () => {
   const minPrice = searchParams.get('minPrice') ? Number(searchParams.get('minPrice')) : 0;
   const maxPrice = searchParams.get('maxPrice') ? Number(searchParams.get('maxPrice')) : 1000000;
   const onlyVerifiedLandlord = searchParams.get('verifiedOnly') === 'true';
-  const availabilityOnly = searchParams.get('availableOnly') === 'true';
+  const availabilityOnly = searchParams.get('availableOnly') !== 'false';
   const selectedAmenities = searchParams.getAll('amenity');
   const sortBy = (searchParams.get('sort') as PropertyFilterParams['sortBy']) || 'relevance';
 
@@ -403,14 +403,15 @@ export const PropertiesPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => updateParam('availableOnly', availabilityOnly ? '' : 'true')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+            type="button"
+            onClick={() => updateParam('availableOnly', availabilityOnly ? 'false' : 'true')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
               availabilityOnly
                 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
                 : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
             }`}
           >
-            Spaces Available
+            {availabilityOnly ? 'Available Only (Hide Reserved)' : 'Showing All (Incl. Reserved)'}
           </button>
 
           {/* Explicit 'Use my location' control */}

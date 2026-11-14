@@ -18,6 +18,7 @@ import {
   Phone,
   Search,
   ShieldCheck,
+  ShieldOff,
   UserCheck,
 } from 'lucide-react';
 import {
@@ -81,6 +82,8 @@ export const UsersPage: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [reason, setReason] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<AdminUser | null>(null);
+  const [revokeReason, setRevokeReason] = useState('');
 
   // Profile viewer modal state
   const [viewingUser, setViewingUser] = useState<AdminUser | null>(null);
@@ -177,6 +180,44 @@ export const UsersPage: React.FC = () => {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const handleRevokeVerification = async (user: AdminUser, reasonText: string) => {
+    setBusyId(user.id);
+    setActionError(null);
+    setSuccess(null);
+    try {
+      await adminService.revokeUserVerification(user.id, reasonText);
+      await refresh();
+      if (viewingUser?.id === user.id) {
+        void openProfileModal({ ...user, isVerified: false });
+      }
+      setSuccess(`Verification revoked for ${user.email}; authoritative badge removed and action audited.`);
+      setRevokeTarget(null);
+      setRevokeReason('');
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Verification could not be revoked.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const isUserVerified = (user: AdminUser): boolean => {
+    if (user.role === 'student') {
+      return Boolean(
+        user.isVerified ||
+          user.studentProfile?.isProfileVerified ||
+          user.studentProfile?.is_profile_verified
+      );
+    }
+    if (user.role === 'landlord') {
+      return Boolean(
+        user.isVerified ||
+          user.landlordProfile?.verificationStatus === 'approved' ||
+          user.landlordProfile?.verification_status === 'approved'
+      );
+    }
+    return false;
   };
 
   const inspectedUser = profileDetails?.user || viewingUser;
@@ -292,6 +333,20 @@ export const UsersPage: React.FC = () => {
                           <Eye className="h-3.5 w-3.5" />
                           View profile
                         </button>
+                        {user.role !== 'admin' && isUserVerified(user) && (
+                          <button
+                            type="button"
+                            disabled={busyId === user.id}
+                            onClick={() => {
+                              setRevokeTarget(user);
+                              setRevokeReason('');
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-2 font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/30 dark:text-amber-300 cursor-pointer"
+                          >
+                            <ShieldOff className="h-3.5 w-3.5" />
+                            Revoke verification
+                          </button>
+                        )}
                         {user.role !== 'admin' && (
                           <button
                             type="button"
@@ -812,6 +867,21 @@ export const UsersPage: React.FC = () => {
 
             {/* Modal Footer Actions */}
             <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {inspectedUser.role !== 'admin' && isUserVerified(inspectedUser) && (
+                <button
+                  type="button"
+                  disabled={busyId === inspectedUser.id}
+                  onClick={() => {
+                    closeProfileModal();
+                    setRevokeTarget(inspectedUser);
+                    setRevokeReason('');
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-2 font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/30 dark:text-amber-300 cursor-pointer"
+                >
+                  <ShieldOff className="h-3.5 w-3.5" />
+                  Revoke verification
+                </button>
+              )}
               {inspectedUser.role !== 'admin' && (
                 <button
                   type="button"
@@ -891,6 +961,51 @@ export const UsersPage: React.FC = () => {
             </button>
             <button disabled={!!busyId} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white">
               {busyId ? 'Saving…' : 'Suspend account'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!revokeTarget}
+        onClose={() => {
+          setRevokeTarget(null);
+          setRevokeReason('');
+        }}
+        title="Revoke user verification"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (revokeTarget) void handleRevokeVerification(revokeTarget, revokeReason);
+          }}
+          className="space-y-4 text-sm"
+        >
+          <p>
+            Revoking verification for <strong>{revokeTarget?.fullName || revokeTarget?.email}</strong> immediately removes their verified badge and requires fresh document approval to verify again.
+          </p>
+          <label className="block font-semibold">
+            Revocation reason
+            <textarea
+              required
+              minLength={5}
+              maxLength={500}
+              value={revokeReason}
+              onChange={(event) => setRevokeReason(event.target.value)}
+              rows={4}
+              placeholder="e.g. Expired or altered credential detected during re-audit"
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setRevokeTarget(null)} className="rounded-lg px-3 py-2 text-xs">
+              Cancel
+            </button>
+            <button
+              disabled={!!busyId}
+              className="rounded-lg bg-amber-600 hover:bg-amber-500 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
+            >
+              {busyId ? 'Revoking…' : 'Revoke verification'}
             </button>
           </div>
         </form>

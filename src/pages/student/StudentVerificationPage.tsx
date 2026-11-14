@@ -19,7 +19,7 @@ import { authService } from '../../application/services/authService';
 import { verificationService } from '../../application/services/verificationService';
 import { storageService } from '../../application/services/storageService';
 import { StudentDocumentType, StudentVerificationDocument } from '../../domain/types';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { VerificationBadge, VerificationTick, Badge } from '../../components/ui/Badge';
 import { validateUploadFile, STUDENT_DOCUMENT_UPLOAD_RULES } from '../../application/utils/uploadValidation';
 import { normalizeError } from '../../application/utils/errorUtils';
 import { useAuth } from '../../application/context/AuthContext';
@@ -162,6 +162,7 @@ export const StudentVerificationPage: React.FC = () => {
           <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Student Identity Verification
           </h1>
+          <VerificationTick type="student" isVerified={isProfileVerified} size="md" />
           <VerificationBadge type="student" status={isProfileVerified} />
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -178,7 +179,10 @@ export const StudentVerificationPage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Enrolled Student:</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{cachedStudent?.fullName || studentName}</span>
+            <div className="inline-flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+              <span>{cachedStudent?.fullName || studentName}</span>
+              <VerificationTick type="student" isVerified={isProfileVerified} />
+            </div>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Registration No:</span>

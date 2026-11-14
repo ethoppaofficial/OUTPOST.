@@ -197,7 +197,12 @@ export const StudentVerifiedPropertiesMap: React.FC<
   }, []);
 
   const visibleProperties = useMemo(
-    () => properties.filter((property) => property.area === area),
+    () =>
+      properties.filter(
+        (property) =>
+          property.area === area &&
+          (typeof property.availableSpaces !== 'number' || property.availableSpaces > 0)
+      ),
     [area, properties],
   );
 
@@ -216,6 +221,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
               (p.locationVerificationStatus === 'verified' ||
                 p.location?.verificationStatus === 'verified') &&
               p.isActive !== false &&
+              (typeof p.availableSpaces !== 'number' || p.availableSpaces > 0) &&
               ['Dambare', 'Rimin Gata'].includes(p.area || p.location?.area || '') &&
               isValidCoordinate(
                 p.publicLatitude ?? p.location?.publicLatitude,
@@ -250,6 +256,11 @@ export const StudentVerifiedPropertiesMap: React.FC<
 
     const loadProperties = async () => {
       try {
+        try {
+          await supabase.rpc('expire_overdue_reservations_safe');
+        } catch {
+          // Ignore if Migration 11 has not yet been applied
+        }
         const { data, error } = await supabase
           .from('properties')
           .select(`
@@ -275,7 +286,8 @@ export const StudentVerifiedPropertiesMap: React.FC<
             )
           `)
           .eq('approval_status', 'approved')
-          .eq('is_published', true);
+          .eq('is_published', true)
+          .gt('available_spaces', 0);
 
         if (error) {
           setError('Could not fetch verified properties from live database. Showing available verified listings from local cache.');
@@ -293,7 +305,8 @@ export const StudentVerifiedPropertiesMap: React.FC<
               const loc = p.property_locations?.[0];
               const validLat = typeof loc?.public_latitude === 'number' && Number.isFinite(loc.public_latitude);
               const validLng = typeof loc?.public_longitude === 'number' && Number.isFinite(loc.public_longitude);
-              return validLat && validLng && ['Dambare', 'Rimin Gata'].includes(p.area);
+              const hasSpaces = typeof p.available_spaces === 'number' ? p.available_spaces > 0 : true;
+              return hasSpaces && validLat && validLng && ['Dambare', 'Rimin Gata'].includes(p.area);
             })
             .map((p: any) => {
               const loc = p.property_locations?.[0];

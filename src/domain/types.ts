@@ -217,6 +217,7 @@ export interface User {
   fullName?: string;
   displayName?: string;
   emailVerified: boolean;
+  isVerified?: boolean;
   createdAt: string;
   lastLoginAt?: string;
   avatarUrl?: string;
@@ -272,6 +273,8 @@ export interface StudentProfile {
   campus?: string; // optional user-provided district or campus location
   studyLevel: 'Undergraduate (Year 1)' | 'Undergraduate (Year 2)' | 'Undergraduate (Year 3)' | 'Undergraduate (Year 4)' | 'Undergraduate (Year 5+)' | 'Postgraduate' | string;
   programme: string;
+  faculty?: string;
+  department?: string;
   gender: 'Male' | 'Female' | 'Other';
   preferredLocation: string;
   bio?: string;
@@ -514,6 +517,8 @@ export type CompatibilityScore = {
   summary: string;
 };
 
+export type ReservationMode = 'hold' | 'pay_now';
+
 export interface Reservation {
   id: string;
   reservationNumber: string; // e.g. "OUT-2026-8941"
@@ -529,17 +534,53 @@ export interface Reservation {
   propertyAddress: string;
   landlordId: string;
   landlordName?: string;
+  landlordVerified?: boolean;
   unitId: string;
   unitName: string;
   roomName?: string; // alias for unitName
   invoiceId?: string;
   status: ReservationStatus;
+  reservationMode?: ReservationMode;
   amount: number;
   currency: string; // "NGN"
   holdExpiresAt: string; // 7 days from creation
   createdAt: string;
   confirmedAt?: string;
   cancellationReason?: string;
+}
+
+export interface PublicLandlordProfile {
+  found: boolean;
+  unavailable: boolean;
+  reason?: string;
+  id: string;
+  role: 'landlord';
+  displayName: string;
+  companyName?: string | null;
+  avatarUrl?: string | null;
+  isVerified: boolean;
+  verificationStatus?: string;
+  createdAt?: string;
+  approvedListingsCount?: number;
+}
+
+export interface PublicStudentProfile {
+  found: boolean;
+  unavailable: boolean;
+  reason?: string;
+  id: string;
+  role: 'student';
+  displayName: string;
+  avatarUrl?: string | null;
+  isVerified: boolean;
+  registrationNumber?: string | null;
+  university?: string | null;
+  campus?: string | null;
+  faculty?: string | null;
+  department?: string | null;
+  studyLevel?: string | null;
+  bio?: string | null;
+  createdAt?: string;
 }
 
 export interface InvoiceItem {

@@ -28,16 +28,17 @@ import {
   Sparkles,
   Compass,
   ExternalLink,
+  Landmark,
 } from 'lucide-react';
 import { propertyService } from '../../application/services/propertyService';
 import { reservationService } from '../../application/services/reservationService';
 import { useAuth } from '../../application/context/AuthContext';
 import { ImageGallery } from '../../components/ui/ImageGallery';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { VerificationBadge, Badge, VerificationTick } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PropertyMap } from '../../components/map/PropertyMap';
-import { Property } from '../../domain/types';
+import { Property, ReservationMode } from '../../domain/types';
 import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
 import {
   calculateDualGateProximity,
@@ -66,6 +67,7 @@ export const PropertyDetailPage: React.FC = () => {
     property?.rooms[0]?.id || ''
   );
   const [reserveModalOpen, setReserveModalOpen] = useState(false);
+  const [bookingMode, setBookingMode] = useState<ReservationMode>('hold');
   const [directionsModalOpen, setDirectionsModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState<any>('Misleading photos');
@@ -194,15 +196,21 @@ export const PropertyDetailPage: React.FC = () => {
 
   const selectedRoom = property.rooms.find((r) => r.id === selectedUnitId) || property.rooms[0];
 
+  const openBookingModal = (mode: ReservationMode) => {
+    setErrorMsg(null);
+    setBookingMode(mode);
+    setReserveModalOpen(true);
+  };
+
   const handleConfirmReservation = async () => {
     setErrorMsg(null);
-    if (!currentUser) {
+    if (!currentUser || currentUser.id === 'anonymous') {
       navigate('/login');
       return;
     }
 
     if (currentUser.role !== 'student') {
-      setErrorMsg('Only registered students can reserve accommodation holds.');
+      setErrorMsg('Only registered students can book or reserve accommodation.');
       return;
     }
 
@@ -216,17 +224,20 @@ export const PropertyDetailPage: React.FC = () => {
       const result = await reservationService.createReservationPersisted(
         currentUser.id,
         property.id,
-        selectedRoom.id
+        selectedRoom.id,
+        undefined,
+        bookingMode
       );
 
       if (result.success && result.reservation) {
         setReserveModalOpen(false);
-        navigate(`/student/reservations/${result.reservation.id}`);
+        const querySuffix = bookingMode === 'pay_now' ? '?mode=pay_now' : '';
+        navigate(`/student/reservations/${result.reservation.id}${querySuffix}`);
       } else {
-        setErrorMsg(result.error || 'Failed to place reservation hold.');
+        setErrorMsg(result.error || 'Failed to lock room space.');
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to place reservation hold.');
+      setErrorMsg(err?.message || 'Failed to lock room space.');
     } finally {
       setSubmittingReservation(false);
     }
@@ -266,12 +277,13 @@ export const PropertyDetailPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <VerificationBadge type="property" status={property.verificationStatus} />
-          {property.landlordVerified && (
-            <Badge variant="success">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              Verified Landlord ({property.landlordName})
-            </Badge>
-          )}
+          <Link
+            to={`/profiles/landlord/${property.landlordId}`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:border-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-400 transition"
+          >
+            <span>Host: {property.landlordName}</span>
+            <VerificationTick type="landlord" isVerified={Boolean(property.landlordVerified)} />
+          </Link>
           <Badge variant="neutral">{property.propertyType}</Badge>
           <Badge variant="info">{property.genderPolicy}</Badge>
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
@@ -420,6 +432,7 @@ export const PropertyDetailPage: React.FC = () => {
                 selectedPropertyId={property.id}
                 height="320px"
                 zoomToFit={false}
+                hideUnavailable={false}
               />
             </div>
 
@@ -564,17 +577,39 @@ export const PropertyDetailPage: React.FC = () => {
 
           {/* Verified Landlord Summary */}
           <section className="p-5 rounded-2xl bg-slate-100/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-bold">
-                {property.landlordName[0]}
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{property.landlordName}</h4>
-                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Identity Verified & Ownership Deeds Vetted</span>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-bold">
+                  {(property.landlordName || 'H')[0]}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <Link
+                      to={`/profiles/landlord/${property.landlordId}`}
+                      className="text-sm font-semibold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                    >
+                      {property.landlordName}
+                    </Link>
+                    <VerificationTick type="landlord" isVerified={Boolean(property.landlordVerified)} />
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400">
+                    {property.landlordVerified ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Identity Verified &amp; Ownership Deeds Vetted</span>
+                      </span>
+                    ) : (
+                      <span>Registered OUTPOST Host</span>
+                    )}
+                  </div>
                 </div>
               </div>
+              <Link
+                to={`/profiles/landlord/${property.landlordId}`}
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+              >
+                View Landlord Profile →
+              </Link>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 pt-2">
               For student safety, private contact details and property gate access are protected until a reservation hold is locked and payment receipt is reviewed.
@@ -582,7 +617,7 @@ export const PropertyDetailPage: React.FC = () => {
           </section>
         </div>
 
-        {/* Right Column: Pricing Breakdown & 7-Day Hold Box */}
+        {/* Right Column: Pricing Breakdown & 7-Day Hold / Pay Now Box */}
         <div className="space-y-6">
           <div className="sticky top-24 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-lg space-y-6">
             <div className="flex items-baseline justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
@@ -617,17 +652,28 @@ export const PropertyDetailPage: React.FC = () => {
 
             {/* 7-Day Hold Notice */}
             <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed">
-              <span className="font-bold">How OUTPOST Works:</span> Placing a reservation locks your space for <strong>7 complete days</strong>. An invoice with official bank details is generated. You make external payment and upload the bank transfer receipt.
+              <span className="font-bold">How OUTPOST Works:</span> Reserve on a <strong>7-day hold</strong> or choose <strong>Pay Now</strong> to proceed directly to landlord bank transfer details and receipt upload. Confirmed only after landlord verifies your transfer.
             </div>
 
-            {/* Action Button */}
+            {/* Action Buttons: Pay Now + Reserve Room (7-Day Hold) */}
             {(selectedRoom?.availableSpaces ?? property.availableSpaces) > 0 && selectedRoom ? (
-              <button
-                onClick={() => setReserveModalOpen(true)}
-                className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition shadow-md flex items-center justify-center gap-2"
-              >
-                <span>Reserve Room (7-Day Hold)</span>
-              </button>
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => openBookingModal('pay_now')}
+                  className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white font-semibold text-sm transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Landmark className="w-4 h-4" />
+                  <span>Pay Now</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openBookingModal('hold')}
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>Reserve Room (7-Day Hold)</span>
+                </button>
+              </div>
             ) : (
               <button
                 disabled
@@ -648,24 +694,41 @@ export const PropertyDetailPage: React.FC = () => {
       <Modal
         isOpen={reserveModalOpen}
         onClose={() => setReserveModalOpen(false)}
-        title="Confirm 7-Day Reservation Hold"
+        title={bookingMode === 'pay_now' ? 'Proceed to Direct Bank Payment' : 'Confirm 7-Day Reservation Hold'}
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-600 dark:text-slate-300">
-            You are placing a temporary reservation hold on:
+            {bookingMode === 'pay_now'
+              ? 'You are locking this room space and opening the landlord bank transfer & receipt submission screen for:'
+              : 'You are placing a temporary reservation hold on:'}
           </p>
 
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-1.5 font-medium">
             <div className="text-sm font-bold text-slate-900 dark:text-white">{property.title}</div>
             <div className="text-slate-500">{selectedRoom?.name || property.accommodationType} ({selectedRoom?.type || property.propertyType})</div>
             <div className="text-emerald-600 font-bold">₦{(selectedRoom?.pricePerSession ?? property.pricePerSession).toLocaleString()} / session</div>
+            {property.depositAmount > 0 && (
+              <div className="text-[11px] text-slate-500">
+                Caution deposit: ₦{property.depositAmount.toLocaleString()} (Refundable)
+              </div>
+            )}
           </div>
 
           <ul className="space-y-1.5 text-slate-500 dark:text-slate-400 text-[11px] list-disc list-inside">
-            <li>Your space is held for exactly 7 days from now.</li>
-            <li>You will receive an official invoice with verified landlord direct bank payment details.</li>
-            <li>After making external payment, upload your bank transfer receipt.</li>
-            <li>If payment receipt is not approved within 7 days, the hold releases automatically.</li>
+            {bookingMode === 'pay_now' ? (
+              <>
+                <li>This space is atomically locked for you immediately while you transfer.</li>
+                <li>The next screen displays the landlord&apos;s verified Nigerian bank account, payment reference, and receipt upload form.</li>
+                <li>OUTPOST does not auto-confirm payment; your booking confirms once the landlord verifies your receipt.</li>
+              </>
+            ) : (
+              <>
+                <li>Your space is held for exactly 7 days from now.</li>
+                <li>You will receive an official invoice with verified landlord direct bank payment details.</li>
+                <li>After making external payment, upload your bank transfer receipt.</li>
+                <li>If payment receipt is not approved within 7 days, the hold releases automatically.</li>
+              </>
+            )}
           </ul>
 
           {errorMsg && (
@@ -689,7 +752,13 @@ export const PropertyDetailPage: React.FC = () => {
               onClick={() => void handleConfirmReservation()}
               className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs disabled:opacity-60 cursor-pointer"
             >
-              {submittingReservation ? 'Placing Hold…' : 'Confirm & Generate Invoice'}
+              {submittingReservation
+                ? bookingMode === 'pay_now'
+                  ? 'Opening Payment Details…'
+                  : 'Placing Hold…'
+                : bookingMode === 'pay_now'
+                ? 'Lock Space & Show Bank Details'
+                : 'Confirm & Generate Invoice'}
             </button>
           </div>
         </div>

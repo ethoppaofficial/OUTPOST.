@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { ShieldCheck, CheckCircle2, Clock, AlertTriangle, XCircle } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Clock, AlertTriangle, XCircle, Check } from 'lucide-react';
 import { ReservationStatus, ReceiptStatus, PropertyVerificationStatus, LandlordVerificationStatus } from '../../domain/types';
 
 interface BadgeProps {
@@ -53,6 +53,70 @@ export const Badge: React.FC<BadgeProps> = ({
   );
 };
 
+/**
+ * Role-specific verification tick emblem:
+ * - Verified Landlord -> green verification tick
+ * - Verified Student  -> crisp white verification tick inside high-contrast emblem
+ * - Unverified / Pending / Rejected / Revoked / Suspended -> returns null (never shown)
+ */
+export const VerificationTick: React.FC<{
+  type: 'student' | 'landlord';
+  isVerified?: boolean;
+  showLabel?: boolean;
+  size?: 'sm' | 'md';
+  className?: string;
+}> = ({ type, isVerified = false, showLabel = false, size = 'sm', className = '' }) => {
+  if (!isVerified) return null;
+
+  const label = type === 'landlord' ? 'Verified Landlord' : 'Verified Student';
+  const dim = size === 'md' ? 'w-5 h-5' : 'w-4 h-4';
+  const iconDim = size === 'md' ? 'w-3 h-3' : 'w-2.5 h-2.5';
+
+  if (type === 'landlord') {
+    return (
+      <span
+        title={label}
+        aria-label={label}
+        className={`inline-flex items-center gap-1 shrink-0 ${className}`}
+      >
+        <span
+          className={`${dim} rounded-full bg-emerald-600 text-white inline-flex items-center justify-center shadow-xs`}
+        >
+          <Check className={iconDim} strokeWidth={3} aria-hidden="true" />
+        </span>
+        {showLabel ? (
+          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+            {label}
+          </span>
+        ) : (
+          <span className="sr-only">{label}</span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={`inline-flex items-center gap-1 shrink-0 ${className}`}
+    >
+      <span
+        className={`${dim} rounded-full bg-slate-900 dark:bg-slate-950 border border-slate-700 dark:border-white/70 text-white inline-flex items-center justify-center shadow-xs`}
+      >
+        <Check className={`${iconDim} text-white`} strokeWidth={3} aria-hidden="true" />
+      </span>
+      {showLabel ? (
+        <span className="text-[11px] font-semibold text-slate-800 dark:text-white">
+          {label}
+        </span>
+      ) : (
+        <span className="sr-only">{label}</span>
+      )}
+    </span>
+  );
+};
+
 export const VerificationBadge: React.FC<{
   type: 'student' | 'landlord' | 'property';
   status: boolean | PropertyVerificationStatus | LandlordVerificationStatus;
@@ -62,12 +126,36 @@ export const VerificationBadge: React.FC<{
   const isPending = status === 'pending';
 
   if (isApproved) {
+    if (type === 'student') {
+      return (
+        <span
+          title="Verified Student"
+          aria-label="Verified Student"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 dark:border-slate-600 bg-slate-900 dark:bg-slate-950 text-white px-2.5 py-1 text-xs font-medium tracking-wide whitespace-nowrap"
+        >
+          <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} aria-hidden="true" />
+          <span>{showText ? 'Verified Student' : 'Verified'}</span>
+        </span>
+      );
+    }
+
+    if (type === 'landlord') {
+      return (
+        <Badge
+          variant="success"
+          icon={<Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={3} aria-hidden="true" />}
+        >
+          {showText ? 'Verified Landlord' : 'Verified'}
+        </Badge>
+      );
+    }
+
     return (
       <Badge
         variant="success"
         icon={<ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
       >
-        {showText ? (type === 'student' ? 'Verified Student' : type === 'landlord' ? 'Verified Landlord' : 'Verified Property') : 'Verified'}
+        {showText ? 'Verified Property' : 'Verified'}
       </Badge>
     );
   }

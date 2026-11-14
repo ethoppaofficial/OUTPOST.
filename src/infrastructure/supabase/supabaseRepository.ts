@@ -43,6 +43,7 @@ import {
   GroupInvitation,
   GroupJoinRequest,
   Reservation,
+  ReservationMode,
   Invoice,
   PaymentReceipt,
   AppNotification,
@@ -53,6 +54,8 @@ import {
   MessageMention,
   AuditLog,
   PublicProfile,
+  PublicLandlordProfile,
+  PublicStudentProfile,
 } from '../../domain/types';
 
 const IS_PROD = Boolean((import.meta as any)?.env?.PROD);
@@ -630,7 +633,164 @@ export class SupabaseRepository {
     }
   }
 
+  private async syncOverdueHoldsSafe(): Promise<void> {
+    try {
+      await supabase.rpc('expire_overdue_reservations_safe');
+    } catch {
+      // Safe no-op if Migration 11 RPC is not yet deployed remotely
+    }
+  }
+
+  private async fetchPublicLandlordSummariesMap(
+    landlordIds: string[]
+  ): Promise<Map<string, { displayName: string; companyName?: string | null; isVerified: boolean; unavailable?: boolean }>> {
+    const cleanIds = Array.from(new Set((landlordIds || []).filter((id) => this.isUuid(id))));
+    const summaryMap = new Map<
+      string,
+      { displayName: string; companyName?: string | null; isVerified: boolean; unavailable?: boolean }
+    >();
+    if (cleanIds.length === 0) return summaryMap;
+
+    try {
+      const { data, error } = await supabase.rpc('get_public_landlord_summaries', {
+        p_landlord_ids: cleanIds,
+      });
+      if (!error && data && typeof data === 'object') {
+        for (const [id, info] of Object.entries(data as Record<string, any>)) {
+          if (info && typeof info === 'object') {
+            summaryMap.set(id, {
+              displayName: String(info.displayName || info.companyName || 'Property Host'),
+              companyName: info.companyName || null,
+              isVerified: Boolean(info.isVerified),
+              unavailable: Boolean(info.unavailable),
+            });
+          }
+        }
+        return summaryMap;
+      }
+    } catch {
+      // Fallback to local cache below
+    }
+
+    for (const id of cleanIds) {
+      const cachedUser = this.getUserById(id);
+      const cachedLp = this.getLandlordProfile(id);
+      if (cachedUser || cachedLp) {
+        const suspended = cachedUser?.accountStatus === 'suspended';
+        summaryMap.set(id, {
+          displayName: suspended
+            ? 'Account Unavailable'
+            : cachedUser?.fullName || cachedLp?.legalName || cachedLp?.businessName || 'Property Host',
+          companyName: suspended ? null : cachedLp?.businessName || null,
+          isVerified: !suspended && cachedLp?.verificationStatus === 'approved',
+          unavailable: suspended,
+        });
+      }
+    }
+
+    return summaryMap;
+  }
+
+  public async fetchPublicLandlordProfileFromSupabase(userId: string): Promise<PublicLandlordProfile | null> {
+    if (!userId) return null;
+    if (this.isUuid(userId)) {
+      try {
+        const { data, error } = await supabase.rpc('get_public_landlord_profile', {
+          p_user_id: userId,
+        });
+        if (!error && data && typeof data === 'object') {
+          return data as PublicLandlordProfile;
+        }
+      } catch {
+        // Fallback below if RPC not yet deployed
+      }
+    }
+
+    const user = this.getUserById(userId);
+    const lp = this.getLandlordProfile(userId);
+    if (!user && !lp) return null;
+    const suspended = user?.accountStatus === 'suspended';
+    return {
+      found: true,
+      unavailable: suspended,
+      reason: suspended ? 'This landlord account is currently unavailable.' : undefined,
+      id: userId,
+      role: 'landlord',
+      displayName: suspended
+        ? 'Account Unavailable'
+        : user?.fullName || lp?.legalName || lp?.businessName || 'OUTPOST Host',
+      companyName: suspended ? null : lp?.businessName || null,
+      avatarUrl: user?.avatarUrl || null,
+      isVerified: !suspended && lp?.verificationStatus === 'approved',
+      verificationStatus: lp?.verificationStatus || 'not_started',
+      createdAt: user?.createdAt,
+      approvedListingsCount: this.properties.filter(
+        (p) => p.landlordId === userId && p.verificationStatus === 'approved'
+      ).length,
+    };
+  }
+
+  public async fetchPublicStudentProfileFromSupabase(userId: string): Promise<PublicStudentProfile | null> {
+    if (!userId) return null;
+    if (this.isUuid(userId)) {
+      try {
+        const { data, error } = await supabase.rpc('get_public_student_profile', {
+          p_user_id: userId,
+        });
+        if (!error && data && typeof data === 'object') {
+          return data as PublicStudentProfile;
+        }
+      } catch {
+        // Fallback below
+      }
+    }
+
+    const sp = this.getStudentProfile(userId);
+    const user = this.getUserById(userId);
+    if (!sp && !user) return null;
+    const suspended = user?.accountStatus === 'suspended';
+    return {
+      found: true,
+      unavailable: suspended,
+      reason: suspended ? 'This student account is currently unavailable.' : undefined,
+      id: userId,
+      role: 'student',
+      displayName: suspended ? 'Account Unavailable' : sp?.fullName || user?.fullName || 'OUTPOST Student',
+      avatarUrl: user?.avatarUrl || null,
+      isVerified: !suspended && Boolean(sp?.isProfileVerified),
+      registrationNumber: sp?.registrationNumber || null,
+      university: sp?.university || null,
+      campus: sp?.campus || null,
+      faculty: sp?.faculty || null,
+      department: sp?.department || null,
+      studyLevel: sp?.studyLevel || null,
+      bio: sp?.bio || null,
+      createdAt: user?.createdAt,
+    };
+  }
+
+  public async lookupStudentByRegistrationNumberFromSupabase(regNumber: string): Promise<PublicStudentProfile | null> {
+    const clean = String(regNumber || '').trim().replace(/\s+/g, '').toUpperCase();
+    if (!clean) return null;
+    try {
+      const { data, error } = await supabase.rpc('lookup_student_by_registration_number', {
+        p_reg_number: clean,
+      });
+      if (!error && data && typeof data === 'object') {
+        if ((data as any).found === false) return null;
+        return data as PublicStudentProfile;
+      }
+    } catch {
+      // Fallback below
+    }
+
+    const local = this.searchStudentByRegistrationNumber(clean);
+    if (!local) return null;
+    return this.fetchPublicStudentProfileFromSupabase(local.userId);
+  }
+
   public async fetchApprovedPropertiesFromSupabase(): Promise<Property[]> {
+    await this.syncOverdueHoldsSafe();
     let propsData: any[];
     try {
       propsData = await this.selectPropertiesResilient((selectClause) =>
@@ -646,9 +806,18 @@ export class SupabaseRepository {
       throw new Error(`Could not load accommodation directory: ${propsError?.message || propsError}`);
     }
 
-    const mapped = (propsData || []).map((row: any) =>
-      this.mapSupabasePropertyRow(row, { defaultActive: true })
+    const landlordSummaries = await this.fetchPublicLandlordSummariesMap(
+      (propsData || []).map((row: any) => row.landlord_id)
     );
+
+    const mapped = (propsData || []).map((row: any) => {
+      const landlordInfo = landlordSummaries.get(row.landlord_id);
+      return this.mapSupabasePropertyRow(row, {
+        defaultActive: true,
+        landlordName: landlordInfo?.displayName,
+        landlordVerified: landlordInfo?.isVerified,
+      });
+    });
     this.mergePropertiesIntoCache(mapped, true);
     return mapped;
   }
@@ -690,6 +859,7 @@ export class SupabaseRepository {
 
   public async fetchPropertyByIdOrSlugFromSupabase(lookupKey: string): Promise<Property | null> {
     if (!lookupKey) return null;
+    await this.syncOverdueHoldsSafe();
     const isUuidLookup = this.isUuid(lookupKey);
 
     if (isUuidLookup) {
@@ -709,7 +879,12 @@ export class SupabaseRepository {
       }
       const data = rows[0];
       if (!data) return null;
-      const mapped = this.mapSupabasePropertyRow(data);
+      const summaries = await this.fetchPublicLandlordSummariesMap([data.landlord_id]);
+      const landlordInfo = summaries.get(data.landlord_id);
+      const mapped = this.mapSupabasePropertyRow(data, {
+        landlordName: landlordInfo?.displayName,
+        landlordVerified: landlordInfo?.isVerified,
+      });
       this.mergePropertiesIntoCache([mapped]);
       return mapped;
     }
@@ -2859,6 +3034,9 @@ export class SupabaseRepository {
       studentPhone: studentUser?.phone || '',
       landlordId: row.landlord_id,
       landlordName,
+      landlordVerified: Boolean(
+        landlordMeta?.verification_status === 'approved' || cachedProp?.landlordVerified
+      ),
       propertyId: row.property_id,
       propertyName: propertyTitle,
       propertyTitle,
@@ -2869,6 +3047,7 @@ export class SupabaseRepository {
       groupId: row.group_id || undefined,
       invoiceId: invObj?.id || undefined,
       status: mappedStatus,
+      reservationMode: row.reservation_mode === 'pay_now' ? 'pay_now' : 'hold',
       amount: resolvedAmount,
       currency: 'NGN',
       holdExpiresAt: row.hold_expires_at,
@@ -3015,7 +3194,7 @@ export class SupabaseRepository {
       landlordIds.length > 0
         ? supabase
             .from('landlord_profiles')
-            .select('user_id, company_name')
+            .select('user_id, company_name, verification_status')
             .in('user_id', landlordIds)
         : Promise.resolve({ data: [] }),
       liveBankLandlordIds.length > 0
@@ -3040,22 +3219,35 @@ export class SupabaseRepository {
 
   public async fetchStudentReservationsFromSupabase(studentId: string): Promise<Reservation[]> {
     if (!studentId) return [];
-    const { data, error } = await supabase
+    await this.syncOverdueHoldsSafe();
+    const buildSelect = (includeMode: boolean) => `
+      id, student_id, landlord_id, property_id, unit_id,
+      status, ${includeMode ? 'reservation_mode, ' : ''}amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
+      properties (id, title, address),
+      units (id, name),
+      invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
+      payment_receipts!payment_receipts_reservation_id_fkey (
+        id, reservation_id, invoice_id, student_id, landlord_id, property_id,
+        storage_path, file_name, file_size, payment_reference, payer_bank_name,
+        payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
+      )
+    `;
+
+    let { data, error } = await supabase
       .from('reservations')
-      .select(`
-        id, student_id, landlord_id, property_id, unit_id,
-        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
-        properties (id, title, address),
-        units (id, name),
-        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
-        payment_receipts!payment_receipts_reservation_id_fkey (
-          id, reservation_id, invoice_id, student_id, landlord_id, property_id,
-          storage_path, file_name, file_size, payment_reference, payer_bank_name,
-          payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
-        )
-      `)
+      .select(buildSelect(true))
       .eq('student_id', studentId)
       .order('created_at', { ascending: false });
+
+    if (error && String(error.message || '').toLowerCase().includes('reservation_mode')) {
+      const retry = await supabase
+        .from('reservations')
+        .select(buildSelect(false))
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false });
+      data = retry.data as any;
+      error = retry.error;
+    }
 
     if (error) {
       throw new Error(`Could not load your reservations: ${error.message}`);
@@ -3071,17 +3263,30 @@ export class SupabaseRepository {
 
   public async fetchLandlordReservationsFromSupabase(landlordId: string): Promise<Reservation[]> {
     if (!landlordId) return [];
-    const { data, error } = await supabase
+    await this.syncOverdueHoldsSafe();
+    const buildSelect = (includeMode: boolean) => `
+      id, student_id, landlord_id, property_id, unit_id,
+      status, ${includeMode ? 'reservation_mode, ' : ''}amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
+      properties (id, title, address),
+      units (id, name),
+      invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at)
+    `;
+
+    let { data, error } = await supabase
       .from('reservations')
-      .select(`
-        id, student_id, landlord_id, property_id, unit_id,
-        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
-        properties (id, title, address),
-        units (id, name),
-        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at)
-      `)
+      .select(buildSelect(true))
       .eq('landlord_id', landlordId)
       .order('created_at', { ascending: false });
+
+    if (error && String(error.message || '').toLowerCase().includes('reservation_mode')) {
+      const retry = await supabase
+        .from('reservations')
+        .select(buildSelect(false))
+        .eq('landlord_id', landlordId)
+        .order('created_at', { ascending: false });
+      data = retry.data as any;
+      error = retry.error;
+    }
 
     if (error) {
       throw new Error(`Could not load landlord reservations: ${error.message}`);
@@ -3186,22 +3391,34 @@ export class SupabaseRepository {
         : null;
     }
 
-    const { data, error } = await supabase
+    const buildDetailSelect = (includeMode: boolean) => `
+      id, student_id, landlord_id, property_id, unit_id,
+      status, ${includeMode ? 'reservation_mode, ' : ''}amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
+      properties (id, title, address),
+      units (id, name),
+      invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
+      payment_receipts!payment_receipts_reservation_id_fkey (
+        id, reservation_id, invoice_id, student_id, landlord_id, property_id,
+        storage_path, file_name, file_size, payment_reference, payer_bank_name,
+        payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
+      )
+    `;
+
+    let { data, error } = await supabase
       .from('reservations')
-      .select(`
-        id, student_id, landlord_id, property_id, unit_id,
-        status, amount, hold_expires_at, cancellation_reason, confirmed_at, created_at, updated_at,
-        properties (id, title, address),
-        units (id, name),
-        invoices (id, invoice_number, reservation_id, amount, breakdown, payment_account_snapshot, status, due_date, paid_at, created_at),
-        payment_receipts!payment_receipts_reservation_id_fkey (
-          id, reservation_id, invoice_id, student_id, landlord_id, property_id,
-          storage_path, file_name, file_size, payment_reference, payer_bank_name,
-          payment_date, amount_paid, status, rejection_reason, reviewed_by, reviewed_at, created_at
-        )
-      `)
+      .select(buildDetailSelect(true))
       .eq('id', reservationId)
       .maybeSingle();
+
+    if (error && String(error.message || '').toLowerCase().includes('reservation_mode')) {
+      const retry = await supabase
+        .from('reservations')
+        .select(buildDetailSelect(false))
+        .eq('id', reservationId)
+        .maybeSingle();
+      data = retry.data as any;
+      error = retry.error;
+    }
 
     if (error) {
       throw new Error(`Could not load reservation details: ${error.message}`);
@@ -3265,13 +3482,14 @@ export class SupabaseRepository {
   }
 
   /**
-   * Create reservation with 7-day hold via Edge Function -> create_reservation_atomic.
+   * Create reservation (7-day hold or Pay Now direct bank transfer mode) via Edge Function -> create_reservation_atomic.
    */
   public async createReservationPersisted(
     _studentId: string,
     propertyId: string,
     unitId: string,
-    groupId?: string
+    groupId?: string,
+    reservationMode: ReservationMode = 'hold'
   ): Promise<{ success: boolean; reservation?: Reservation; invoice?: Invoice; error?: string }> {
     const idempotencyKey =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -3283,6 +3501,7 @@ export class SupabaseRepository {
       unitId,
       groupId: groupId || null,
       idempotencyKey,
+      reservationMode,
     });
 
     if (error && isEdgeFunctionUnavailableError(error)) {
@@ -3292,12 +3511,29 @@ export class SupabaseRepository {
         return { success: false, error: 'Please sign in as a student before reserving an accommodation.' };
       }
 
-      const { data: rpcData, error: rpcError } = await supabase.rpc('create_reservation_atomic', {
+      let { data: rpcData, error: rpcError } = await supabase.rpc('create_reservation_atomic', {
         p_student_id: callerId,
         p_property_id: propertyId,
         p_unit_id: unitId,
         p_idempotency_key: idempotencyKey,
+        p_reservation_mode: reservationMode,
       });
+
+      // Fallback cleanly to legacy 4-arg RPC if Migration 11 has not yet been executed remotely
+      if (
+        rpcError &&
+        (String((rpcError as any)?.code || '') === 'PGRST202' ||
+          String(rpcError.message || '').toLowerCase().includes('p_reservation_mode'))
+      ) {
+        const legacyRes = await supabase.rpc('create_reservation_atomic', {
+          p_student_id: callerId,
+          p_property_id: propertyId,
+          p_unit_id: unitId,
+          p_idempotency_key: idempotencyKey,
+        });
+        rpcData = legacyRes.data;
+        rpcError = legacyRes.error;
+      }
 
       if (rpcError) {
         return { success: false, error: rpcError.message || 'Failed to place reservation hold.' };
@@ -3318,13 +3554,34 @@ export class SupabaseRepository {
       };
     }
 
+    // Immediately sync local property & unit availability cache so listings/maps hide reserved units right away
+    const cachedProp = this.getPropertyById(propertyId);
+    if (cachedProp) {
+      const nextRooms = (cachedProp.rooms || []).map((r) =>
+        r.id === unitId ? { ...r, availableSpaces: Math.max(0, r.availableSpaces - 1) } : r
+      );
+      const nextAvail = nextRooms.length > 0
+        ? nextRooms.reduce((sum, r) => sum + r.availableSpaces, 0)
+        : Math.max(0, cachedProp.availableSpaces - 1);
+      this.mergePropertiesIntoCache([
+        {
+          ...cachedProp,
+          rooms: nextRooms,
+          availableSpaces: nextAvail,
+        },
+      ]);
+    }
+
     const bundle = await this.fetchReservationDetailFromSupabase(reservationId).catch(() => null);
     await this.fetchPropertyByIdOrSlugFromSupabase(propertyId).catch(() => null);
 
     if (bundle?.reservation) {
       return {
         success: true,
-        reservation: bundle.reservation,
+        reservation: {
+          ...bundle.reservation,
+          reservationMode: bundle.reservation.reservationMode || reservationMode,
+        },
         invoice: bundle.invoice,
       };
     }
@@ -3366,6 +3623,7 @@ export class SupabaseRepository {
     if (res?.propertyId) {
       await this.fetchPropertyByIdOrSlugFromSupabase(res.propertyId).catch(() => null);
     }
+    await this.fetchApprovedPropertiesFromSupabase().catch(() => null);
 
     return {
       success: true,
@@ -3424,13 +3682,14 @@ export class SupabaseRepository {
   }
 
   /**
-   * Create reservation with 7-day hold, atomic availability update, and invoice creation.
+   * Create reservation with 7-day hold or Pay Now mode, atomic availability update, and invoice creation.
    */
   public createReservation(
     studentId: string,
     propertyId: string,
     unitId: string,
-    groupId?: string
+    groupId?: string,
+    reservationMode: ReservationMode = 'hold'
   ): { success: boolean; reservation?: Reservation; invoice?: Invoice; error?: string } {
     const prop = this.getPropertyById(propertyId);
     if (!prop) return { success: false, error: 'Property not found.' };
@@ -3453,6 +3712,8 @@ export class SupabaseRepository {
       studentEmail: studentUser?.email || '',
       studentPhone: studentUser?.phone || '',
       landlordId: prop.landlordId,
+      landlordName: prop.landlordName,
+      landlordVerified: prop.landlordVerified,
       propertyId,
       propertyName: prop.title,
       propertyAddress: prop.address,
@@ -3460,6 +3721,7 @@ export class SupabaseRepository {
       unitName: unit.name,
       groupId,
       status: 'pending_payment',
+      reservationMode,
       holdExpiresAt: holdExpires.toISOString(),
       amount: unit.pricePerSession,
       currency: 'NGN',
@@ -3516,6 +3778,7 @@ export class SupabaseRepository {
       propertyId,
       unitId,
       groupId,
+      reservationMode,
     }).catch((err) => console.warn('[SupabaseRepository] create-reservation edge function notice:', err));
 
     return { success: true, reservation: newRes, invoice: newInv };

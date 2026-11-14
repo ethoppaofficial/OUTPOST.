@@ -14,11 +14,24 @@ import { useParams, Link } from 'react-router-dom';
 import { Printer, ArrowLeft, Building2, Loader2, RefreshCw, Copy, Check, AlertTriangle } from 'lucide-react';
 import { reservationService } from '../../application/services/reservationService';
 import { Invoice } from '../../domain/types';
+import { VerificationTick } from '../../components/ui/Badge';
 
 export const InvoicePage: React.FC = () => {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const [invoice, setInvoice] = useState<Invoice | undefined>(() =>
     reservationService.getInvoiceById(invoiceId || '')
+  );
+  const [linkedLandlordId, setLinkedLandlordId] = useState<string | undefined>(() =>
+    invoice?.reservationId
+      ? reservationService.getReservationById(invoice.reservationId)?.landlordId
+      : undefined
+  );
+  const [linkedLandlordVerified, setLinkedLandlordVerified] = useState<boolean>(() =>
+    Boolean(
+      invoice?.reservationId
+        ? reservationService.getReservationById(invoice.reservationId)?.landlordVerified
+        : false
+    )
   );
   const [loading, setLoading] = useState<boolean>(!invoice);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -33,7 +46,22 @@ export const InvoicePage: React.FC = () => {
     setLoadError(null);
     try {
       const live = await reservationService.loadInvoiceById(invoiceId);
-      if (live) setInvoice(live);
+      if (live) {
+        setInvoice(live);
+        const cachedRes = live.reservationId
+          ? reservationService.getReservationById(live.reservationId)
+          : undefined;
+        if (cachedRes?.landlordId) {
+          setLinkedLandlordId(cachedRes.landlordId);
+          setLinkedLandlordVerified(Boolean(cachedRes.landlordVerified));
+        } else if (live.reservationId) {
+          const bundle = await reservationService.loadReservationDetail(live.reservationId);
+          if (bundle?.reservation) {
+            setLinkedLandlordId(bundle.reservation.landlordId);
+            setLinkedLandlordVerified(Boolean(bundle.reservation.landlordVerified));
+          }
+        }
+      }
     } catch (err: any) {
       setLoadError(err?.message || 'Could not load invoice document.');
     } finally {
@@ -167,8 +195,23 @@ export const InvoicePage: React.FC = () => {
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
               Accommodation Provider:
             </span>
-            <div className="font-bold text-sm text-slate-900">{invoice.landlordName}</div>
-            <div className="text-slate-600">Verified Landlord Partner</div>
+            {linkedLandlordId ? (
+              <Link
+                to={`/profiles/landlord/${linkedLandlordId}`}
+                className="inline-flex items-center gap-1.5 font-bold text-sm text-slate-900 hover:text-emerald-700 hover:underline print:no-underline"
+              >
+                <span>{invoice.landlordName}</span>
+                <VerificationTick type="landlord" isVerified={linkedLandlordVerified} />
+              </Link>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 font-bold text-sm text-slate-900">
+                <span>{invoice.landlordName}</span>
+                <VerificationTick type="landlord" isVerified={linkedLandlordVerified} />
+              </div>
+            )}
+            <div className="text-slate-600">
+              {linkedLandlordVerified ? 'Verified Landlord Partner' : 'Registered Landlord Partner'}
+            </div>
             <div className="text-slate-600">Property: {invoice.propertyTitle}</div>
           </div>
         </div>

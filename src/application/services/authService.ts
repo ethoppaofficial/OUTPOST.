@@ -2,6 +2,10 @@ import { supabase } from '../../infrastructure/supabase/supabaseClient';
 import { User, UserRole, AccountStatus, StudentProfile, LandlordProfile } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { appConfig } from '../../infrastructure/config/appConfig';
+import {
+  normalizeRegistrationNumber,
+  validateStudentRegistrationNumber,
+} from '../utils/validation';
 
 export interface AuthSession {
   user: User;
@@ -164,6 +168,44 @@ class AuthService {
   }
 
   /**
+   * Checks normalized student registration number availability against Supabase DB.
+   */
+  public async checkRegistrationNumberAvailability(
+    rawRegNumber: string
+  ): Promise<{ available: boolean; normalized: string; error?: string }> {
+    const check = validateStudentRegistrationNumber(rawRegNumber);
+    if (!check.isValid) {
+      return { available: false, normalized: check.normalized, error: check.error };
+    }
+
+    const existingProfiles = repository.getStudentProfiles();
+    if (existingProfiles.some((p) => normalizeRegistrationNumber(p.registrationNumber) === check.normalized)) {
+      return {
+        available: false,
+        normalized: check.normalized,
+        error: 'This student registration number is already registered on OUTPOST.',
+      };
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('is_registration_number_available', {
+        p_reg_number: check.normalized,
+      });
+      if (!error && data === false) {
+        return {
+          available: false,
+          normalized: check.normalized,
+          error: 'This student registration number is already registered on OUTPOST.',
+        };
+      }
+    } catch {
+      // DB trigger & unique index remain authoritative if RPC check fails due to network
+    }
+
+    return { available: true, normalized: check.normalized };
+  }
+
+  /**
    * Supabase-backed Student Registration
    */
   public async registerStudentWithSupabase(data: {
@@ -185,10 +227,18 @@ class AuthService {
       return { success: false, error: 'A valid, active academic or personal email is required.' };
     }
 
-    const regNorm = data.registrationNumber.trim().toUpperCase();
-    const existingProfiles = repository.getStudentProfiles();
-    if (existingProfiles.some((p) => p.registrationNumber?.toUpperCase() === regNorm)) {
-      return { success: false, error: 'This student registration number is already registered on OUTPOST.' };
+    const regCheck = validateStudentRegistrationNumber(data.registrationNumber);
+    if (!regCheck.isValid) {
+      return { success: false, error: regCheck.error };
+    }
+    const regNorm = regCheck.normalized;
+
+    const availability = await this.checkRegistrationNumberAvailability(regNorm);
+    if (!availability.available) {
+      return {
+        success: false,
+        error: availability.error || 'This student registration number is already registered on OUTPOST.',
+      };
     }
 
     if (!data.password) {
@@ -205,14 +255,26 @@ class AuthService {
             role: 'student',
             phone: data.phone.trim(),
             registration_number: regNorm,
+            university: data.university,
+            campus: data.campus,
+            study_level: data.studyLevel,
+            gender: data.gender?.toLowerCase() || 'other',
           },
         },
       });
 
       if (signUpError || !signUpData.user) {
         let msg = signUpError?.message || 'Registration failed.';
-        if (msg.toLowerCase().includes('error sending confirmation email')) {
+        const lowerMsg = msg.toLowerCase();
+        if (lowerMsg.includes('error sending confirmation email')) {
           msg = 'Unable to send confirmation email. Please disable "Confirm email" or verify SMTP settings in your Supabase Dashboard (Authentication > Providers > Email).';
+        } else if (
+          (signUpError as any)?.code === '23505' ||
+          lowerMsg.includes('registration number') ||
+          lowerMsg.includes('uq_student_profiles_registration_number') ||
+          lowerMsg.includes('duplicate key')
+        ) {
+          msg = 'This student registration number is already registered on OUTPOST.';
         }
         return { success: false, error: msg };
       }
@@ -242,7 +304,7 @@ class AuthService {
           })
           .eq('id', sbUser.id);
 
-        await supabase
+        const { error: spUpsertError } = await supabase
           .from('student_profiles')
           .upsert(
             {
@@ -256,6 +318,21 @@ class AuthService {
             },
             { onConflict: 'user_id' }
           );
+
+        if (spUpsertError) {
+          const spMsg = String(spUpsertError.message || '').toLowerCase();
+          if (
+            spUpsertError.code === '23505' ||
+            spMsg.includes('uq_student_profiles_registration_number') ||
+            spMsg.includes('registration_number')
+          ) {
+            await supabase.auth.signOut().catch(() => {});
+            return {
+              success: false,
+              error: 'This student registration number is already registered on OUTPOST.',
+            };
+          }
+        }
 
         repository.createUser(newUser);
         repository.saveStudentProfile({

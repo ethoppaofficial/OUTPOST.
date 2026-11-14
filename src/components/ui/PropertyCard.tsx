@@ -14,9 +14,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Navigation, Bed, CheckCircle2, Compass, Building2 } from 'lucide-react';
+import { MapPin, Navigation, Bed, CheckCircle2, Compass, Building2, User as UserIcon } from 'lucide-react';
 import { Property } from '../../domain/types';
-import { VerificationBadge, Badge } from './Badge';
+import { VerificationBadge, Badge, VerificationTick } from './Badge';
 import { getNearestLandmarkOrientation } from '../../domain/geoUtils';
 import { getImmediateDualGateProximity } from '../../application/services/walkingRouteService';
 
@@ -114,6 +114,19 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
               {property.title}
             </Link>
           </h3>
+
+          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 mt-1.5">
+            <UserIcon className="w-3.5 h-3.5 flex-shrink-0 text-slate-400" />
+            <span className="text-slate-400">Host:</span>
+            <Link
+              to={`/profiles/landlord/${property.landlordId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="font-semibold text-slate-800 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline truncate"
+            >
+              {property.landlordName || 'Property Host'}
+            </Link>
+            <VerificationTick type="landlord" isVerified={Boolean(property.landlordVerified)} />
+          </div>
 
           <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
             <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-slate-400" />

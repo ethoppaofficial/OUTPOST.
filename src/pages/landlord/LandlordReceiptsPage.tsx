@@ -11,6 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CheckCircle2, ExternalLink, AlertCircle, Eye, Loader2, RefreshCw } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
@@ -181,12 +182,23 @@ export const LandlordReceiptsPage: React.FC = () => {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                        {rec.studentName}
-                      </h3>
-                      <span className="font-mono text-xs text-slate-400">
-                        ({rec.registrationNumber})
-                      </span>
+                      {rec.studentId ? (
+                        <Link
+                          to={`/profiles/student/${rec.studentId}`}
+                          className="text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                        >
+                          {rec.studentName}
+                        </Link>
+                      ) : (
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                          {rec.studentName}
+                        </h3>
+                      )}
+                      {rec.registrationNumber && (
+                        <span className="font-mono text-xs text-slate-400">
+                          ({rec.registrationNumber})
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Property: <span className="font-semibold text-slate-700 dark:text-slate-300">{rec.propertyTitle}</span> ({rec.roomName})

@@ -14,7 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import {
   Clock,
   FileText,
@@ -29,12 +29,13 @@ import {
   Copy,
   Check,
   ShieldAlert,
+  Landmark,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
 import { reservationService } from '../../application/services/reservationService';
 import { storageService } from '../../application/services/storageService';
-import { ReservationStatusBadge, ReceiptStatusBadge } from '../../components/ui/Badge';
+import { ReservationStatusBadge, ReceiptStatusBadge, VerificationTick } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { Invoice, PaymentReceipt, Reservation } from '../../domain/types';
 import {
@@ -49,6 +50,7 @@ import { normalizeError } from '../../application/utils/errorUtils';
 
 export const ReservationDetailPage: React.FC = () => {
   const { reservationId } = useParams<{ reservationId: string }>();
+  const [searchParams] = useSearchParams();
   const { currentUser, loading: authLoading } = useAuth();
   const fallbackSession = authService.getSession();
   const activeUser = currentUser || fallbackSession.user;
@@ -186,6 +188,8 @@ export const ReservationDetailPage: React.FC = () => {
   const canUploadReceipt =
     !isExpired &&
     (reservation.status === 'pending_payment' || reservation.status === 'receipt_submitted');
+  const isPayNowMode =
+    searchParams.get('mode') === 'pay_now' || reservation.reservationMode === 'pay_now';
 
   const handleUploadReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -327,7 +331,34 @@ export const ReservationDetailPage: React.FC = () => {
           <ReservationStatusBadge status={reservation.status} />
         </div>
 
-        {/* 7-Day Hold Countdown Bar */}
+        {/* Pay Now / 7-Day Hold Countdown Bar */}
+        {isPayNowMode && reservation.status === 'pending_payment' && !isExpired && (
+          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <Landmark className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                  Direct Bank Transfer — Pay Now Mode
+                </h4>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-0.5">
+                  This room is locked exclusively while you transfer{' '}
+                  <strong>₦{reservation.amount.toLocaleString()}</strong> to the landlord account below and upload your receipt. Confirmation occurs only after landlord verification.
+                </p>
+              </div>
+            </div>
+
+            {canUploadReceipt && (
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs whitespace-nowrap cursor-pointer"
+              >
+                I Have Paid — Upload Receipt
+              </button>
+            )}
+          </div>
+        )}
+
         {reservation.status === 'pending_payment' && !isExpired && (
           <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/60 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -374,7 +405,20 @@ export const ReservationDetailPage: React.FC = () => {
           </div>
           <div>
             <span className="text-slate-400 text-[11px] block">Landlord</span>
-            <span className="font-semibold text-slate-900 dark:text-white">{reservation.landlordName || 'Verified Host'}</span>
+            {reservation.landlordId ? (
+              <Link
+                to={`/profiles/landlord/${reservation.landlordId}`}
+                className="inline-flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+              >
+                <span>{reservation.landlordName || 'OUTPOST Host'}</span>
+                <VerificationTick type="landlord" isVerified={Boolean(reservation.landlordVerified)} />
+              </Link>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
+                <span>{reservation.landlordName || 'OUTPOST Host'}</span>
+                <VerificationTick type="landlord" isVerified={Boolean(reservation.landlordVerified)} />
+              </span>
+            )}
           </div>
           <div>
             <span className="text-slate-400 text-[11px] block">Official Invoice</span>

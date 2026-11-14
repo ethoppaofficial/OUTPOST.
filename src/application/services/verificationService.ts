@@ -17,6 +17,8 @@ import {
   StudentVerificationDocument,
   VerificationReviewStatus,
   LandlordProfile,
+  PublicLandlordProfile,
+  PublicStudentProfile,
 } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { supabase } from '../../infrastructure/supabase/supabaseClient';
@@ -25,6 +27,87 @@ import { supabaseStorageService } from '../../infrastructure/supabase/supabaseSt
 class VerificationService {
   public searchStudentByRegNumber(regNumber: string) {
     return repository.searchStudentByRegistrationNumber(regNumber);
+  }
+
+  public async lookupStudentByRegistrationNumber(regNumber: string): Promise<PublicStudentProfile | null> {
+    if (typeof (repository as any).lookupStudentByRegistrationNumberFromSupabase === 'function') {
+      const remote = await (repository as any).lookupStudentByRegistrationNumberFromSupabase(regNumber);
+      if (remote) return remote;
+    }
+    const local = repository.searchStudentByRegistrationNumber(regNumber);
+    if (!local) return null;
+    const user = repository.getUserById(local.userId);
+    return {
+      found: true,
+      unavailable: user?.accountStatus === 'suspended',
+      id: local.userId,
+      role: 'student',
+      displayName: user?.accountStatus === 'suspended' ? 'Account Unavailable' : local.fullName,
+      avatarUrl: user?.avatarUrl || null,
+      isVerified: Boolean(local.isProfileVerified) && user?.accountStatus !== 'suspended',
+      registrationNumber: local.registrationNumber,
+      university: local.university,
+      campus: local.campus,
+      faculty: local.faculty,
+      department: local.department,
+      studyLevel: local.studyLevel,
+      bio: local.bio,
+      createdAt: user?.createdAt,
+    };
+  }
+
+  public async getPublicLandlordProfile(userId: string): Promise<PublicLandlordProfile | null> {
+    if (typeof (repository as any).fetchPublicLandlordProfileFromSupabase === 'function') {
+      return (repository as any).fetchPublicLandlordProfileFromSupabase(userId);
+    }
+    const lp = repository.getLandlordProfile(userId);
+    const user = repository.getUserById(userId);
+    if (!lp && !user) return null;
+    const suspended = user?.accountStatus === 'suspended';
+    return {
+      found: true,
+      unavailable: suspended,
+      reason: suspended ? 'This landlord account is currently unavailable.' : undefined,
+      id: userId,
+      role: 'landlord',
+      displayName: suspended ? 'Account Unavailable' : (user?.fullName || lp?.legalName || lp?.businessName || 'OUTPOST Host'),
+      companyName: suspended ? null : lp?.businessName || null,
+      avatarUrl: user?.avatarUrl || null,
+      isVerified: !suspended && lp?.verificationStatus === 'approved',
+      verificationStatus: lp?.verificationStatus || 'not_started',
+      createdAt: user?.createdAt,
+      approvedListingsCount: repository
+        .getProperties()
+        .filter((p) => p.landlordId === userId && p.verificationStatus === 'approved').length,
+    };
+  }
+
+  public async getPublicStudentProfile(userId: string): Promise<PublicStudentProfile | null> {
+    if (typeof (repository as any).fetchPublicStudentProfileFromSupabase === 'function') {
+      return (repository as any).fetchPublicStudentProfileFromSupabase(userId);
+    }
+    const sp = repository.getStudentProfile(userId);
+    const user = repository.getUserById(userId);
+    if (!sp && !user) return null;
+    const suspended = user?.accountStatus === 'suspended';
+    return {
+      found: true,
+      unavailable: suspended,
+      reason: suspended ? 'This student account is currently unavailable.' : undefined,
+      id: userId,
+      role: 'student',
+      displayName: suspended ? 'Account Unavailable' : (sp?.fullName || user?.fullName || 'OUTPOST Student'),
+      avatarUrl: user?.avatarUrl || null,
+      isVerified: !suspended && Boolean(sp?.isProfileVerified),
+      registrationNumber: sp?.registrationNumber || null,
+      university: sp?.university || null,
+      campus: sp?.campus || null,
+      faculty: sp?.faculty || null,
+      department: sp?.department || null,
+      studyLevel: sp?.studyLevel || null,
+      bio: sp?.bio || null,
+      createdAt: user?.createdAt,
+    };
   }
 
   public getStudentDocuments(studentId: string): StudentVerificationDocument[] {

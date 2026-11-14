@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import { Users, Sparkles, CheckCircle2, Send, ShieldCheck, XCircle } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { roommateService } from '../../application/services/roommateService';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { VerificationBadge, VerificationTick, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { StudentProfile, User } from '../../domain/types';
 import { CompatibilityResult } from '../../domain/matching';
@@ -162,9 +162,15 @@ export const RoommatesPage: React.FC = () => {
                       className="rounded-2xl"
                     />
                     <div>
-                      <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
-                        {st.fullName}
-                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        <Link
+                          to={`/profiles/student/${st.userId}`}
+                          className="font-bold text-sm text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline line-clamp-1"
+                        >
+                          {st.fullName}
+                        </Link>
+                        <VerificationTick type="student" isVerified={Boolean(st.isProfileVerified)} />
+                      </div>
                       <div className="text-[11px] text-slate-400">{st.programme} • {st.studyLevel}</div>
                     </div>
                   </div>
@@ -180,7 +186,7 @@ export const RoommatesPage: React.FC = () => {
 
                 {/* Badges */}
                 <div className="flex flex-wrap gap-1.5">
-                  <VerificationBadge type="student" status={st.isProfileVerified ? 'approved' : 'pending'} />
+                  <VerificationBadge type="student" status={Boolean(st.isProfileVerified)} />
                   <Badge variant="neutral" size="sm">{st.university}</Badge>
                   <Badge variant="info" size="sm">{st.gender}</Badge>
                 </div>

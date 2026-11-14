@@ -26,9 +26,10 @@ import { authService } from '../../application/services/authService';
 import { reservationService } from '../../application/services/reservationService';
 import { roommateService } from '../../application/services/roommateService';
 import { verificationService } from '../../application/services/verificationService';
-import { VerificationBadge, ReservationStatusBadge } from '../../components/ui/Badge';
+import { VerificationBadge, VerificationTick, ReservationStatusBadge } from '../../components/ui/Badge';
 import { useAuth } from '../../application/context/AuthContext';
 import { Reservation, StudentVerificationDocument } from '../../domain/types';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
 
 /**
  * StudentDashboard Component
@@ -48,18 +49,32 @@ export const StudentDashboard: React.FC = () => {
   const [documents, setDocuments] = useState<StudentVerificationDocument[]>(() =>
     studentId && studentId !== 'anonymous' ? verificationService.getStudentDocuments(studentId) : []
   );
+  const [liveRegNumber, setLiveRegNumber] = useState<string>(student?.registrationNumber || '');
+  const [liveVerified, setLiveVerified] = useState<boolean>(Boolean(student?.isProfileVerified));
   const [refreshing, setRefreshing] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     if (authLoading || !studentId || studentId === 'anonymous') return;
     setRefreshing(true);
     try {
-      const [liveRes, liveDocs] = await Promise.all([
+      const [liveRes, liveDocs, spRes, profRes] = await Promise.all([
         reservationService.loadStudentReservations(studentId),
         verificationService.loadStudentDocuments(studentId),
+        supabase
+          .from('student_profiles')
+          .select('registration_number, is_profile_verified')
+          .eq('user_id', studentId)
+          .maybeSingle(),
+        supabase.from('profiles').select('is_verified').eq('id', studentId).maybeSingle(),
       ]);
       setReservations(liveRes);
       setDocuments(liveDocs);
+      if (spRes?.data?.registration_number) {
+        setLiveRegNumber(spRes.data.registration_number);
+      }
+      if (spRes?.data || profRes?.data) {
+        setLiveVerified(Boolean(spRes?.data?.is_profile_verified || profRes?.data?.is_verified));
+      }
     } catch {
       // Keep cached items if a background sync temporarily fails
     } finally {
@@ -74,7 +89,7 @@ export const StudentDashboard: React.FC = () => {
   const activeReservations = reservations.filter((r) => r.status === 'pending_payment' || r.status === 'receipt_submitted');
   const roommateRequests = roommateService.getReceivedRequests(studentId).filter((r) => r.status === 'pending');
 
-  const isVerified = student?.isProfileVerified;
+  const isVerified = liveVerified;
   const isPendingReview = documents.some((d) => d.status === 'pending');
   const isRejected = documents.some((d) => d.status === 'rejected');
 
@@ -110,18 +125,24 @@ export const StudentDashboard: React.FC = () => {
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               Hello, {firstName}
             </h1>
+            <VerificationTick type="student" isVerified={!!isVerified} size="md" />
             <VerificationBadge type="student" status={!!isVerified} />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {[
-              student?.registrationNumber,
+              liveRegNumber || student?.registrationNumber,
               student?.programme,
               student?.university,
               student?.campus ? `(${student.campus})` : null,
             ]
               .filter(Boolean)
-              .join(' • ') || 'Verified Student Profile'}
+              .join(' • ') || 'Student Account'}
           </p>
+          {(liveRegNumber || student?.registrationNumber) && (
+            <p className="text-[11px] font-mono font-semibold text-emerald-700 dark:text-emerald-400">
+              Reg No: {liveRegNumber || student?.registrationNumber}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

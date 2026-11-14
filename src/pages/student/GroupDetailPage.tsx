@@ -29,7 +29,7 @@ import { useAuth } from '../../application/context/AuthContext';
 import { groupChatService } from '../../application/services/groupChatService';
 import { chatService } from '../../application/services/chatService';
 import { AccommodationGroup, GroupMemberRecord, GroupJoinRequest, StudentProfile } from '../../domain/types';
-import { Badge } from '../../components/ui/Badge';
+import { Badge, VerificationBadge, VerificationTick } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 
 export const GroupDetailPage: React.FC = () => {
@@ -518,7 +518,13 @@ export const GroupDetailPage: React.FC = () => {
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                            <span>{m.name}</span>
+                            <Link
+                              to={`/profiles/student/${m.userId}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                            >
+                              {m.name}
+                            </Link>
                             {isUserAdmin && <Crown className="w-3 h-3 text-amber-500" />}
                           </div>
                           <span className="text-[10px] text-slate-400">
@@ -629,9 +635,12 @@ export const GroupDetailPage: React.FC = () => {
                         </div>
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                            <Link
+                              to={`/profiles/student/${m.userId}`}
+                              className="text-xs font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                            >
                               {m.name}
-                            </h4>
+                            </Link>
                             {isMe && (
                               <span className="text-[10px] text-slate-400 font-medium">(You)</span>
                             )}
@@ -752,8 +761,13 @@ export const GroupDetailPage: React.FC = () => {
                         {req.userName[0]}
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-900 dark:text-white">{req.userName}</h4>
-                        <span className="text-[10px] text-slate-400">
+                        <Link
+                          to={`/profiles/student/${req.userId}`}
+                          className="text-xs font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                        >
+                          {req.userName}
+                        </Link>
+                        <span className="text-[10px] text-slate-400 block">
                           Requested on {new Date(req.requestedAt).toLocaleDateString()}
                         </span>
                       </div>
@@ -830,20 +844,25 @@ export const GroupDetailPage: React.FC = () => {
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  <Link
+                    to={`/profiles/student/${selectedProfileUser.userId}`}
+                    onClick={() => setSelectedProfileUser(null)}
+                    className="text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                  >
                     {selectedProfileUser.fullName}
-                  </h3>
-                  <span title="Verified Outpost Student">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  </span>
+                  </Link>
+                  <VerificationTick type="student" isVerified={Boolean(selectedProfileUser.isProfileVerified)} />
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {selectedProfileUser.university || 'Higher Institution'} • {selectedProfileUser.programme || 'Undergraduate'}
                 </p>
-                <div className="mt-1 flex items-center gap-2">
-                  <Badge variant="success" size="sm">
-                    Verified Student
-                  </Badge>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                  <VerificationBadge type="student" status={Boolean(selectedProfileUser.isProfileVerified)} />
+                  {selectedProfileUser.registrationNumber && (
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-slate-300">
+                      {selectedProfileUser.registrationNumber}
+                    </span>
+                  )}
                   <span className="text-[11px] text-slate-400">{selectedProfileUser.studyLevel || 'Undergraduate'}</span>
                 </div>
               </div>
@@ -880,6 +899,13 @@ export const GroupDetailPage: React.FC = () => {
 
             {/* Actions */}
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+              <Link
+                to={`/profiles/student/${selectedProfileUser.userId}`}
+                onClick={() => setSelectedProfileUser(null)}
+                className="mr-auto text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+              >
+                View Full Public Profile →
+              </Link>
               <button
                 type="button"
                 onClick={() => {

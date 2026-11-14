@@ -88,9 +88,12 @@ export const RoommateRequestsPage: React.FC = () => {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    <Link
+                      to={`/profiles/student/${req.senderId}`}
+                      className="text-sm font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                    >
                       {req.senderName}
-                    </h3>
+                    </Link>
                     <p className="text-[11px] text-slate-400">
                       Sent {new Date(req.createdAt).toLocaleDateString()}
                     </p>
@@ -140,9 +143,12 @@ export const RoommateRequestsPage: React.FC = () => {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <Link
+                    to={`/profiles/student/${req.receiverId}`}
+                    className="text-sm font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                  >
                     {req.receiverName || 'Student Roommate'}
-                  </h3>
+                  </Link>
                   <p className="text-[11px] text-slate-400">
                     Invited {new Date(req.createdAt).toLocaleDateString()}
                   </p>

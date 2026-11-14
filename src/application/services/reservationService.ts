@@ -13,7 +13,7 @@
  * - Concurrency & Invariants: All inventory modifications delegate to database stored procedures (`create_reservation_atomic`, `review_payment_receipt_atomic`) to prevent double-booking.
  */
 
-import { Reservation, Invoice, PaymentReceipt } from '../../domain/types';
+import { Reservation, ReservationMode, Invoice, PaymentReceipt } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
 import { storageService } from './storageService';
@@ -158,13 +158,20 @@ class ReservationService {
     studentId: string,
     propertyId: string,
     unitId: string,
-    groupId?: string
+    groupId?: string,
+    reservationMode: ReservationMode = 'hold'
   ) {
-    return repository.createReservationPersisted(studentId, propertyId, unitId, groupId);
+    return repository.createReservationPersisted(studentId, propertyId, unitId, groupId, reservationMode);
   }
 
-  public createReservation(studentId: string, propertyId: string, unitId: string, groupId?: string) {
-    return repository.createReservation(studentId, propertyId, unitId, groupId);
+  public createReservation(
+    studentId: string,
+    propertyId: string,
+    unitId: string,
+    groupId?: string,
+    reservationMode: ReservationMode = 'hold'
+  ) {
+    return repository.createReservation(studentId, propertyId, unitId, groupId, reservationMode);
   }
 
   public async submitPaymentReceiptWithStorage(params: {

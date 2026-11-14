@@ -31,6 +31,7 @@ import { ForgotPasswordPage } from './pages/public/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/public/ResetPasswordPage';
 import { UnauthorizedPage } from './pages/public/UnauthorizedPage';
 import { StudentHousingMapPage } from './pages/public/StudentHousingMapPage';
+import { PublicProfilePage } from './pages/public/PublicProfilePage';
 
 // Student pages
 import { StudentDashboard } from './pages/student/StudentDashboard';
@@ -128,6 +129,8 @@ export default function App() {
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/unauthorized" element={<UnauthorizedPage />} />
+              <Route path="/profiles/landlord/:userId" element={<PublicProfilePage />} />
+              <Route path="/profiles/student/:userId" element={<PublicProfilePage />} />
               <Route path="/profile" element={<ProfileRouteRedirect />} />
 
               {/* Student Routes */}

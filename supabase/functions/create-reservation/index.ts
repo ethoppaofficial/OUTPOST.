@@ -49,7 +49,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { propertyId, unitId, idempotencyKey } = body;
+    const { propertyId, unitId, idempotencyKey, reservationMode } = body;
+    const normalizedMode = reservationMode === 'pay_now' ? 'pay_now' : 'hold';
 
     if (!propertyId || !unitId) {
       return new Response(JSON.stringify({ error: 'propertyId and unitId are required' }), {
@@ -77,6 +78,7 @@ serve(async (req) => {
       p_property_id: propertyId,
       p_unit_id: unitId,
       p_idempotency_key: idempotencyKey || null,
+      p_reservation_mode: normalizedMode,
     });
 
     if (rpcError) {

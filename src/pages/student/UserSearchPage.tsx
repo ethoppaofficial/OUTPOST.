@@ -1,19 +1,38 @@
 import React, { useState } from 'react';
-import { Search, ShieldCheck, UserCheck, Lock, AlertCircle, MessageSquare } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { verificationService } from '../../application/services/verificationService';
-import { VerificationBadge, Badge } from '../../components/ui/Badge';
+import { VerificationBadge, VerificationTick } from '../../components/ui/Badge';
+import { PublicStudentProfile } from '../../domain/types';
 
 export const UserSearchPage: React.FC = () => {
   const [regNumber, setRegNumber] = useState('');
-  const [result, setResult] = useState<any | null>(null);
+  const [result, setResult] = useState<PublicStudentProfile | null>(null);
   const [searched, setSearched] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  const runLookup = async (rawValue: string) => {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return;
+    setSearching(true);
+    setLookupError(null);
+    try {
+      const found = await verificationService.lookupStudentByRegistrationNumber(trimmed);
+      setResult(found);
+      setSearched(true);
+    } catch (err: any) {
+      setLookupError(err?.message || 'Unable to verify registration number right now.');
+      setResult(null);
+      setSearched(true);
+    } finally {
+      setSearching(false);
+    }
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regNumber.trim()) return;
-    const found = verificationService.searchStudentByRegNumber(regNumber.trim());
-    setResult(found);
-    setSearched(true);
+    void runLookup(regNumber);
   };
 
   return (
@@ -45,111 +64,124 @@ export const UserSearchPage: React.FC = () => {
 
         <button
           type="submit"
-          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs whitespace-nowrap"
+          disabled={searching}
+          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs whitespace-nowrap inline-flex items-center justify-center gap-1.5 disabled:opacity-60 cursor-pointer"
         >
-          Verify Student
+          {searching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          <span>{searching ? 'Checking…' : 'Verify Student'}</span>
         </button>
       </form>
 
       {/* Case Study Quick Test Chips */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="font-semibold text-slate-600 dark:text-slate-400">Quick Test Records:</span>
-        <button
-          type="button"
-          onClick={() => {
-            setRegNumber('BUK/23/ENG/01492');
-            const found = verificationService.searchStudentByRegNumber('BUK/23/ENG/01492');
-            setResult(found);
-            setSearched(true);
-          }}
-          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700 transition"
-        >
-          BUK/23/ENG/01492 (Aliyu)
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setRegNumber('BUK/22/CHS/00812');
-            const found = verificationService.searchStudentByRegNumber('BUK/22/CHS/00812');
-            setResult(found);
-            setSearched(true);
-          }}
-          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700 transition"
-        >
-          BUK/22/CHS/00812 (Fatima)
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setRegNumber('BUK/24/FCS/02105');
-            const found = verificationService.searchStudentByRegNumber('BUK/24/FCS/02105');
-            setResult(found);
-            setSearched(true);
-          }}
-          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700 transition"
-        >
-          BUK/24/FCS/02105 (Ibrahim)
-        </button>
+        <span className="font-semibold text-slate-600 dark:text-slate-400">Quick Examples:</span>
+        {['BUK/23/ENG/01492', 'BUK/22/CHS/00812', 'BUK/24/FCS/02105'].map((sample) => (
+          <button
+            key={sample}
+            type="button"
+            onClick={() => {
+              setRegNumber(sample);
+              void runLookup(sample);
+            }}
+            className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 font-mono text-[11px] border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+          >
+            {sample}
+          </button>
+        ))}
       </div>
 
       {/* Privacy Notice */}
       <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2.5">
         <Lock className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
         <span>
-          <strong>Data Privacy Protocol:</strong> In compliance with Nigerian student data protection guidelines, OUTPOST only returns validated enrolment status, programme, level, and verification badge. Direct phone and email remain private.
+          <strong>Data Privacy Protocol:</strong> OUTPOST only returns validated enrolment status, academic programme, level, registration number, and verification badge. Direct phone numbers and private emails remain protected.
         </span>
       </div>
 
+      {lookupError && (
+        <div role="alert" className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+          {lookupError}
+        </div>
+      )}
+
       {/* Result Card */}
-      {searched && (
+      {searched && !searching && (
         <div className="space-y-4">
-          {result ? (
+          {result && result.unavailable ? (
+            <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+              <p className="font-bold text-slate-900 dark:text-white">Account Unavailable</p>
+              <p>{result.reason || 'This student account is currently unavailable.'}</p>
+            </div>
+          ) : result ? (
             <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-md space-y-4 animate-in fade-in duration-150">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-base text-slate-700 dark:text-slate-200">
-                    {result.fullName[0]}
+                    {(result.displayName || 'S')[0]}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {result.fullName}
-                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        to={`/profiles/student/${result.id}`}
+                        className="text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                      >
+                        {result.displayName}
+                      </Link>
+                      <VerificationTick type="student" isVerified={result.isVerified} />
+                    </div>
                     <div className="text-xs text-slate-400 font-mono">
                       {result.registrationNumber}
                     </div>
                   </div>
                 </div>
 
-                <VerificationBadge type="student" status={result.isProfileVerified} />
+                <VerificationBadge type="student" status={result.isVerified} />
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
                 <div>
                   <span className="text-slate-400 text-[11px] block">University</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{result.university}</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {result.university || 'Bayero University Kano'}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400 text-[11px] block">Campus</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{result.campus}</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {result.campus || 'Not specified'}
+                  </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 text-[11px] block">Programme</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{result.programme}</span>
+                  <span className="text-slate-400 text-[11px] block">Faculty / Department</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {[result.faculty, result.department].filter(Boolean).join(' • ') || 'Not specified'}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400 text-[11px] block">Study Level</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{result.studyLevel}</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {result.studyLevel || 'Not specified'}
+                  </span>
                 </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                <Link
+                  to={`/profiles/student/${result.id}`}
+                  className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                >
+                  Open Student Profile →
+                </Link>
               </div>
             </div>
           ) : (
             <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs text-slate-400 space-y-1">
               <AlertCircle className="w-6 h-6 text-slate-400 mx-auto" />
               <p className="font-medium text-slate-600 dark:text-slate-300">
-                No verified student found with registration number "{regNumber}"
+                No student found with registration number "{regNumber}"
               </p>
               <p className="text-[11px]">
-                Please ensure you entered the exact matriculation format (e.g. BUK/22/SCI/01842).
+                Please ensure you entered the exact matriculation format (e.g. BUK/22/CHS/00812).
               </p>
             </div>
           )}

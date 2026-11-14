@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { configValidationError, isSupabaseMode } from '../../infrastructure/config/appConfig';
+import { normalizeRegistrationNumber, validateStudentRegistrationNumber } from '../../application/utils/validation';
 
 export const RegisterPage: React.FC = () => {
   const [role, setRole] = useState<'student' | 'landlord'>('student');
@@ -45,12 +46,20 @@ export const RegisterPage: React.FC = () => {
 
     try {
       if (role === 'student') {
+        const regCheck = validateStudentRegistrationNumber(registrationNumber);
+        if (!regCheck.isValid) {
+          setError(regCheck.error || 'Please enter a valid student registration number.');
+          setSubmitting(false);
+          return;
+        }
+        setRegistrationNumber(regCheck.normalized);
+
         const res = await authService.registerStudentWithSupabase({
           email,
           password,
           fullName,
           phone,
-          registrationNumber,
+          registrationNumber: regCheck.normalized,
           university,
           campus,
           studyLevel,
@@ -243,8 +252,9 @@ export const RegisterPage: React.FC = () => {
                       type="text"
                       required
                       value={registrationNumber}
-                      onChange={(e) => setRegistrationNumber(e.target.value.toUpperCase())}
-                      placeholder="e.g. BUK/23/SCI/01842"
+                      onChange={(e) => setRegistrationNumber(normalizeRegistrationNumber(e.target.value))}
+                      onBlur={() => setRegistrationNumber((prev) => normalizeRegistrationNumber(prev))}
+                      placeholder="e.g. BUK/22/CHS/00812"
                       className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white"
                     />
                   </div>

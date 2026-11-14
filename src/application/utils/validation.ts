@@ -320,3 +320,65 @@ export function validateLandlordPaymentDetails(input: {
     },
   };
 }
+
+export interface StudentRegistrationValidationResult {
+  isValid: boolean;
+  normalized: string;
+  error?: string;
+}
+
+/**
+ * Normalizes a student registration number (e.g., "  buk/22/chs/00812 " -> "BUK/22/CHS/00812").
+ */
+export function normalizeRegistrationNumber(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+/**
+ * Validates university student registration numbers (such as BUK/22/CHS/00812)
+ * without baking in overly brittle institution assumptions.
+ */
+export function validateStudentRegistrationNumber(raw: string): StudentRegistrationValidationResult {
+  const normalized = normalizeRegistrationNumber(raw);
+
+  if (!normalized) {
+    return {
+      isValid: false,
+      normalized,
+      error: 'Student registration number is required (e.g., BUK/22/CHS/00812).',
+    };
+  }
+
+  if (normalized.length < 4 || normalized.length > 40) {
+    return {
+      isValid: false,
+      normalized,
+      error: 'Registration number must be between 4 and 40 characters.',
+    };
+  }
+
+  if (!/^[A-Z0-9][A-Z0-9/.\-_]*[A-Z0-9]$/.test(normalized)) {
+    return {
+      isValid: false,
+      normalized,
+      error: 'Use only letters, numbers, slashes (/), hyphens (-), dots (.), or underscores (_).',
+    };
+  }
+
+  if (!/[A-Z]/.test(normalized) || !/\d/.test(normalized)) {
+    return {
+      isValid: false,
+      normalized,
+      error: 'Enter a valid student registration number containing both faculty/school code and digits (e.g., BUK/22/CHS/00812).',
+    };
+  }
+
+  return {
+    isValid: true,
+    normalized,
+  };
+}
+

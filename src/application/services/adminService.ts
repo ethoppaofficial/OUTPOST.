@@ -982,6 +982,106 @@ export function createAdminService(deps?: { client?: any }) {
     }
   }
 
+  async function revokeUserVerification(targetId: string, reason: string) {
+    const admin = await verifyActiveAdmin();
+    const cleanReason = reason?.trim() || '';
+    if (cleanReason.length < 5) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'A revocation reason of at least 5 characters is required.');
+    }
+
+    const { data, error } = await client.rpc('admin_revoke_user_verification', {
+      p_target_id: targetId,
+      p_reason: cleanReason,
+    });
+
+    if (error) {
+      if (!isRpcMissingError(error)) {
+        throw classifySupabaseError(error, 'profiles');
+      }
+
+      const nowIso = new Date().toISOString();
+      const { data: targetProf, error: targetErr } = await client
+        .from('profiles')
+        .select('id, role, account_status')
+        .eq('id', targetId)
+        .maybeSingle();
+
+      if (targetErr) throw classifySupabaseError(targetErr, 'profiles');
+      if (!targetProf) throw new AdminServiceError('VALIDATION_ERROR', 'Target user profile not found.');
+
+      const nextStatus =
+        targetProf.account_status === 'suspended' || targetProf.account_status === 'email_unverified'
+          ? targetProf.account_status
+          : targetProf.role === 'landlord'
+          ? 'profile_pending'
+          : 'active';
+
+      const { error: profUpdErr } = await client
+        .from('profiles')
+        .update({
+          is_verified: false,
+          verified_at: null,
+          verified_by: null,
+          account_status: nextStatus,
+          updated_at: nowIso,
+        })
+        .eq('id', targetId);
+      if (profUpdErr) throw classifySupabaseError(profUpdErr, 'profiles');
+
+      if (targetProf.role === 'student') {
+        await client
+          .from('student_profiles')
+          .update({ is_profile_verified: false, verification_date: null, updated_at: nowIso })
+          .eq('user_id', targetId);
+
+        await client
+          .from('student_verification_documents')
+          .update({
+            status: 'rejected',
+            reviewer_id: admin.id,
+            reviewed_at: nowIso,
+            rejection_reason: `Verification revoked: ${cleanReason}`,
+          })
+          .eq('student_id', targetId)
+          .eq('status', 'approved');
+      } else if (targetProf.role === 'landlord') {
+        await client
+          .from('landlord_profiles')
+          .update({
+            verification_status: 'rejected',
+            verified_by: admin.id,
+            verified_at: null,
+            rejection_reason: `Verification revoked: ${cleanReason}`,
+            updated_at: nowIso,
+          })
+          .eq('user_id', targetId);
+
+        await client
+          .from('landlord_verification_submissions')
+          .update({
+            status: 'rejected',
+            reviewer_id: admin.id,
+            reviewed_at: nowIso,
+            rejection_reason: `Verification revoked: ${cleanReason}`,
+          })
+          .eq('landlord_id', targetId)
+          .eq('status', 'approved');
+      }
+
+      await client.from('audit_logs').insert({
+        actor_id: admin.id,
+        action: 'ADMIN_REVOKE_VERIFICATION',
+        entity_type: 'profiles',
+        entity_id: targetId,
+        details: { role: targetProf.role, reason: cleanReason },
+      });
+
+      return { success: true, user_id: targetId, revoked: true };
+    }
+
+    return data || { success: true, revoked: true };
+  }
+
   async function reviewProperty(payload: {
     propertyId: string;
     decision: 'approve' | 'reject' | 'suspend' | 'reactivate';
@@ -1404,6 +1504,7 @@ export function createAdminService(deps?: { client?: any }) {
     getSettings,
     setUserStatus,
     reviewVerification,
+    revokeUserVerification,
     reviewProperty,
     reviewPropertyLocation,
     saveSettings,
