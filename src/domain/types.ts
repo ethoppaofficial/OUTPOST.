@@ -690,8 +690,9 @@ export interface AppNotification {
   userId: string;
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'alert';
+  type: 'info' | 'success' | 'warning' | 'alert' | 'broadcast' | 'reservation' | 'verification' | 'general' | string;
   link?: string;
+  metadata?: Record<string, any>;
   isRead: boolean;
   createdAt: string;
 }

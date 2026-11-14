@@ -5,6 +5,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Ban,
   Building2,
@@ -15,6 +16,7 @@ import {
   GraduationCap,
   Loader2,
   Mail,
+  Megaphone,
   Phone,
   Search,
   ShieldCheck,
@@ -224,11 +226,20 @@ export const UsersPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white">User management</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Live Supabase user profiles. Identity documents are reviewed separately in the verification queue.
-        </p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white">User management</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Live Supabase user profiles. Identity documents are reviewed separately in the verification queue.
+          </p>
+        </div>
+        <Link
+          to="/admin/broadcasts"
+          className="inline-flex items-center gap-1.5 self-start rounded-xl bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-500"
+        >
+          <Megaphone className="h-3.5 w-3.5" />
+          Broadcast message
+        </Link>
       </header>
 
       <AdminStatusBar
@@ -333,6 +344,13 @@ export const UsersPage: React.FC = () => {
                           <Eye className="h-3.5 w-3.5" />
                           View profile
                         </button>
+                        <Link
+                          to={`/admin/broadcasts?userId=${encodeURIComponent(user.id)}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300"
+                        >
+                          <Megaphone className="h-3.5 w-3.5" />
+                          Notify
+                        </Link>
                         {user.role !== 'admin' && isUserVerified(user) && (
                           <button
                             type="button"
@@ -913,6 +931,14 @@ export const UsersPage: React.FC = () => {
                     : 'Suspend account'}
                 </button>
               )}
+              <Link
+                to={`/admin/broadcasts?userId=${encodeURIComponent(inspectedUser.id)}`}
+                onClick={closeProfileModal}
+                className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300"
+              >
+                <Megaphone className="h-3.5 w-3.5" />
+                Send notification
+              </Link>
               <button
                 type="button"
                 onClick={closeProfileModal}

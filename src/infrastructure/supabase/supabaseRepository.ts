@@ -67,6 +67,8 @@ export class SupabaseRepository {
   private isLiveInitialized = false;
   private propertiesInitPromise: Promise<void> | null = null;
   private activeUserId: string = '';
+  private notificationsRealtimeChannel: any = null;
+  private notificationsRealtimeUserId: string = '';
 
   // In-memory cache synced with Supabase PostgreSQL tables
   private users: User[] = [];
@@ -1065,16 +1067,30 @@ export class SupabaseRepository {
       throw new Error('A permanent public Storage avatar URL is required.');
     }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        avatar_url: avatarUrl,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId);
+    const { error: rpcError } = await supabase.rpc('update_own_profile_avatar', {
+      p_avatar_url: avatarUrl,
+    });
 
-    if (error) {
-      throw new Error(`Could not update profile photo in Supabase: ${error.message}`);
+    if (rpcError) {
+      const rpcMissing =
+        rpcError.code === 'PGRST202' ||
+        /could not find the function|function .*update_own_profile_avatar.* does not exist/i.test(rpcError.message || '');
+
+      if (!rpcMissing) {
+        throw new Error(`Could not update profile photo in Supabase: ${rpcError.message}`);
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (error) {
+        throw new Error(`Could not update profile photo in Supabase: ${error.message}`);
+      }
     }
 
     if (previousAvatarUrl && previousAvatarUrl !== avatarUrl) {
@@ -1121,6 +1137,10 @@ export class SupabaseRepository {
       this.hydrateUserSessionContext(userId).catch((err) =>
         console.warn('[SupabaseRepository] Session context hydration notice:', err?.message || err)
       );
+      this.fetchNotificationsFromSupabase(userId).catch((err) =>
+        console.warn('[SupabaseRepository] Notifications hydration notice:', err?.message || err)
+      );
+      this.subscribeToNotificationsRealtime(userId);
     }
   }
 
@@ -3631,6 +3651,40 @@ export class SupabaseRepository {
     };
   }
 
+  public async deleteReservationPersisted(
+    reservationId: string
+  ): Promise<{ success: boolean; releasedSpace?: boolean; message?: string }> {
+    const existing = this.getReservationById(reservationId);
+    const { data, error } = await supabase.rpc('delete_student_reservation_atomic', {
+      p_reservation_id: reservationId,
+    });
+
+    if (error) {
+      return {
+        success: false,
+        message: error.message || 'Could not delete reserved accommodation.',
+      };
+    }
+
+    const releasedSpace = Boolean((data as any)?.releasedSpace);
+    this.reservations = this.reservations.filter((r) => r.id !== reservationId);
+    this.invoices = this.invoices.filter((inv) => inv.reservationId !== reservationId);
+    this.receipts = this.receipts.filter((rc) => rc.reservationId !== reservationId);
+
+    if (existing?.propertyId) {
+      await this.fetchPropertyByIdOrSlugFromSupabase(existing.propertyId).catch(() => null);
+    }
+    await this.fetchApprovedPropertiesFromSupabase().catch(() => null);
+
+    return {
+      success: true,
+      releasedSpace,
+      message: releasedSpace
+        ? 'Reservation deleted and reserved space released back to available listings.'
+        : 'Reservation deleted from your accommodation history.',
+    };
+  }
+
   public async reviewPaymentReceiptPersisted(
     receiptId: string,
     decision: 'approved' | 'rejected',
@@ -3811,6 +3865,46 @@ export class SupabaseRepository {
     return { success: true, message: 'Reservation cancelled.' };
   }
 
+  public deleteReservation(reservationId: string): { success: boolean; releasedSpace?: boolean; message?: string } {
+    const idx = this.reservations.findIndex((r) => r.id === reservationId);
+    if (idx === -1) return { success: false, message: 'Reservation not found.' };
+    const res = this.reservations[idx];
+    if (res.status === 'confirmed') {
+      return {
+        success: false,
+        message: 'Confirmed reservations with verified payment receipts cannot be deleted directly.',
+      };
+    }
+
+    let releasedSpace = false;
+    if (res.status === 'pending_payment' || res.status === 'receipt_submitted') {
+      const prop = this.getPropertyById(res.propertyId);
+      const unit = prop?.rooms?.find((u) => u.id === res.unitId);
+      if (prop && unit) {
+        this.updatePropertyAvailability(res.propertyId, res.unitId, unit.availableSpaces + 1);
+      }
+      releasedSpace = true;
+    }
+
+    this.reservations.splice(idx, 1);
+    this.invoices = this.invoices.filter((inv) => inv.reservationId !== reservationId);
+    this.receipts = this.receipts.filter((rc) => rc.reservationId !== reservationId);
+
+    supabase.rpc('delete_student_reservation_atomic', {
+      p_reservation_id: reservationId,
+    }).then(({ error }) => {
+      if (error) console.warn('[SupabaseRepository] deleteReservation warning:', error.message);
+    });
+
+    return {
+      success: true,
+      releasedSpace,
+      message: releasedSpace
+        ? 'Reservation deleted and space released.'
+        : 'Reservation deleted.',
+    };
+  }
+
   public uploadPaymentReceipt(data: {
     reservationId: string;
     studentId: string;
@@ -3942,8 +4036,92 @@ export class SupabaseRepository {
   }
 
   // Notifications
+  private mapNotificationRow(row: any): AppNotification {
+    return {
+      id: String(row.id),
+      userId: String(row.user_id),
+      title: String(row.title || 'Notification'),
+      message: String(row.message || ''),
+      type: String(row.type || 'general'),
+      link: row.link || undefined,
+      metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined,
+      isRead: Boolean(row.is_read),
+      createdAt: row.created_at || new Date().toISOString(),
+    };
+  }
+
   public getNotifications(userId: string): AppNotification[] {
-    return this.notifications.filter((n) => n.userId === userId);
+    return this.notifications
+      .filter((n) => n.userId === userId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public async fetchNotificationsFromSupabase(userId: string): Promise<AppNotification[]> {
+    if (!userId) return [];
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      console.warn('[SupabaseRepository] fetchNotifications warning:', error.message);
+      return this.getNotifications(userId);
+    }
+
+    const mapped = (data || []).map((row: any) => this.mapNotificationRow(row));
+    const otherUsers = this.notifications.filter((n) => n.userId !== userId);
+    this.notifications = [...mapped, ...otherUsers];
+    appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
+    if (mapped[0]) {
+      appEventBus.publish(`notifications:${userId}`, mapped[0]);
+    }
+    return this.getNotifications(userId);
+  }
+
+  private subscribeToNotificationsRealtime(userId: string): void {
+    if (!userId || typeof window === 'undefined') return;
+    if (this.notificationsRealtimeUserId === userId && this.notificationsRealtimeChannel) return;
+
+    if (this.notificationsRealtimeChannel) {
+      supabase.removeChannel(this.notificationsRealtimeChannel);
+      this.notificationsRealtimeChannel = null;
+    }
+
+    this.notificationsRealtimeUserId = userId;
+    const channel = supabase
+      .channel(`user-notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload: any) => {
+          if (payload.eventType === 'DELETE' && payload.old?.id) {
+            this.notifications = this.notifications.filter((n) => n.id !== payload.old.id);
+            appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
+            return;
+          }
+          if (payload.new?.id) {
+            const mapped = this.mapNotificationRow(payload.new);
+            const idx = this.notifications.findIndex((n) => n.id === mapped.id);
+            if (idx >= 0) {
+              this.notifications[idx] = mapped;
+            } else {
+              this.notifications.unshift(mapped);
+            }
+            appEventBus.publish(`notifications:${userId}`, mapped);
+            appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
+          }
+        }
+      )
+      .subscribe();
+
+    this.notificationsRealtimeChannel = channel;
   }
 
   public createNotification(data: Omit<AppNotification, 'id' | 'isRead' | 'createdAt'>): AppNotification {
@@ -3954,6 +4132,8 @@ export class SupabaseRepository {
       createdAt: new Date().toISOString(),
     };
     this.notifications.unshift(notif);
+    appEventBus.publish(`notifications:${notif.userId}`, notif);
+    appEventBus.publish('notificationsUpdated', this.getNotifications(notif.userId));
 
     supabase
       .from('notifications')
@@ -3963,6 +4143,8 @@ export class SupabaseRepository {
         title: notif.title,
         message: notif.message,
         type: notif.type || 'info',
+        link: notif.link || null,
+        metadata: notif.metadata || null,
         is_read: false,
       })
       .then(({ error }) => {
@@ -3974,11 +4156,15 @@ export class SupabaseRepository {
 
   public markNotificationAsRead(id: string): void {
     const notif = this.notifications.find((n) => n.id === id);
-    if (notif) notif.isRead = true;
+    if (notif) {
+      notif.isRead = true;
+      appEventBus.publish(`notifications:${notif.userId}`, notif);
+      appEventBus.publish('notificationsUpdated', this.getNotifications(notif.userId));
+    }
 
     supabase
       .from('notifications')
-      .update({ is_read: true })
+      .update({ is_read: true, read_at: new Date().toISOString() })
       .eq('id', id)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] markNotificationAsRead warning:', error.message);
@@ -3989,13 +4175,31 @@ export class SupabaseRepository {
     this.notifications.forEach((n) => {
       if (n.userId === userId) n.isRead = true;
     });
+    appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
 
     supabase
       .from('notifications')
-      .update({ is_read: true })
+      .update({ is_read: true, read_at: new Date().toISOString() })
       .eq('user_id', userId)
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] markAllNotificationsAsRead warning:', error.message);
+      });
+  }
+
+  public deleteNotification(id: string): void {
+    const target = this.notifications.find((n) => n.id === id);
+    this.notifications = this.notifications.filter((n) => n.id !== id);
+    if (target) {
+      appEventBus.publish(`notifications:${target.userId}`, target);
+      appEventBus.publish('notificationsUpdated', this.getNotifications(target.userId));
+    }
+
+    supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] deleteNotification warning:', error.message);
       });
   }
 

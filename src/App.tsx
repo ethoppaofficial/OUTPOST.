@@ -66,6 +66,8 @@ import { AdminReportsPage } from './pages/admin/AdminReportsPage';
 import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
 import { AdminAccountPage } from './pages/admin/AdminAccountPage';
+import { AdminBroadcastsPage } from './pages/admin/AdminBroadcastsPage';
+import { NotificationsPage } from './pages/common/NotificationsPage';
 import { ThemeProvider } from './application/context/ThemeContext';
 import { AuthProvider, useAuth } from './application/context/AuthContext';
 import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
@@ -132,6 +134,14 @@ export default function App() {
               <Route path="/profiles/landlord/:userId" element={<PublicProfilePage />} />
               <Route path="/profiles/student/:userId" element={<PublicProfilePage />} />
               <Route path="/profile" element={<ProfileRouteRedirect />} />
+              <Route
+                path="/notifications"
+                element={
+                  <ProtectedRoute allowedRoles={['student', 'landlord', 'admin']}>
+                    <NotificationsPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Student Routes */}
               <Route
@@ -535,6 +545,14 @@ export default function App() {
                 element={
                   <ProtectedRoute allowedRoles={['admin']}>
                     <ChatPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/broadcasts"
+                element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <AdminBroadcastsPage />
                   </ProtectedRoute>
                 }
               />

@@ -82,6 +82,21 @@ export interface AdminDashboardData {
   fetchedAt: string;
 }
 
+export type BroadcastAudience = 'all_users' | 'all_landlords' | 'all_students' | 'individual';
+
+export interface AdminBroadcastRecord {
+  id: string;
+  senderId: string;
+  senderName: string;
+  targetAudience: BroadcastAudience;
+  targetUserId?: string;
+  targetUserName?: string;
+  title: string;
+  message: string;
+  recipientCount: number;
+  createdAt: string;
+}
+
 export type AdminErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN_ROLE'
@@ -1082,6 +1097,162 @@ export function createAdminService(deps?: { client?: any }) {
     return data || { success: true, revoked: true };
   }
 
+  async function sendBroadcast(payload: {
+    targetAudience: BroadcastAudience;
+    title: string;
+    message: string;
+    targetUserId?: string;
+  }): Promise<{
+    success: boolean;
+    broadcastId?: string;
+    targetAudience: BroadcastAudience;
+    recipientCount: number;
+    createdAt: string;
+  }> {
+    const admin = await verifyActiveAdmin();
+    const audience = payload.targetAudience;
+    if (!['all_users', 'all_landlords', 'all_students', 'individual'].includes(audience)) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'Invalid broadcast target audience selected.');
+    }
+
+    const cleanTitle = String(payload.title || '').trim();
+    const cleanMessage = String(payload.message || '').trim();
+    const cleanTargetUserId = payload.targetUserId?.trim() || undefined;
+
+    if (cleanTitle.length < 2 || cleanTitle.length > 140) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'Message title must be between 2 and 140 characters.');
+    }
+    if (cleanMessage.length < 2 || cleanMessage.length > 2000) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'Broadcast message must be between 2 and 2000 characters.');
+    }
+    if (audience === 'individual' && !cleanTargetUserId) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'Please choose an individual user to message.');
+    }
+
+    const { data, error } = await client.rpc('admin_send_broadcast', {
+      p_target_audience: audience,
+      p_title: cleanTitle,
+      p_message: cleanMessage,
+      p_target_user_id: audience === 'individual' ? cleanTargetUserId : null,
+    });
+
+    if (error) {
+      if (!isRpcMissingError(error)) {
+        throw classifySupabaseError(error, 'admin_broadcasts');
+      }
+
+      // Graceful fallback if Migration 13 RPC is not yet pushed
+      let profileQuery = client.from('profiles').select('id, role, account_status');
+      if (audience === 'individual' && cleanTargetUserId) {
+        profileQuery = profileQuery.eq('id', cleanTargetUserId);
+      } else if (audience === 'all_landlords') {
+        profileQuery = profileQuery.eq('role', 'landlord').neq('account_status', 'suspended');
+      } else if (audience === 'all_students') {
+        profileQuery = profileQuery.eq('role', 'student').neq('account_status', 'suspended');
+      } else {
+        profileQuery = profileQuery.neq('account_status', 'suspended');
+      }
+
+      const { data: recipients, error: recErr } = await profileQuery;
+      if (recErr) throw classifySupabaseError(recErr, 'profiles');
+
+      const recipientIds = (recipients || []).map((r: any) => r.id).filter(Boolean);
+      if (audience === 'individual' && recipientIds.length === 0) {
+        throw new AdminServiceError('VALIDATION_ERROR', 'Selected recipient account was not found.');
+      }
+
+      const nowIso = new Date().toISOString();
+      if (recipientIds.length > 0) {
+        const rows = recipientIds.map((uid: string) => ({
+          user_id: uid,
+          title: cleanTitle,
+          message: cleanMessage,
+          type: 'broadcast',
+          link: '/notifications',
+          is_read: false,
+          created_at: nowIso,
+        }));
+        const { error: notifErr } = await client.from('notifications').insert(rows);
+        if (notifErr) throw classifySupabaseError(notifErr, 'notifications');
+      }
+
+      await client.from('audit_logs').insert({
+        actor_id: admin.id,
+        action: 'ADMIN_SEND_BROADCAST',
+        entity_type: 'notifications',
+        entity_id: cleanTargetUserId || audience,
+        details: {
+          target_audience: audience,
+          target_user_id: cleanTargetUserId || null,
+          title: cleanTitle,
+          recipient_count: recipientIds.length,
+        },
+      });
+
+      return {
+        success: true,
+        targetAudience: audience,
+        recipientCount: recipientIds.length,
+        createdAt: nowIso,
+      };
+    }
+
+    return {
+      success: true,
+      broadcastId: (data as any)?.broadcast_id,
+      targetAudience: ((data as any)?.target_audience || audience) as BroadcastAudience,
+      recipientCount: Number((data as any)?.recipient_count || 0),
+      createdAt: String((data as any)?.created_at || new Date().toISOString()),
+    };
+  }
+
+  async function getBroadcastHistory(): Promise<AdminBroadcastRecord[]> {
+    await verifyActiveAdmin();
+    const { data, error } = await client
+      .from('admin_broadcasts')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      const code = String((error as any)?.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      if (code === '42P01' || msg.includes('admin_broadcasts')) {
+        return [];
+      }
+      throw classifySupabaseError(error, 'admin_broadcasts');
+    }
+
+    const rows = data || [];
+    const userIds = Array.from(
+      new Set(rows.flatMap((r: any) => [r.sender_id, r.target_user_id].filter(Boolean)))
+    );
+    const nameMap = new Map<string, string>();
+
+    if (userIds.length > 0) {
+      const { data: profiles } = await client
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', userIds);
+      (profiles || []).forEach((p: any) => {
+        nameMap.set(p.id, p.full_name || p.email || p.id);
+      });
+    }
+
+    return rows.map((row: any) => ({
+      id: String(row.id),
+      senderId: String(row.sender_id),
+      senderName: nameMap.get(row.sender_id) || 'Administrator',
+      targetAudience: (row.target_audience || 'all_users') as BroadcastAudience,
+      targetUserId: row.target_user_id || undefined,
+      targetUserName: row.target_user_id ? nameMap.get(row.target_user_id) || row.target_user_id : undefined,
+      title: String(row.title || ''),
+      message: String(row.message || ''),
+      recipientCount: Number(row.recipient_count || 0),
+      createdAt: displayDate(row.created_at),
+    }));
+  }
+
   async function reviewProperty(payload: {
     propertyId: string;
     decision: 'approve' | 'reject' | 'suspend' | 'reactivate';
@@ -1505,6 +1676,8 @@ export function createAdminService(deps?: { client?: any }) {
     setUserStatus,
     reviewVerification,
     revokeUserVerification,
+    sendBroadcast,
+    getBroadcastHistory,
     reviewProperty,
     reviewPropertyLocation,
     saveSettings,

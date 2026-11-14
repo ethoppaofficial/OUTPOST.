@@ -20,6 +20,7 @@ import {
   FileCheck2,
   FileText,
   FolderCheck,
+  Megaphone,
   Receipt,
   ShieldCheck,
   UserCheck,
@@ -102,12 +103,20 @@ export const AdminDashboard: React.FC = () => {
             Live database metrics across OUTPOST student housing around Dambare &amp; Rimin Gata.
           </p>
         </div>
-        <Link
-          to="/admin/verifications"
-          className="inline-flex items-center gap-2 self-start rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500"
-        >
-          Open review queue <ArrowRight className="h-4 w-4" />
-        </Link>
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          <Link
+            to="/admin/broadcasts"
+            className="inline-flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 px-4 py-2.5 text-sm font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300"
+          >
+            <Megaphone className="h-4 w-4" /> Broadcast message
+          </Link>
+          <Link
+            to="/admin/verifications"
+            className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500"
+          >
+            Open review queue <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
       </header>
 
       <AdminStatusBar
@@ -172,6 +181,9 @@ export const AdminDashboard: React.FC = () => {
                 </Link>
                 <Link to="/admin/reports" className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold dark:bg-slate-800">
                   Reports &amp; definitions
+                </Link>
+                <Link to="/admin/broadcasts" className="rounded-lg bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-700 dark:bg-purple-950/40 dark:text-purple-300">
+                  Broadcast notification
                 </Link>
               </div>
             </div>

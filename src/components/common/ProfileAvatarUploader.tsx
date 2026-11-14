@@ -61,6 +61,7 @@ export const ProfileAvatarUploader: React.FC<ProfileAvatarUploaderProps> = ({
       onUpdated?.();
       setTimeout(() => setSuccess(null), 4000);
     } catch (err: unknown) {
+      console.error('[ProfileAvatarUploader] Profile photo update failed:', err instanceof Error ? err.message : err);
       if (uploadedPath) {
         await storageService.deletePublicMediaAsset('profile-pictures', uploadedPath).catch(() => {});
       }

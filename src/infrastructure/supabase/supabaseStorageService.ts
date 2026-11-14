@@ -264,7 +264,7 @@ export class SupabaseStorageService {
       .from('profile-pictures')
       .upload(storagePath, file, {
         contentType,
-        upsert: true,
+        upsert: false,
       });
 
     if (error) {

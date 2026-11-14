@@ -41,6 +41,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Megaphone,
 } from 'lucide-react';
 import { notificationService } from '../../application/services/notificationService';
 import { chatService } from '../../application/services/chatService';
@@ -143,12 +144,17 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
     });
 
+    const unsubNotifList = notificationService.subscribeToListUpdates(() => {
+      setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
+    });
+
     const unsubConvos = chatService.subscribeToConversations(() => {
       setUnreadMessages(chatService.getUnreadMessageCount(currentUserId));
     });
 
     return () => {
       unsubNotifs();
+      unsubNotifList();
       unsubConvos();
     };
   }, [session?.user?.id]);
@@ -265,6 +271,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         { id: 'reservations', label: 'Reservations & Receipts', to: '/admin/reservations', icon: Receipt },
         { id: 'reports', label: 'Reports', to: '/admin/reports', icon: Layers },
         { id: 'audit', label: 'Audit Logs', to: '/admin/audit-logs', icon: FileCheck },
+        { id: 'broadcasts', label: 'Broadcast Messages', to: '/admin/broadcasts', icon: Megaphone },
         { id: 'settings', label: 'Platform Settings', to: '/admin/settings', icon: Settings },
         { id: 'account', label: 'Admin Account', to: '/admin/account', icon: User },
         { id: 'chat', label: 'Support & Inquiries', to: '/admin/chat', icon: MessageSquare, badgeKey: 'messages' },
@@ -724,8 +731,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               {/* Notification Bell */}
               <div className="relative">
                 <button
-                  onClick={() => setNotifsDropdownOpen(!notifsDropdownOpen)}
-                  className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  onClick={() => {
+                    const next = !notifsDropdownOpen;
+                    setNotifsDropdownOpen(next);
+                    if (next && session?.user?.id) {
+                      void notificationService.refreshNotifications(session.user.id);
+                    }
+                  }}
+                  className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                   aria-label="View notifications"
                 >
                   <Bell className="w-4 h-4" />
@@ -747,7 +760,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                             notificationService.markAllAsRead(session.user.id);
                             refreshSession();
                           }}
-                          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+                          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
                         >
                           Mark all read
                         </button>
@@ -765,7 +778,11 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                             onClick={() => {
                               notificationService.markAsRead(n.id);
                               refreshSession();
-                              if (n.link) navigate(n.link);
+                              if (n.link) {
+                                navigate(n.link);
+                              } else if (n.type === 'broadcast') {
+                                navigate('/notifications');
+                              }
                               setNotifsDropdownOpen(false);
                             }}
                             className={`p-3 text-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
@@ -780,6 +797,24 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                             </div>
                           </div>
                         ))
+                      )}
+                    </div>
+                    <div className="px-4 pt-2 mt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                      <Link
+                        to="/notifications"
+                        onClick={() => setNotifsDropdownOpen(false)}
+                        className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                      >
+                        View all notifications
+                      </Link>
+                      {userRole === 'admin' && (
+                        <Link
+                          to="/admin/broadcasts"
+                          onClick={() => setNotifsDropdownOpen(false)}
+                          className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:underline"
+                        >
+                          Send broadcast
+                        </Link>
                       )}
                     </div>
                   </div>

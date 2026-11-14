@@ -131,6 +131,18 @@ class ReservationService {
     return repository.cancelReservation(reservationId, reason);
   }
 
+  public async deleteReservationPersisted(
+    reservationId: string
+  ): Promise<{ success: boolean; releasedSpace?: boolean; message?: string }> {
+    return repository.deleteReservationPersisted(reservationId);
+  }
+
+  public deleteReservation(
+    reservationId: string
+  ): { success: boolean; releasedSpace?: boolean; message?: string } {
+    return repository.deleteReservation(reservationId);
+  }
+
   public getReceiptsForLandlord(landlordId: string): PaymentReceipt[] {
     return repository.getPaymentReceiptsForLandlord(landlordId).map((rc) => {
       const res = repository.getReservationById(rc.reservationId);

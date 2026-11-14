@@ -14,7 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   Clock,
   FileText,
@@ -30,6 +30,7 @@ import {
   Check,
   ShieldAlert,
   Landmark,
+  Trash2,
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
@@ -51,6 +52,7 @@ import { normalizeError } from '../../application/utils/errorUtils';
 export const ReservationDetailPage: React.FC = () => {
   const { reservationId } = useParams<{ reservationId: string }>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { currentUser, loading: authLoading } = useAuth();
   const fallbackSession = authService.getSession();
   const activeUser = currentUser || fallbackSession.user;
@@ -72,6 +74,8 @@ export const ReservationDetailPage: React.FC = () => {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [payerBank, setPayerBank] = useState('GTBank');
   const [reference, setReference] = useState('');
   const [amountPaid, setAmountPaid] = useState<number>(reservation?.amount || 0);
@@ -285,6 +289,24 @@ export const ReservationDetailPage: React.FC = () => {
       setError(normalized.userMessage);
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const handleDeleteReservation = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await reservationService.deleteReservationPersisted(reservation.id);
+      if (res.success) {
+        navigate('/student/reservations');
+      } else {
+        setError(res.message || 'Could not delete reservation.');
+      }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not delete reservation.');
+      setError(normalized.userMessage);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -606,37 +628,80 @@ export const ReservationDetailPage: React.FC = () => {
         )}
       </div>
 
-      {/* Cancellation option (inline iframe-safe confirmation) */}
-      {reservation.status === 'pending_payment' && !isExpired && (
-        <div className="flex items-center justify-end gap-3">
-          {confirmCancel ? (
+      {/* Cancellation & deletion options (inline iframe-safe confirmation) */}
+      {reservation.status !== 'confirmed' && (
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          {reservation.status === 'pending_payment' && !isExpired && (
+            confirmCancel ? (
+              <div className="flex flex-wrap items-center justify-end gap-2 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs">
+                <span className="text-amber-800 dark:text-amber-200 font-medium">
+                  Release this bed-space immediately?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(false)}
+                  className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
+                >
+                  Keep Hold
+                </button>
+                <button
+                  type="button"
+                  disabled={cancelling}
+                  onClick={() => void handleCancelReservation()}
+                  className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  {cancelling ? 'Cancelling…' : 'Confirm Cancel'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDelete(false);
+                  setConfirmCancel(true);
+                }}
+                className="text-xs text-amber-600 hover:text-amber-800 dark:text-amber-400 font-medium cursor-pointer"
+              >
+                Cancel this reservation hold
+              </button>
+            )
+          )}
+
+          {confirmDelete ? (
             <div className="flex flex-wrap items-center justify-end gap-2 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-xs">
               <span className="text-rose-700 dark:text-rose-300 font-medium">
-                Release this bed-space immediately?
+                {reservation.status === 'pending_payment' || reservation.status === 'receipt_submitted'
+                  ? 'Delete this reserved accommodation and release space?'
+                  : 'Permanently delete this reservation?'}
               </span>
               <button
                 type="button"
-                onClick={() => setConfirmCancel(false)}
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
                 className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
               >
-                Keep Hold
+                Keep
               </button>
               <button
                 type="button"
-                disabled={cancelling}
-                onClick={() => void handleCancelReservation()}
+                disabled={deleting}
+                onClick={() => void handleDeleteReservation()}
                 className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold cursor-pointer disabled:opacity-50"
               >
-                {cancelling ? 'Cancelling…' : 'Confirm Cancel'}
+                {deleting ? 'Deleting…' : 'Confirm Delete'}
               </button>
             </div>
           ) : (
             <button
               type="button"
-              onClick={() => setConfirmCancel(true)}
-              className="text-xs text-rose-500 hover:text-rose-700 font-medium cursor-pointer"
+              onClick={() => {
+                setConfirmCancel(false);
+                setConfirmDelete(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-100 font-semibold cursor-pointer"
             >
-              Cancel this reservation hold
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Reservation</span>
             </button>
           )}
         </div>
