@@ -1074,19 +1074,33 @@ export class SupabaseRepository {
     if (rpcError) {
       const rpcMissing =
         rpcError.code === 'PGRST202' ||
+        rpcError.code === '42883' ||
         /could not find the function|function .*update_own_profile_avatar.* does not exist/i.test(rpcError.message || '');
 
       if (!rpcMissing) {
         throw new Error(`Could not update profile photo in Supabase: ${rpcError.message}`);
       }
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('profiles')
         .update({
           avatar_url: avatarUrl,
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
+
+      if (
+        error &&
+        (error.code === '42703' ||
+          error.code === 'PGRST204' ||
+          /updated_at/i.test(error.message || ''))
+      ) {
+        const retryRes = await supabase
+          .from('profiles')
+          .update({ avatar_url: avatarUrl })
+          .eq('id', userId);
+        error = retryRes.error;
+      }
 
       if (error) {
         throw new Error(`Could not update profile photo in Supabase: ${error.message}`);

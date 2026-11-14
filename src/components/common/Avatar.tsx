@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { getAvatarPreset } from '../../assets/avatars';
 
 export type AvatarSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -59,15 +59,21 @@ export const Avatar: React.FC<AvatarProps> = ({
 }) => {
   const { container, text } = sizeClasses[size];
   const preset = getAvatarPreset(avatarPresetId || undefined);
+  const [imgFailed, setImgFailed] = useState(false);
 
-  // 1. Uploaded photo has highest priority if valid
-  if (avatarUrl && avatarUrl.trim()) {
+  useEffect(() => {
+    setImgFailed(false);
+  }, [avatarUrl]);
+
+  // 1. Uploaded photo has highest priority if valid and reachable
+  if (avatarUrl && avatarUrl.trim() && !imgFailed) {
     return (
       <img
         src={avatarUrl}
         alt={name || 'User avatar'}
         title={title || name}
         onClick={onClick}
+        onError={() => setImgFailed(true)}
         className={`rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 shrink-0 ${container} ${className} ${
           onClick ? 'cursor-pointer hover:opacity-90 transition' : ''
         }`}

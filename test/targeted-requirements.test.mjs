@@ -333,17 +333,49 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
     });
   });
 
-  describe('Profile Photo Upload Hardening (Migration 12)', () => {
+  describe('Profile Photo Upload Hardening & Storage RLS Review (Migrations 12 & 14)', () => {
     const m12 = read('supabase/migrations/20261114000012_profile_avatar_upload_fix.sql');
+    const m14 = read('supabase/migrations/20261114000014_profile_pictures_storage_rls_review.sql');
     const storageSrc = read('src/infrastructure/supabase/supabaseStorageService.ts');
     const repoSrc = read('src/infrastructure/supabase/supabaseRepository.ts');
+    const errorUtilsSrc = read('src/application/utils/errorUtils.ts');
 
-    test('Migration 12 defines update_own_profile_avatar RPC and storage avoids upsert=true UPDATE policy dependency', () => {
+    test('Migration 12 & 14 define update_own_profile_avatar RPC and storage avoids upsert=true UPDATE policy dependency', () => {
       assert.match(m12, /CREATE OR REPLACE FUNCTION public\.update_own_profile_avatar/i);
       assert.match(m12, /REVOKE EXECUTE ON FUNCTION public\.update_own_profile_avatar\(TEXT\) FROM PUBLIC, anon/i);
       assert.match(m12, /GRANT EXECUTE ON FUNCTION public\.update_own_profile_avatar\(TEXT\) TO authenticated/i);
+      assert.match(m14, /CREATE OR REPLACE FUNCTION public\.update_own_profile_avatar/i);
       assert.match(storageSrc, /from\('profile-pictures'\)[\s\S]*upsert:\s*false/);
+      assert.match(storageSrc, /assertValidOwnerId\(userId,\s*'user'\)\.toLowerCase\(\)/);
       assert.match(repoSrc, /rpc\('update_own_profile_avatar'/);
+      assert.match(repoSrc, /rpcError\.code === '42883'/);
+      assert.match(repoSrc, /error\.code === '42703'/);
+    });
+
+    test('Migration 14 enforces public-read and owner-scoped authenticated-write Storage RLS policies for profile-pictures', () => {
+      assert.match(m14, /INSERT INTO storage\.buckets[\s\S]*'profile-pictures'[\s\S]*true[\s\S]*2097152/i);
+      assert.match(
+        m14,
+        /CREATE POLICY "Profile pictures public read"\s+ON storage\.objects FOR SELECT\s+TO public\s+USING \(bucket_id = 'profile-pictures'\)/i
+      );
+      assert.match(
+        m14,
+        /CREATE POLICY "Users upload own profile picture"\s+ON storage\.objects FOR INSERT\s+TO authenticated\s+WITH CHECK \(\s*bucket_id = 'profile-pictures'\s+AND auth\.uid\(\) IS NOT NULL\s+AND lower\(\(storage\.foldername\(name\)\)\[1\]\) = lower\(auth\.uid\(\)::text\)/i
+      );
+      assert.match(
+        m14,
+        /CREATE POLICY "Users update own profile picture"\s+ON storage\.objects FOR UPDATE\s+TO authenticated\s+USING[\s\S]*lower\(\(storage\.foldername\(name\)\)\[1\]\) = lower\(auth\.uid\(\)::text\)[\s\S]*WITH CHECK[\s\S]*lower\(\(storage\.foldername\(name\)\)\[1\]\) = lower\(auth\.uid\(\)::text\)/i
+      );
+      assert.match(
+        m14,
+        /CREATE POLICY "Users delete own profile picture"\s+ON storage\.objects FOR DELETE\s+TO authenticated\s+USING \(\s*bucket_id = 'profile-pictures'\s+AND auth\.uid\(\) IS NOT NULL\s+AND lower\(\(storage\.foldername\(name\)\)\[1\]\) = lower\(auth\.uid\(\)::text\)/i
+      );
+    });
+
+    test('errorUtils classifies Storage bucket, RLS denial, and file validation errors cleanly', () => {
+      assert.match(errorUtilsSrc, /ERR_STORAGE_BUCKET_MISSING/);
+      assert.match(errorUtilsSrc, /row-level security/);
+      assert.match(errorUtilsSrc, /ERR_STORAGE_VALIDATION/);
     });
   });
 });

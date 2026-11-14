@@ -249,7 +249,7 @@ export class SupabaseStorageService {
     file: File | Blob,
     userId: string
   ): Promise<SupabaseFileUploadResult> {
-    const safeUserId = this.assertValidOwnerId(userId, 'user');
+    const safeUserId = this.assertValidOwnerId(userId, 'user').toLowerCase();
     const contentType = this.validateUploadPayload(
       file,
       2 * 1024 * 1024,

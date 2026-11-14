@@ -72,12 +72,40 @@ export function normalizeError(err: unknown, fallbackMessage = 'An unexpected er
     };
   }
 
-  if (lower.includes('forbidden') || lower.includes('suspended') || lower.includes('account_status')) {
+  if (lower.includes('bucket not found')) {
+    return {
+      category: 'NOT_FOUND',
+      userMessage: 'Storage bucket is not configured. Please contact the administrator.',
+      code: 'ERR_STORAGE_BUCKET_MISSING',
+      canRetry: false,
+    };
+  }
+
+  if (
+    lower.includes('forbidden') ||
+    lower.includes('suspended') ||
+    lower.includes('account_status') ||
+    lower.includes('row-level security') ||
+    lower.includes('permission denied')
+  ) {
     return {
       category: 'FORBIDDEN',
       userMessage: 'Access denied: You do not have permission to perform this action or your account is restricted.',
       code: 'ERR_FORBIDDEN',
       canRetry: false,
+    };
+  }
+
+  if (
+    lower.includes('mime type') ||
+    lower.includes('exceeded the maximum allowed size') ||
+    lower.includes('payload too large')
+  ) {
+    return {
+      category: 'VALIDATION',
+      userMessage: 'The selected file exceeds the size limit or uses an unsupported format.',
+      code: 'ERR_STORAGE_VALIDATION',
+      canRetry: true,
     };
   }
 
