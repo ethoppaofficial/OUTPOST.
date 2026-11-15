@@ -665,6 +665,32 @@ class AuthService {
     }
   }
 
+  public async verifySignupOtp(
+    email: string,
+    token: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanToken = token.trim();
+    if (!cleanEmail || !cleanToken) {
+      return { success: false, error: 'Email address and confirmation code are required.' };
+    }
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: 'signup',
+      });
+      if (error) {
+        return { success: false, error: error.message || 'Invalid or expired confirmation code.' };
+      }
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      repository.clearActiveSession();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to verify confirmation code.' };
+    }
+  }
+
   public async resendVerificationEmail(emailOverride?: string): Promise<{ success: boolean; error?: string }> {
     const user = this.getCurrentUser();
     const targetEmail = (emailOverride || user?.email || '').trim().toLowerCase();
@@ -681,7 +707,24 @@ class AuthService {
         email: targetEmail,
         options: emailRedirectTo ? { emailRedirectTo } : undefined,
       });
-      if (error) return { success: false, error: error.message };
+      if (error) {
+        const lower = String(error.message || '').toLowerCase();
+        if (lower.includes('error sending') || lower.includes('smtp')) {
+          return {
+            success: false,
+            error:
+              'Supabase could not send the confirmation email. Disable "Confirm email" or configure SMTP in Supabase Dashboard > Authentication > Providers > Email.',
+          };
+        }
+        if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('security purposes')) {
+          return {
+            success: false,
+            error:
+              'Confirmation email rate limit reached on Supabase. Wait briefly or confirm the user in Supabase Dashboard > Authentication > Users.',
+          };
+        }
+        return { success: false, error: error.message };
+      }
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to resend verification email.' };

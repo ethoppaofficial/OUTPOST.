@@ -12,6 +12,7 @@ import { reservationService } from '../src/application/services/reservationServi
 import { verificationService } from '../src/application/services/verificationService.ts';
 import { repository } from '../src/infrastructure/repositories/index.ts';
 import { createAdminService } from '../src/application/services/adminService.ts';
+import { authService } from '../src/application/services/authService.ts';
 
 const read = (relPath) => fs.readFileSync(path.resolve(relPath), 'utf8');
 
@@ -603,6 +604,27 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
       assert.ok(specificRow);
       assert.equal(specificRow.senderName, 'Campus Admin');
       assert.deepEqual(specificRow.targetUserNames, ['Aminu Kano', 'Alhaji Sani']);
+    });
+
+    test('Email confirmation UX handles token_hash links, inline 6-digit OTP verify, and accurate resend errors', async () => {
+      const authSvcSrc = read('src/application/services/authService.ts');
+      const loginPageSrc = read('src/pages/public/LoginPage.tsx');
+      const registerPageSrc = read('src/pages/public/RegisterPage.tsx');
+
+      assert.match(authSvcSrc, /public async verifySignupOtp\(/);
+      assert.match(authSvcSrc, /verifyOtp\(\{\s*email:\s*cleanEmail,\s*token:\s*cleanToken,\s*type:\s*'signup'/);
+      assert.match(authSvcSrc, /Disable "Confirm email" or configure SMTP in Supabase Dashboard/);
+      assert.match(authSvcSrc, /Confirmation email rate limit reached on Supabase/);
+
+      assert.match(loginPageSrc, /token_hash/);
+      assert.match(loginPageSrc, /verifySignupOtp\(email,\s*otpCode\)/);
+      assert.match(loginPageSrc, /useState<\{\s*ok:\s*boolean;\s*text:\s*string\s*\}\s*\|\s*null>/);
+      assert.match(loginPageSrc, /role=\{resendStatus\.ok \? 'status' : 'alert'\}/);
+      assert.match(registerPageSrc, /useState<\{\s*ok:\s*boolean;\s*text:\s*string\s*\}\s*\|\s*null>/);
+
+      const emptyOtpRes = await authService.verifySignupOtp('student@buk.edu.ng', '   ');
+      assert.equal(emptyOtpRes.success, false);
+      assert.match(emptyOtpRes.error || '', /required/i);
     });
   });
 });

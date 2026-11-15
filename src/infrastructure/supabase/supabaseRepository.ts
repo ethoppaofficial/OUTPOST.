@@ -1086,12 +1086,29 @@ export class SupabaseRepository {
     previousAvatarUrl?: string
   ): Promise<User> {
     if (!userId || /^(data:|blob:)/i.test(avatarUrl)) {
-      throw new Error('A permanent public Storage avatar URL is required.');
+      throw new Error('A permanent public Storage avatar URL or preset is required.');
     }
 
-    const { error: rpcError } = await supabase.rpc('update_own_profile_avatar', {
-      p_avatar_url: avatarUrl,
+    const cleanUrl = (avatarUrl || '').trim();
+    const isPreset = cleanUrl.startsWith('preset:');
+    const presetId = isPreset ? cleanUrl.slice('preset:'.length).trim() : null;
+
+    let { error: rpcError } = await supabase.rpc('update_own_profile_avatar', {
+      p_avatar_url: cleanUrl || null,
+      p_avatar_preset_id: presetId,
     });
+
+    if (rpcError) {
+      const paramMismatch =
+        rpcError.code === 'PGRST202' ||
+        /could not find the function/i.test(rpcError.message || '');
+      if (paramMismatch && cleanUrl) {
+        const retryOneArg = await supabase.rpc('update_own_profile_avatar', {
+          p_avatar_url: cleanUrl,
+        });
+        rpcError = retryOneArg.error;
+      }
+    }
 
     if (rpcError) {
       const rpcMissing =
@@ -1106,7 +1123,8 @@ export class SupabaseRepository {
       let { error } = await supabase
         .from('profiles')
         .update({
-          avatar_url: avatarUrl,
+          avatar_url: cleanUrl || null,
+          avatar_preset_id: presetId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
@@ -1115,11 +1133,11 @@ export class SupabaseRepository {
         error &&
         (error.code === '42703' ||
           error.code === 'PGRST204' ||
-          /updated_at/i.test(error.message || ''))
+          /avatar_preset_id|updated_at|column .* does not exist/i.test(error.message || ''))
       ) {
         const retryRes = await supabase
           .from('profiles')
-          .update({ avatar_url: avatarUrl })
+          .update({ avatar_url: cleanUrl || null })
           .eq('id', userId);
         error = retryRes.error;
       }
@@ -1129,14 +1147,17 @@ export class SupabaseRepository {
       }
     }
 
-    if (previousAvatarUrl && previousAvatarUrl !== avatarUrl) {
+    if (previousAvatarUrl && previousAvatarUrl !== cleanUrl && !previousAvatarUrl.startsWith('preset:')) {
       await supabaseStorageService.deletePublicMediaAsset('profile-pictures', previousAvatarUrl);
     }
+
+    const nextAvatarUrl = isPreset ? '' : cleanUrl;
+    const nextPresetId = presetId || undefined;
 
     let updatedUser: User | undefined;
     this.users = this.users.map((u) => {
       if (u.id === userId) {
-        updatedUser = { ...u, avatarUrl };
+        updatedUser = { ...u, avatarUrl: nextAvatarUrl, avatarPresetId: nextPresetId };
         return updatedUser;
       }
       return u;
@@ -1149,13 +1170,24 @@ export class SupabaseRepository {
         role: 'student',
         accountStatus: 'active',
         emailVerified: true,
-        avatarUrl,
+        avatarUrl: nextAvatarUrl,
+        avatarPresetId: nextPresetId,
         createdAt: new Date().toISOString(),
       };
       this.users.push(updatedUser);
     }
 
     return updatedUser;
+  }
+
+  public async updateUserAvatarPresetPersisted(
+    userId: string,
+    presetId: string | null,
+    previousAvatarUrl?: string
+  ): Promise<User> {
+    const cleanPreset = presetId ? presetId.trim() : '';
+    const encoded = cleanPreset ? `preset:${cleanPreset}` : '';
+    return this.updateUserAvatarPersisted(userId, encoded, previousAvatarUrl);
   }
 
   public getActiveUserId(): string {
@@ -4554,7 +4586,9 @@ export class SupabaseRepository {
       throw new Error(`Could not load your reservations: ${error.message}`);
     }
 
-    const rows = data || [];
+    const rows = (data || []).filter(
+      (row: any) => !(row?.status === 'cancelled' && row?.cancellation_reason === '[DELETED_BY_STUDENT]')
+    );
     const context = await this.hydrateRelatedEntitiesForReservations(rows);
     const mapped = rows.map((row: any) => this.mapSupabaseReservationBundle(row, context).reservation);
     const otherRes = this.reservations.filter((r) => r.studentId !== studentId);
@@ -4944,14 +4978,89 @@ export class SupabaseRepository {
       p_reservation_id: reservationId,
     });
 
+    let releasedSpace = Boolean((data as any)?.releasedSpace);
+
     if (error) {
-      return {
-        success: false,
-        message: error.message || 'Could not delete reserved accommodation.',
-      };
+      const code = String((error as any)?.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      const missingRpc =
+        code === '42883' ||
+        code === 'PGRST202' ||
+        msg.includes('delete_student_reservation_atomic');
+
+      if (!missingRpc) {
+        return {
+          success: false,
+          message: error.message || 'Could not delete reserved accommodation.',
+        };
+      }
+
+      // Fallback when Migration 14 has not been applied to the remote Supabase project yet
+      let targetStatus = existing?.status;
+      let targetPropertyId = existing?.propertyId;
+      if (!targetStatus) {
+        const { data: resRow } = await supabase
+          .from('reservations')
+          .select('id, status, property_id, student_id')
+          .eq('id', reservationId)
+          .maybeSingle();
+        if (!resRow) {
+          return {
+            success: false,
+            message: 'Reservation record not found.',
+          };
+        }
+        targetStatus = resRow.status;
+        targetPropertyId = resRow.property_id;
+      }
+
+      const normalizedStatus = String(targetStatus || '').toLowerCase();
+      if (normalizedStatus === 'confirmed') {
+        return {
+          success: false,
+          message: 'Confirmed tenancy reservations cannot be deleted.',
+        };
+      }
+
+      const activeHold =
+        normalizedStatus === 'pending_payment' ||
+        normalizedStatus === 'receipt_submitted' ||
+        normalizedStatus === 'awaiting_verification';
+
+      let softDeletedActiveHold = false;
+
+      if (activeHold) {
+        const cancelRes = await this.cancelReservationPersisted(
+          reservationId,
+          '[DELETED_BY_STUDENT]'
+        );
+        if (cancelRes.success) {
+          releasedSpace = true;
+          softDeletedActiveHold = true;
+        }
+      }
+
+      const { data: deletedRows } = await supabase
+        .from('reservations')
+        .delete()
+        .eq('id', reservationId)
+        .select('id');
+
+      const hardDeleted = Array.isArray(deletedRows) && deletedRows.length > 0;
+
+      if (!hardDeleted && !softDeletedActiveHold) {
+        return {
+          success: false,
+          message:
+            'Apply Supabase Migration 14 (20261115000014_broadcasts_presets_delete_reservation.sql) to enable permanent deletion of cancelled reservations.',
+        };
+      }
+
+      if (targetPropertyId && !existing?.propertyId) {
+        await this.fetchPropertyByIdOrSlugFromSupabase(targetPropertyId).catch(() => null);
+      }
     }
 
-    const releasedSpace = Boolean((data as any)?.releasedSpace);
     this.reservations = this.reservations.filter((r) => r.id !== reservationId);
     this.invoices = this.invoices.filter((inv) => inv.reservationId !== reservationId);
     this.receipts = this.receipts.filter((rc) => rc.reservationId !== reservationId);

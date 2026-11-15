@@ -26,8 +26,10 @@ export const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
-  const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [resendStatus, setResendStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [resending, setResending] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,11 +43,13 @@ export const LoginPage: React.FC = () => {
     const hashStr = window.location.hash || '';
     const hashParams = new URLSearchParams(hashStr.replace(/^#/, ''));
     const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
+    const tokenHash = hashParams.get('token_hash') || searchParams.get('token_hash');
 
     const isConfirmationArrival =
       searchParams.get('confirmed') === '1' ||
       flowType === 'signup' ||
-      flowType === 'email';
+      flowType === 'email' ||
+      Boolean(tokenHash);
 
     if (!isConfirmationArrival) return;
 
@@ -71,15 +75,30 @@ export const LoginPage: React.FC = () => {
 
     confirmationSignOutPendingRef.current = true;
     setError(null);
-    setConfirmationMessage(
-      'Your email address has been confirmed! Sign in below using the email and password you provided during registration.'
-    );
 
     let cancelled = false;
     (async () => {
       try {
-        // Wait for Supabase client to settle any URL token/PKCE confirmation callback first
-        await supabase.auth.getSession();
+        if (tokenHash && (flowType === 'signup' || flowType === 'email' || !flowType)) {
+          const { error: otpErr } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: flowType === 'email' ? 'email' : 'signup',
+          });
+          if (otpErr && !cancelled) {
+            confirmationSignOutPendingRef.current = false;
+            setConfirmationMessage(null);
+            setError(otpErr.message || 'Could not confirm email from link. Try resending confirmation.');
+            return;
+          }
+        } else {
+          // Wait for Supabase client to settle any URL token/PKCE confirmation callback first
+          await supabase.auth.getSession();
+        }
+        if (!cancelled) {
+          setConfirmationMessage(
+            'Your email address has been confirmed! Sign in below using the email and password you provided during registration.'
+          );
+        }
         if (!cancelled && confirmationSignOutPendingRef.current) {
           await supabase.auth.signOut({ scope: 'local' });
           repository.clearActiveSession();
@@ -243,33 +262,84 @@ export const LoginPage: React.FC = () => {
                 error.toLowerCase().includes('email not confirmed') ||
                 error.toLowerCase().includes('expired') ||
                 error.toLowerCase().includes('confirmation link')) && (
-                <div className="pl-6">
-                  <button
-                    type="button"
-                    disabled={resending}
-                    onClick={async () => {
-                      setResending(true);
-                      setResendStatus(null);
-                      const res = await authService.resendVerificationEmail(email);
-                      setResendStatus(
-                        res.success
-                          ? 'A new confirmation link has been sent to your email.'
-                          : res.error || 'Could not resend confirmation email.'
-                      );
-                      setResending(false);
-                    }}
-                    className="font-semibold text-emerald-700 dark:text-emerald-300 underline hover:no-underline disabled:opacity-50"
-                  >
-                    {resending ? 'Sending confirmation link…' : 'Resend confirmation email'}
-                  </button>
+                <div className="pl-6 space-y-2.5 pt-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={resending}
+                      onClick={async () => {
+                        setResending(true);
+                        setResendStatus(null);
+                        const res = await authService.resendVerificationEmail(email);
+                        setResendStatus(
+                          res.success
+                            ? {
+                                ok: true,
+                                text: 'A new confirmation link/code has been sent. Check your inbox or spam folder.',
+                              }
+                            : {
+                                ok: false,
+                                text: res.error || 'Could not resend confirmation email.',
+                              }
+                        );
+                        setResending(false);
+                      }}
+                      className="font-semibold text-emerald-700 dark:text-emerald-300 underline hover:no-underline disabled:opacity-50 cursor-pointer"
+                    >
+                      {resending ? 'Sending confirmation link…' : 'Resend confirmation email'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      placeholder="Or enter 6-digit code from email"
+                      className="flex-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 text-[11px] text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={verifyingOtp || otpCode.trim().length < 6}
+                      onClick={async () => {
+                        setVerifyingOtp(true);
+                        setResendStatus(null);
+                        const res = await authService.verifySignupOtp(email, otpCode);
+                        if (res.success) {
+                          setError(null);
+                          setOtpCode('');
+                          setConfirmationMessage(
+                            'Your email address has been confirmed! Sign in below using your password.'
+                          );
+                        } else {
+                          setResendStatus({
+                            ok: false,
+                            text: res.error || 'Invalid or expired confirmation code.',
+                          });
+                        }
+                        setVerifyingOtp(false);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold disabled:opacity-50 cursor-pointer"
+                    >
+                      {verifyingOtp ? 'Verifying…' : 'Verify Code'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {resendStatus && (
-            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200">
-              {resendStatus}
+            <div
+              role={resendStatus.ok ? 'status' : 'alert'}
+              className={`p-3 rounded-xl border text-xs ${
+                resendStatus.ok
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              {resendStatus.text}
             </div>
           )}
 

@@ -28,7 +28,7 @@ export const RegisterPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [requiresConfirmation, setRequiresConfirmation] = useState(false);
-  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resendMessage, setResendMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [resending, setResending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -167,7 +167,15 @@ export const RegisterPage: React.FC = () => {
                   We sent a confirmation link to <strong className="text-slate-800 dark:text-slate-200">{email}</strong>. Click the link in your email to confirm your account — you will be directed to the Sign In page to log in using your registered password.
                 </p>
                 {resendMessage && (
-                  <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{resendMessage}</p>
+                  <p
+                    className={`text-xs font-medium ${
+                      resendMessage.ok
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {resendMessage.text}
+                  </p>
                 )}
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                   <Link
@@ -185,12 +193,18 @@ export const RegisterPage: React.FC = () => {
                       const res = await authService.resendVerificationEmail(email);
                       setResendMessage(
                         res.success
-                          ? 'Confirmation link resent. Please check your inbox or spam folder.'
-                          : res.error || 'Could not resend confirmation email.'
+                          ? {
+                              ok: true,
+                              text: 'Confirmation link resent. Please check your inbox or spam folder.',
+                            }
+                          : {
+                              ok: false,
+                              text: res.error || 'Could not resend confirmation email.',
+                            }
                       );
                       setResending(false);
                     }}
-                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
                   >
                     {resending ? 'Resending…' : 'Resend Confirmation Email'}
                   </button>

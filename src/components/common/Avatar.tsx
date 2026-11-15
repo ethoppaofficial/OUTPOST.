@@ -58,18 +58,21 @@ export const Avatar: React.FC<AvatarProps> = ({
   title,
 }) => {
   const { container, text } = sizeClasses[size];
-  const preset = getAvatarPreset(avatarPresetId || undefined);
+  const trimmedUrl = avatarUrl?.trim() || '';
+  const urlPresetId = trimmedUrl.startsWith('preset:') ? trimmedUrl.slice('preset:'.length).trim() : undefined;
+  const preset = getAvatarPreset(avatarPresetId || urlPresetId || undefined);
+  const resolvedImageUrl = trimmedUrl && !trimmedUrl.startsWith('preset:') ? trimmedUrl : '';
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
     setImgFailed(false);
-  }, [avatarUrl]);
+  }, [avatarUrl, avatarPresetId]);
 
   // 1. Uploaded photo has highest priority if valid and reachable
-  if (avatarUrl && avatarUrl.trim() && !imgFailed) {
+  if (resolvedImageUrl && !imgFailed) {
     return (
       <img
-        src={avatarUrl}
+        src={resolvedImageUrl}
         alt={name || 'User avatar'}
         title={title || name}
         onClick={onClick}
