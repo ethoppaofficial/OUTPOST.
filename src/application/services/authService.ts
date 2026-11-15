@@ -92,15 +92,7 @@ class AuthService {
       const userId = sbUser.id;
       repository.setActiveUserId(userId);
 
-      // Sync registration metadata captured prior to email confirmation if companion fields are blank
       const meta = sbUser.user_metadata || {};
-      if (meta.phone && sbUser.email_confirmed_at) {
-        await supabase
-          .from('profiles')
-          .update({ phone: String(meta.phone).trim() })
-          .eq('id', userId)
-          .is('phone', null);
-      }
 
       // Fetch user profile from Supabase profiles table with bounded retries
       let profile: any = null;
@@ -152,6 +144,18 @@ class AuthService {
         return { success: false, error: 'Administrator account is not active.' };
       }
 
+      const profilePhone = typeof profile.phone === 'string' ? profile.phone.trim() : '';
+      const metaPhone = typeof meta.phone === 'string' ? meta.phone.trim() : '';
+      const resolvedPhone = profilePhone || metaPhone;
+
+      if (!profilePhone && metaPhone && sbUser.email_confirmed_at) {
+        await supabase
+          .from('profiles')
+          .update({ phone: metaPhone })
+          .eq('id', userId);
+        profile.phone = metaPhone;
+      }
+
       if (validRole === 'student') {
         const { data: existingSp } = await supabase
           .from('student_profiles')
@@ -189,7 +193,7 @@ class AuthService {
           const cachedSp: StudentProfile = {
             userId,
             fullName: profile.full_name || meta.full_name || 'Student',
-            phone: profile.phone || meta.phone || '',
+            phone: resolvedPhone,
             institutionName: existingSp?.institution || meta.university || 'Bayero University Kano',
             university: existingSp?.institution || meta.university || 'Bayero University Kano',
             campus: existingSp?.campus || meta.campus || 'New Campus',
@@ -249,7 +253,7 @@ class AuthService {
         emailVerified: Boolean(sbUser.email_confirmed_at),
         fullName: profile.full_name || sbUser.user_metadata?.full_name || '',
         avatarUrl: profile.avatar_url || sbUser.user_metadata?.avatar_url || '',
-        phone: profile.phone || meta.phone || existing?.phone,
+        phone: resolvedPhone || existing?.phone || undefined,
         studentProfile: repository.getStudentProfile(userId) || existing?.studentProfile,
       };
 

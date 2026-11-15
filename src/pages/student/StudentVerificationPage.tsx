@@ -212,7 +212,7 @@ export const StudentVerificationPage: React.FC = () => {
       {/* Overview status box */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
         <h2 className="text-sm font-bold text-slate-900 dark:text-white">Verification Status</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Enrolled Student:</span>
             <div className="inline-flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
@@ -239,6 +239,12 @@ export const StudentVerificationPage: React.FC = () => {
               )}
             </div>
             <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{liveRegNumber || 'Not supplied'}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
+            <span className="text-slate-400 block text-[11px]">Phone Number:</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              {currentUser?.phone || cachedStudent?.phone || 'Not supplied'}
+            </span>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-400 block text-[11px]">Badge Status:</span>

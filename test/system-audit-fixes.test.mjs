@@ -35,8 +35,13 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
   const groupsSrc = read('src/pages/student/GroupsPage.tsx');
   const groupDetailSrc = read('src/pages/student/GroupDetailPage.tsx');
   const studentVerifSrc = read('src/pages/student/StudentVerificationPage.tsx');
+  const landlordVerifSrc = read('src/pages/landlord/LandlordVerificationPage.tsx');
+  const usersPageSrc = read('src/pages/admin/UsersPage.tsx');
+  const publicProfileSrc = read('src/pages/public/PublicProfilePage.tsx');
+  const verificationSvcSrc = read('src/application/services/verificationService.ts');
   const userSearchSrc = read('src/pages/student/UserSearchPage.tsx');
   const m16 = read('supabase/migrations/20261115000016_student_reg_number_link_and_invite_search.sql');
+  const m17 = read('supabase/migrations/20261115000017_persist_user_phone_on_registration.sql');
 
   describe('1. Migration 15 Schema & Atomic RPC Fixes', () => {
     test('Defines submit_payment_receipt_atomic RPC with ownership, status guard, and SECURITY DEFINER lock', () => {
@@ -601,6 +606,38 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
       assert.match(userSearchSrc, /groupChatService\s*\.\s*inviteMemberPersisted/);
       assert.match(authSvcSrc, /cacheStudentProfile/);
       assert.match(authCtxSrc, /cacheStudentProfile/);
+    });
+  });
+
+  describe('8. User Phone Persistence on Registration & Profile Visibility (Migration 17)', () => {
+    test('Migration 17 backfills profiles.phone from auth metadata and persists phone in handle_new_user()', () => {
+      assert.match(m17, /UPDATE public\.profiles p[\s\S]*SET[\s\S]*phone = NULLIF\(btrim\(u\.raw_user_meta_data->>'phone'\), ''\)/i);
+      assert.match(m17, /CREATE OR REPLACE FUNCTION public\.handle_new_user/i);
+      assert.match(m17, /v_phone := NULLIF\(btrim\(COALESCE\(NEW\.raw_user_meta_data->>'phone', ''\)\), ''\);/i);
+      assert.match(m17, /INSERT INTO public\.profiles \([\s\S]*phone,[\s\S]*VALUES \([\s\S]*v_phone,/i);
+      assert.match(m17, /phone = COALESCE\(NULLIF\(btrim\(phone\), ''\), v_phone\)/i);
+      assert.match(m17, /link_student_registration_number|registration_number/i);
+      assert.match(m17, /NOTIFY pgrst, 'reload schema'/i);
+    });
+
+    test('authService, AuthContext, and verificationService hydrate and backfill empty/null profile.phone', () => {
+      assert.match(authCtxSrc, /const resolvedPhone = profilePhone \|\| metaPhone;/);
+      assert.match(authCtxSrc, /if \(!profilePhone && metaPhone && user\.email_confirmed_at\)/);
+      assert.match(authCtxSrc, /phone: resolvedPhone,/);
+      assert.match(authSvcSrc, /const resolvedPhone = profilePhone \|\| metaPhone;/);
+      assert.match(authSvcSrc, /if \(!profilePhone && metaPhone && sbUser\.email_confirmed_at\)/);
+      assert.match(verificationSvcSrc, /from\('profiles'\)\.select\('full_name, phone'\)/);
+    });
+
+    test('Student, Landlord, and Admin profile views display phone number while PublicProfilePage keeps PII hidden', () => {
+      assert.match(studentVerifSrc, /Phone Number:/);
+      assert.match(studentVerifSrc, /currentUser\?\.phone \|\| cachedStudent\?\.phone/);
+      assert.match(landlordVerifSrc, /Phone Number:/);
+      assert.match(landlordVerifSrc, /currentUser\?\.phone \|\| liveProfile\?\.phone \|\| landlordProfile\?\.phone/);
+      assert.match(usersPageSrc, /inspectedUser\.phone \|\| 'No phone supplied'/);
+      assert.match(usersPageSrc, /user\.phone \? ` · \$\{user\.phone\}` : ''/);
+      const publicBody = publicProfileSrc.slice(publicProfileSrc.indexOf('export const PublicProfilePage'));
+      assert.doesNotMatch(publicBody, /\bphone\b/i);
     });
   });
 });

@@ -176,6 +176,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
+        const meta = user.user_metadata || {};
+        const metaPhone = typeof meta.phone === 'string' ? meta.phone.trim() : '';
+        const profilePhone = typeof profile.phone === 'string' ? profile.phone.trim() : '';
+        const resolvedPhone = profilePhone || metaPhone;
+
+        if (!profilePhone && metaPhone && user.email_confirmed_at) {
+          try {
+            await supabase
+              .from('profiles')
+              .update({ phone: metaPhone })
+              .eq('id', user.id);
+          } catch {
+            // Non-fatal: continue hydrating resolvedPhone into app state
+          }
+        }
+
         let resolvedLandlordProfile: LandlordProfile | null = null;
         let resolvedStudentProfile: StudentProfile | null = null;
 
@@ -188,7 +204,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (isStale()) return;
 
-          const meta = user.user_metadata || {};
           let regNo = sp?.registration_number
             ? normalizeRegistrationNumber(sp.registration_number)
             : '';
@@ -215,7 +230,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             resolvedStudentProfile = {
               userId: user.id,
               fullName: profile.full_name || meta.full_name || 'Student',
-              phone: profile.phone || meta.phone || '',
+              phone: resolvedPhone,
               institutionName: sp?.institution || meta.university || 'Bayero University Kano',
               university: sp?.institution || meta.university || 'Bayero University Kano',
               campus: sp?.campus || meta.campus || 'New Campus',
@@ -254,7 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               userId: lp.user_id,
               legalName: profile.full_name || lp.company_name || 'Landlord',
               businessName: lp.company_name || undefined,
-              phone: profile.phone || '',
+              phone: resolvedPhone,
               contactAddress: lp.business_address || '',
               idType: 'National ID (NIN)',
               idReference: lp.tax_id || '',
@@ -281,7 +296,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           emailVerified: Boolean(user.email_confirmed_at),
           fullName: profile.full_name || user.user_metadata?.full_name || '',
           avatarUrl: profile.avatar_url || user.user_metadata?.avatar_url || '',
-          phone: profile.phone || existingUser?.phone,
+          phone: resolvedPhone || existingUser?.phone || undefined,
           studentProfile: resolvedStudentProfile || existingUser?.studentProfile,
           landlordProfile: resolvedLandlordProfile || undefined,
         };

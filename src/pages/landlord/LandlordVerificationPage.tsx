@@ -205,6 +205,29 @@ export const LandlordVerificationPage: React.FC = () => {
 
       <ProfileAvatarUploader title="Landlord Host Profile Photo" />
 
+      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
+            <span className="text-slate-400 block text-[11px]">Host Name:</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              {currentUser?.fullName || liveProfile?.legalName || landlordProfile?.legalName || 'Landlord'}
+            </span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
+            <span className="text-slate-400 block text-[11px]">Email Address:</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-200 break-all">
+              {currentUser?.email || 'Not supplied'}
+            </span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
+            <span className="text-slate-400 block text-[11px]">Phone Number:</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              {currentUser?.phone || liveProfile?.phone || landlordProfile?.phone || 'Not supplied'}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {loadError && (
         <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
           <span>{loadError}</span>

@@ -310,7 +310,10 @@ export const UsersPage: React.FC = () => {
                   <tr key={user.id} className="align-top">
                     <td className="p-3">
                       <p className="font-bold text-slate-900 dark:text-white">{user.name || user.fullName || 'User'}</p>
-                      <p className="mt-1 text-slate-500">{user.email}</p>
+                      <p className="mt-1 text-slate-500">
+                        {user.email}
+                        {user.phone ? ` · ${user.phone}` : ''}
+                      </p>
                       <p className="mt-1 break-all font-mono text-[10px] text-slate-400">{user.id}</p>
                     </td>
                     <td className="p-3">

@@ -136,13 +136,14 @@ class VerificationService {
       createdAt: string;
     }>;
   }> {
-    const [{ data: lp, error: lpErr }, { data: subs, error: subsErr }] = await Promise.all([
+    const [{ data: lp, error: lpErr }, { data: subs, error: subsErr }, { data: prof }] = await Promise.all([
       supabase.from('landlord_profiles').select('*').eq('user_id', userId).maybeSingle(),
       supabase
         .from('landlord_verification_submissions')
         .select('*')
         .eq('landlord_id', userId)
         .order('created_at', { ascending: false }),
+      supabase.from('profiles').select('full_name, phone').eq('id', userId).maybeSingle(),
     ]);
 
     if (lpErr) {
@@ -155,9 +156,9 @@ class VerificationService {
     const mappedProfile: LandlordProfile | null = lp
       ? {
           userId: lp.user_id,
-          legalName: lp.company_name || 'Landlord',
+          legalName: prof?.full_name || lp.company_name || 'Landlord',
           businessName: lp.company_name || undefined,
-          phone: '',
+          phone: typeof prof?.phone === 'string' ? prof.phone.trim() : '',
           contactAddress: lp.business_address || '',
           idType: 'National ID (NIN)',
           idReference: lp.tax_id || '',
