@@ -676,6 +676,42 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
         assert.doesNotMatch(content, /case[- _]?study/i);
       }
     });
+
+    test('Map pinpoint automatically reverse-geocodes and auto-fills property address fields', async () => {
+      const geoSvc = await import('../src/application/services/geocodingService.ts');
+      const geoUtils = await import('../src/domain/geoUtils.ts');
+
+      // Test structured reverse geocoding using local Kano landmark fallback when network fetch fails
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => {
+        throw new Error('Offline in unit test');
+      };
+
+      try {
+        const danbareHub = geoUtils.LOCAL_REFERENCE_LANDMARKS.find((l) => l.id === 'danbare-market');
+        assert.ok(danbareHub, 'Danbare reference landmark must exist');
+        const resolved = await geoSvc.reverseGeocodeDetailed(danbareHub.latitude, danbareHub.longitude);
+        assert.ok(resolved, 'reverseGeocodeDetailed must resolve fallback address');
+        assert.match(resolved.formattedAddress, /Danbare Market.*Kano State/i);
+        assert.equal(resolved.nearestLandmark, danbareHub.fullName);
+        assert.equal(resolved.city, 'Kano');
+        assert.equal(resolved.detectedArea, 'Dambare');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      const pickerSrc = read('src/components/map/LandlordPinPicker.tsx');
+      const modalSrc = read('src/components/map/LandlordPinPlacementMapModal.tsx');
+      const newPropSrc = read('src/pages/landlord/NewPropertyPage.tsx');
+
+      assert.match(pickerSrc, /reverseGeocodeDetailed/);
+      assert.match(pickerSrc, /formattedAddress:\s*details\.formattedAddress/);
+      assert.match(modalSrc, /reverseGeocodeDetailed/);
+      assert.match(modalSrc, /streetOrRoad:\s*details\.streetOrRoad/);
+      assert.match(newPropSrc, /applyAutoFilledAddressFromPin/);
+      assert.match(newPropSrc, /Auto-filled from map pin/);
+      assert.doesNotMatch(newPropSrc, /if\s*\(newLoc\.formattedAddress\s*&&\s*!address\)/);
+    });
   });
 });
 

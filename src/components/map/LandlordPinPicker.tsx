@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { maplibregl } from '../../infrastructure/config/maplibreSetup';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { HousingArea, LocationPrecision } from '../../domain/types';
@@ -9,23 +9,31 @@ import {
 } from '../../infrastructure/config/mapConfig';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
 import { requestCurrentDevicePosition } from '../../application/services/geolocationService';
-import { MapPin, Shield, Check, Navigation, AlertTriangle } from 'lucide-react';
+import { reverseGeocodeDetailed } from '../../application/services/geocodingService';
+import { MapPin, Shield, Check, Navigation, AlertTriangle, Loader2 } from 'lucide-react';
+
+export interface PinPickerLocationPayload {
+  area: HousingArea;
+  latitude: number;
+  longitude: number;
+  geohash: string;
+  precision: LocationPrecision;
+  publicLatitude: number;
+  publicLongitude: number;
+  publicLocationLabel: string;
+  formattedAddress?: string;
+  streetOrRoad?: string;
+  nearestLandmark?: string;
+  city?: string;
+  detectedArea?: HousingArea;
+}
 
 interface LandlordPinPickerProps {
   initialArea: HousingArea;
   initialLatitude?: number;
   initialLongitude?: number;
   initialPrecision?: LocationPrecision;
-  onLocationChange: (data: {
-    area: HousingArea;
-    latitude: number;
-    longitude: number;
-    geohash: string;
-    precision: LocationPrecision;
-    publicLatitude: number;
-    publicLongitude: number;
-    publicLocationLabel: string;
-  }) => void;
+  onLocationChange: (data: PinPickerLocationPayload) => void;
   className?: string;
   readOnly?: boolean;
 }
@@ -42,13 +50,99 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
+  const geocodeAbortRef = useRef<AbortController | null>(null);
 
   const defaultCoords = AREA_CENTERS[initialArea] || AREA_CENTERS.Dambare;
   const [currentLat, setCurrentLat] = useState<number>(initialLatitude ?? defaultCoords.latitude);
   const [currentLng, setCurrentLng] = useState<number>(initialLongitude ?? defaultCoords.longitude);
   const [area, setArea] = useState<HousingArea>(initialArea);
   const [precision, setPrecision] = useState<LocationPrecision>(initialPrecision);
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const fallbackAppliedRef = useRef(false);
+
+  // Refs prevent stale closures inside MapLibre click/dragend listeners
+  const areaRef = useRef<HousingArea>(area);
+  const precisionRef = useRef<LocationPrecision>(precision);
+  const onLocationChangeRef = useRef(onLocationChange);
+
+  useEffect(() => {
+    areaRef.current = area;
+  }, [area]);
+  useEffect(() => {
+    precisionRef.current = precision;
+  }, [precision]);
+  useEffect(() => {
+    onLocationChangeRef.current = onLocationChange;
+  }, [onLocationChange]);
+
+  const updateCoordinates = useCallback(
+    async (
+      lat: number,
+      lng: number,
+      targetArea: HousingArea,
+      targetPrecision: LocationPrecision,
+      shouldReverseGeocode: boolean = true
+    ) => {
+      const latRounded = Number(lat.toFixed(6));
+      const lngRounded = Number(lng.toFixed(6));
+      setCurrentLat(latRounded);
+      setCurrentLng(lngRounded);
+
+      const geohash = encodeGeohash(latRounded, lngRounded);
+      const pub = computePublicCoordinates(latRounded, lngRounded, targetPrecision, targetArea);
+
+      const basePayload: PinPickerLocationPayload = {
+        area: targetArea,
+        latitude: latRounded,
+        longitude: lngRounded,
+        geohash,
+        precision: targetPrecision,
+        publicLatitude: pub.publicLatitude,
+        publicLongitude: pub.publicLongitude,
+        publicLocationLabel: pub.publicLocationLabel,
+      };
+
+      onLocationChangeRef.current(basePayload);
+
+      if (!shouldReverseGeocode) return;
+
+      if (geocodeAbortRef.current) {
+        geocodeAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      geocodeAbortRef.current = controller;
+
+      setIsResolvingAddress(true);
+      try {
+        const details = await reverseGeocodeDetailed(
+          latRounded,
+          lngRounded,
+          controller.signal
+        );
+        if (controller.signal.aborted || !details?.formattedAddress) return;
+
+        setResolvedAddress(details.formattedAddress);
+        onLocationChangeRef.current({
+          ...basePayload,
+          formattedAddress: details.formattedAddress,
+          streetOrRoad: details.streetOrRoad,
+          nearestLandmark: details.nearestLandmark,
+          city: details.city,
+          detectedArea: details.detectedArea,
+        });
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          // Non-fatal: manual pin coordinates remain saved even if reverse geocoding fails
+        }
+      } finally {
+        if (geocodeAbortRef.current === controller) {
+          setIsResolvingAddress(false);
+        }
+      }
+    },
+    []
+  );
 
   // Subscribe to config changes
   useEffect(() => {
@@ -68,10 +162,13 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     return unsubscribe;
   }, []);
 
-  // Sync with prop changes (e.g. When landlord selects an address search suggestion)
+  // Sync with external coordinate changes (e.g. from Full Map Modal or GPS button)
   useEffect(() => {
     if (initialLatitude !== undefined && initialLongitude !== undefined) {
-      if (initialLatitude !== currentLat || initialLongitude !== currentLng) {
+      if (
+        Math.abs(initialLatitude - currentLat) > 1e-6 ||
+        Math.abs(initialLongitude - currentLng) > 1e-6
+      ) {
         setCurrentLat(initialLatitude);
         setCurrentLng(initialLongitude);
         if (markerRef.current) {
@@ -82,7 +179,7 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
         }
       }
     }
-  }, [initialLatitude, initialLongitude]);
+  }, [initialLatitude, initialLongitude, currentLat, currentLng]);
 
   useEffect(() => {
     setArea(initialArea);
@@ -94,7 +191,7 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     }
   }, [initialPrecision]);
 
-  // Initialize Map
+  // Initialize Map once
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -142,18 +239,18 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     markerRef.current = marker;
     mapRef.current = map;
 
-    // Handle Marker Drag
+    // Handle Marker Drag -> updates coords & auto-fills address
     marker.on('dragend', () => {
       const lngLat = marker.getLngLat();
-      updateCoordinates(lngLat.lat, lngLat.lng, area, precision);
+      void updateCoordinates(lngLat.lat, lngLat.lng, areaRef.current, precisionRef.current, true);
     });
 
-    // Handle Map Click to set Pin
+    // Handle Map Click -> moves pin, updates coords & auto-fills address
     if (!readOnly) {
       map.on('click', (e) => {
         const { lat, lng } = e.lngLat;
         marker.setLngLat([lng, lat]);
-        updateCoordinates(lat, lng, area, precision);
+        void updateCoordinates(lat, lng, areaRef.current, precisionRef.current, true);
       });
     }
 
@@ -174,41 +271,16 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     resizeObserver.observe(mapContainerRef.current);
 
     return () => {
+      geocodeAbortRef.current?.abort();
       resizeObserver.disconnect();
       marker.remove();
       map.remove();
     };
-  }, []);
-
-  const updateCoordinates = (
-    lat: number,
-    lng: number,
-    targetArea: HousingArea,
-    targetPrecision: LocationPrecision
-  ) => {
-    const latRounded = Number(lat.toFixed(6));
-    const lngRounded = Number(lng.toFixed(6));
-    setCurrentLat(latRounded);
-    setCurrentLng(lngRounded);
-
-    const geohash = encodeGeohash(latRounded, lngRounded);
-    const pub = computePublicCoordinates(latRounded, lngRounded, targetPrecision, targetArea);
-
-    onLocationChange({
-      area: targetArea,
-      latitude: latRounded,
-      longitude: lngRounded,
-      geohash,
-      precision: targetPrecision,
-      publicLatitude: pub.publicLatitude,
-      publicLongitude: pub.publicLongitude,
-      publicLocationLabel: pub.publicLocationLabel,
-    });
-  };
+  }, [readOnly, updateCoordinates]);
 
   const handleSelectPrecision = (newPrecision: LocationPrecision) => {
     setPrecision(newPrecision);
-    updateCoordinates(currentLat, currentLng, area, newPrecision);
+    void updateCoordinates(currentLat, currentLng, area, newPrecision, false);
   };
 
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -221,7 +293,7 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
       if (markerRef.current && mapRef.current) {
         markerRef.current.setLngLat([longitude, latitude]);
         mapRef.current.flyTo({ center: [longitude, latitude], zoom: 17 });
-        updateCoordinates(latitude, longitude, area, precision);
+        void updateCoordinates(latitude, longitude, area, precision, true);
       }
     } catch (err: any) {
       setGpsError(err?.message || 'Device location unavailable. Please place marker manually.');
@@ -240,7 +312,7 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
         {/* Floating Instruction Banner */}
         <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200/90 dark:border-slate-800 shadow-md backdrop-blur-xs">
           <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-          <span>Click map or drag marker to property building</span>
+          <span>Click map or drag marker to pinpoint building & auto-fill address</span>
         </div>
 
         {/* Use GPS Button */}
@@ -313,8 +385,25 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
         </div>
       </div>
 
-      {/* Coordinates & Security Review Audit Tag */}
+      {/* Coordinates, Auto-Filled Address & Security Review Audit Tag */}
       <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-[11px] space-y-1.5">
+        {(isResolvingAddress || resolvedAddress) && (
+          <div className="flex items-center gap-1.5 pb-1.5 border-b border-slate-200/70 dark:border-slate-800 text-slate-700 dark:text-slate-200">
+            {isResolvingAddress ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 flex-shrink-0" />
+                <span>Resolving address from map pinpoint…</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                <span className="truncate">
+                  Auto-filled Address: <strong className="font-semibold">{resolvedAddress}</strong>
+                </span>
+              </>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-2 text-slate-500 dark:text-slate-400">
           <span>
             Physical Lat/Lng: <strong className="text-slate-700 dark:text-slate-300 font-mono">{currentLat}, {currentLng}</strong>

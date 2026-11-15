@@ -16,12 +16,13 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Navigation, AlertTriangle, MapPin, Loader2, Compass, Shield } from 'lucide-react';
 import { useAuth } from '../../application/context/AuthContext';
 import { propertyService } from '../../application/services/propertyService';
-import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
+import { LandlordPinPicker, PinPickerLocationPayload } from '../../components/map/LandlordPinPicker';
 import { LandlordPinPlacementMapModal, PinLocationValue } from '../../components/map/LandlordPinPlacementMapModal';
 import { PropertyImageCaptureUpload } from '../../components/property/PropertyImageCaptureUpload';
 import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
 import { requestCurrentDevicePosition, GeolocationErrorResult } from '../../application/services/geolocationService';
+import { reverseGeocodeDetailed } from '../../application/services/geocodingService';
 import { appConfig } from '../../infrastructure/config/appConfig';
 
 export const NewPropertyPage: React.FC = () => {
@@ -86,12 +87,42 @@ export const NewPropertyPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Private property-point device location capture states
+  // Private property-point device location capture & pinpoint auto-fill states
+  const [addressAutoFilledFromPin, setAddressAutoFilledFromPin] = useState(false);
+  const [landmarkAutoFilledFromPin, setLandmarkAutoFilledFromPin] = useState(false);
   const [isCapturingDeviceLocation, setIsCapturingDeviceLocation] = useState(false);
   const [deviceLocationCaptured, setDeviceLocationCaptured] = useState(false);
   const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
   const [deviceLocationWarning, setDeviceLocationWarning] = useState<string | null>(null);
   const [deviceLocationSuccess, setDeviceLocationSuccess] = useState<string | null>(null);
+
+  const applyAutoFilledAddressFromPin = (details: {
+    formattedAddress?: string;
+    streetOrRoad?: string;
+    nearestLandmark?: string;
+    city?: string;
+    detectedArea?: HousingArea;
+  }) => {
+    if (details.formattedAddress) {
+      setAddress(details.formattedAddress);
+      setAddressAutoFilledFromPin(true);
+    }
+    if (details.streetOrRoad) {
+      setStreetOrRoad(details.streetOrRoad);
+    }
+    if (details.nearestLandmark) {
+      setNearestLandmark((prev) => {
+        if (!prev.trim() || landmarkAutoFilledFromPin) {
+          setLandmarkAutoFilledFromPin(true);
+          return details.nearestLandmark!;
+        }
+        return prev;
+      });
+    }
+    if (details.city) {
+      setCity(details.city);
+    }
+  };
 
   const handleCaptureDeviceLocation = async () => {
     setDeviceLocationError(null);
@@ -142,8 +173,20 @@ export const NewPropertyPage: React.FC = () => {
 
       setHasCustomCoordinates(true);
       setDeviceLocationCaptured(true);
+
+      let resolvedAddress: string | undefined;
+      try {
+        const resolved = await reverseGeocodeDetailed(lat, lon);
+        if (resolved) {
+          applyAutoFilledAddressFromPin(resolved);
+          resolvedAddress = resolved.formattedAddress;
+        }
+      } catch {
+        // Non-fatal: GPS coordinates remain captured even if reverse geocoding is unavailable
+      }
+
       setDeviceLocationSuccess(
-        `Property location captured successfully from your device (GPS accuracy: ~${Math.round(position.accuracyMeters || 10)}m). This point will be stored privately and used only for approximate nearby search after administrator verification.`
+        `Property location captured successfully from your device (GPS accuracy: ~${Math.round(position.accuracyMeters || 10)}m).${resolvedAddress ? ` Auto-filled address: ${resolvedAddress}.` : ' This point will be stored privately and used only for approximate nearby search after administrator verification.'}`
       );
     } catch (err: any) {
       const geoErr = err as GeolocationErrorResult;
@@ -424,14 +467,24 @@ export const NewPropertyPage: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="font-semibold text-slate-700 dark:text-slate-300">
-                  Full Property Address
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Full Property Address
+                  </label>
+                  {addressAutoFilledFromPin && (
+                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      Auto-filled from map pin
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={(e) => {
+                    setAddress(e.target.value);
+                    setAddressAutoFilledFromPin(false);
+                  }}
                   placeholder="e.g. Plot 18, Dambare Layout, Gwarzo Road"
                   className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200"
                 />
@@ -535,7 +588,10 @@ export const NewPropertyPage: React.FC = () => {
                 type="text"
                 required
                 value={nearestLandmark}
-                onChange={(e) => setNearestLandmark(e.target.value)}
+                onChange={(e) => {
+                  setNearestLandmark(e.target.value);
+                  setLandmarkAutoFilledFromPin(false);
+                }}
                 placeholder="e.g. Opposite BUK Old Gate / Beside Al-Hikma Pharmacy"
                 className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
               />
@@ -580,17 +636,34 @@ export const NewPropertyPage: React.FC = () => {
               </button>
             </div>
             <p className="text-[11px] text-slate-500">
-              Drag the pin or click on the map to mark the property building location in {locationData.area}.
+              Drag the pin or click on the map to mark the property building location in {locationData.area} — the address fields above auto-fill automatically.
             </p>
             <LandlordPinPicker
               initialArea={locationData.area}
               initialLatitude={locationData.latitude}
               initialLongitude={locationData.longitude}
               initialPrecision={locationData.precision}
-              onLocationChange={(loc) => {
-                setLocationData(loc);
+              onLocationChange={(loc: PinPickerLocationPayload) => {
+                setLocationData({
+                  area: loc.area,
+                  latitude: loc.latitude,
+                  longitude: loc.longitude,
+                  geohash: loc.geohash,
+                  precision: loc.precision,
+                  publicLatitude: loc.publicLatitude,
+                  publicLongitude: loc.publicLongitude,
+                  publicLocationLabel: loc.publicLocationLabel,
+                });
                 setHasCustomCoordinates(true);
                 setNeighbourhood(loc.area);
+                if (
+                  loc.formattedAddress ||
+                  loc.streetOrRoad ||
+                  loc.nearestLandmark ||
+                  loc.city
+                ) {
+                  applyAutoFilledAddressFromPin(loc);
+                }
               }}
             />
           </div>
@@ -627,9 +700,7 @@ export const NewPropertyPage: React.FC = () => {
                 publicLocationLabel: pub.publicLocationLabel,
               });
               setHasCustomCoordinates(true);
-              if (newLoc.formattedAddress && !address) {
-                setAddress(newLoc.formattedAddress);
-              }
+              applyAutoFilledAddressFromPin(newLoc);
               setNeighbourhood(newLoc.area);
               setIsPinModalOpen(false);
             }}

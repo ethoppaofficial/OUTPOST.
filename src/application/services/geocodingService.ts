@@ -38,13 +38,30 @@ interface NominatimItem {
   addresstype?: string;
   importance?: number;
   address?: {
+    house_number?: string;
     road?: string;
+    pedestrian?: string;
+    footway?: string;
+    residential?: string;
+    amenity?: string;
+    building?: string;
     suburb?: string;
     neighbourhood?: string;
+    quarter?: string;
+    village?: string;
     city?: string;
     town?: string;
+    county?: string;
     state?: string;
   };
+}
+
+export interface ReverseGeocodeDetails {
+  formattedAddress: string;
+  streetOrRoad?: string;
+  nearestLandmark?: string;
+  city?: string;
+  detectedArea?: HousingArea;
 }
 
 const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
@@ -269,16 +286,22 @@ export async function searchAddress(
   return combined.slice(0, 6);
 }
 
+function detectHousingAreaFromText(text?: string): HousingArea | undefined {
+  const lower = (text || '').toLowerCase();
+  if (lower.includes('rimin gata')) return 'Rimin Gata';
+  if (lower.includes('dambare') || lower.includes('danbare')) return 'Dambare';
+  return undefined;
+}
+
 /**
- * Reverse geocoding to resolve a street/road name or landmark from coordinates.
- * Uses MapTiler when configured, falling back to OpenStreetMap Nominatim and
- * nearest Kano BUK reference landmark description.
+ * Structured reverse geocoding returning a formatted street address along with
+ * street/road name, nearest landmark, city, and Kano housing area when available.
  */
-export async function reverseGeocodeCoordinates(
+export async function reverseGeocodeDetailed(
   latitude: number,
   longitude: number,
   signal?: AbortSignal,
-): Promise<string | undefined> {
+): Promise<ReverseGeocodeDetails | undefined> {
   const apiKey = mapConfig.apiKey;
   if (apiKey) {
     try {
@@ -292,12 +315,22 @@ export async function reverseGeocodeCoordinates(
       if (res.ok) {
         const data = (await res.json()) as MapTilerResponse;
         const first = data.features?.[0];
-        if (first?.place_name) return first.place_name;
+        if (first?.place_name) {
+          const detectedArea = detectHousingAreaFromText(first.place_name);
+          return {
+            formattedAddress: first.place_name,
+            streetOrRoad: first.properties?.address || first.text,
+            city: first.place_name.toLowerCase().includes('kano') ? 'Kano' : undefined,
+            detectedArea,
+          };
+        }
       }
-    } catch {
-      // Fall through to Nominatim
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
     }
   }
+
+  const orientation = getNearestLandmarkOrientation(latitude, longitude);
 
   try {
     const osmUrl = new URL(NOMINATIM_REVERSE_URL);
@@ -315,20 +348,78 @@ export async function reverseGeocodeCoordinates(
     });
     if (res.ok) {
       const data = (await res.json()) as NominatimItem;
-      if (data?.display_name) {
-        return data.display_name;
+      const addr = data?.address;
+      const roadPart = [
+        addr?.house_number,
+        addr?.road || addr?.pedestrian || addr?.footway || addr?.residential,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const areaPart =
+        addr?.suburb || addr?.neighbourhood || addr?.quarter || addr?.village;
+      const cityPart = addr?.city || addr?.town || addr?.county;
+      const statePart = addr?.state;
+
+      const conciseParts = [
+        addr?.amenity || addr?.building || data?.name,
+        roadPart,
+        areaPart,
+        cityPart,
+        statePart,
+      ].filter((part, idx, arr) => Boolean(part) && arr.indexOf(part) === idx);
+
+      const formattedAddress =
+        data?.display_name ||
+        (conciseParts.length > 0 ? conciseParts.join(', ') : undefined);
+
+      if (formattedAddress) {
+        return {
+          formattedAddress,
+          streetOrRoad:
+            roadPart ||
+            addr?.neighbourhood ||
+            addr?.suburb ||
+            undefined,
+          nearestLandmark:
+            addr?.amenity ||
+            addr?.building ||
+            orientation?.landmarkFullName ||
+            undefined,
+          city: cityPart || (formattedAddress.toLowerCase().includes('kano') ? 'Kano' : undefined),
+          detectedArea: detectHousingAreaFromText(formattedAddress),
+        };
       }
     }
-  } catch {
-    // Non-fatal fallback
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw err;
   }
 
-  const orientation = getNearestLandmarkOrientation(latitude, longitude);
   if (orientation) {
-    return `${orientation.formattedDescription}, Kano State`;
+    const fallbackArea = detectHousingAreaFromText(orientation.landmarkFullName);
+    return {
+      formattedAddress: `${orientation.formattedDescription}, ${fallbackArea ? `${fallbackArea}, ` : ''}Kano State`,
+      nearestLandmark: orientation.landmarkFullName,
+      city: 'Kano',
+      detectedArea: fallbackArea,
+    };
   }
 
   return undefined;
+}
+
+/**
+ * Reverse geocoding to resolve a street/road name or landmark from coordinates.
+ * Uses MapTiler when configured, falling back to OpenStreetMap Nominatim and
+ * nearest Kano BUK reference landmark description.
+ */
+export async function reverseGeocodeCoordinates(
+  latitude: number,
+  longitude: number,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  const details = await reverseGeocodeDetailed(latitude, longitude, signal);
+  return details?.formattedAddress;
 }
 
 /**

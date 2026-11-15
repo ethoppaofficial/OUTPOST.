@@ -13,7 +13,7 @@ import {
   searchAddress,
   resultMentionsArea,
   getPrecisionLabel,
-  reverseGeocodeCoordinates,
+  reverseGeocodeDetailed,
 } from '../../application/services/geocodingService';
 import { requestCurrentDevicePosition, type GeolocationErrorResult } from '../../application/services/geolocationService';
 import { AREA_CENTERS } from '../../domain/geoUtils';
@@ -40,6 +40,9 @@ export interface PinLocationValue {
   area: HousingArea;
   precision: LocationPrecision;
   formattedAddress?: string;
+  streetOrRoad?: string;
+  nearestLandmark?: string;
+  city?: string;
 }
 
 export interface LandlordPinPlacementMapModalProps {
@@ -89,13 +92,13 @@ export const LandlordPinPlacementMapModal: React.FC<
   mapAttribution,
   onClose,
   onConfirm,
-  onReverseGeocode = ({ latitude, longitude }) =>
-    reverseGeocodeCoordinates(latitude, longitude),
+  onReverseGeocode,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const fallbackAppliedRef = useRef(false);
+  const reverseAbortRef = useRef<AbortController | null>(null);
 
   const [selectedArea, setSelectedArea] = useState<HousingArea>(initialArea);
   const [location, setLocation] = useState<PinLocationValue | null>(null);
@@ -119,7 +122,6 @@ export const LandlordPinPlacementMapModal: React.FC<
   // Refs to avoid tearing down and recreating the MapLibre instance on click/precision updates
   const selectedAreaRef = useRef(selectedArea);
   const precisionRef = useRef(precision);
-  const addressRef = useRef(address);
   const onReverseGeocodeRef = useRef(onReverseGeocode);
   const initialLocationRef = useRef(initialLocation);
 
@@ -129,9 +131,6 @@ export const LandlordPinPlacementMapModal: React.FC<
   useEffect(() => {
     precisionRef.current = precision;
   }, [precision]);
-  useEffect(() => {
-    addressRef.current = address;
-  }, [address]);
   useEffect(() => {
     onReverseGeocodeRef.current = onReverseGeocode;
   }, [onReverseGeocode]);
@@ -175,25 +174,64 @@ export const LandlordPinPlacementMapModal: React.FC<
         accuracyMeters,
         area: selectedAreaRef.current,
         precision: precisionRef.current,
-        formattedAddress: sourceAddress || addressRef.current || undefined,
+        formattedAddress: sourceAddress || undefined,
       };
       setLocation(nextLocation);
+      if (sourceAddress) {
+        setAddress(sourceAddress);
+      } else {
+        setAddress('');
+      }
       mapRef.current?.flyTo({ center: [longitude, latitude], zoom: 17, essential: true });
 
-      if (!sourceAddress && onReverseGeocodeRef.current) {
+      if (!sourceAddress) {
+        if (reverseAbortRef.current) {
+          reverseAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        reverseAbortRef.current = controller;
+
         setIsReverseGeocoding(true);
         try {
-          const result = await onReverseGeocodeRef.current({ latitude, longitude });
-          if (result) {
-            setAddress(result);
-            setLocation((current) =>
-              current ? { ...current, formattedAddress: result } : current,
+          if (onReverseGeocodeRef.current) {
+            const customResult = await onReverseGeocodeRef.current({ latitude, longitude });
+            if (controller.signal.aborted) return;
+            if (customResult) {
+              setAddress(customResult);
+              setLocation((current) =>
+                current ? { ...current, formattedAddress: customResult } : current,
+              );
+            }
+          } else {
+            const details = await reverseGeocodeDetailed(
+              latitude,
+              longitude,
+              controller.signal,
             );
+            if (controller.signal.aborted) return;
+            if (details?.formattedAddress) {
+              setAddress(details.formattedAddress);
+              setLocation((current) =>
+                current
+                  ? {
+                      ...current,
+                      formattedAddress: details.formattedAddress,
+                      streetOrRoad: details.streetOrRoad,
+                      nearestLandmark: details.nearestLandmark,
+                      city: details.city,
+                    }
+                  : current,
+              );
+            }
           }
-        } catch {
-          // Failure to reverse geocode does not invalidate manually placed pin
+        } catch (err: any) {
+          if (err?.name !== 'AbortError') {
+            // Failure to reverse geocode does not invalidate manually placed pin
+          }
         } finally {
-          setIsReverseGeocoding(false);
+          if (reverseAbortRef.current === controller) {
+            setIsReverseGeocoding(false);
+          }
         }
       }
     },
@@ -386,6 +424,7 @@ export const LandlordPinPlacementMapModal: React.FC<
       }, 180);
 
       return () => {
+        reverseAbortRef.current?.abort();
         window.clearTimeout(resizeTimer);
         resizeObserver.disconnect();
         markerRef.current?.remove();
@@ -666,7 +705,9 @@ export const LandlordPinPlacementMapModal: React.FC<
               </div>
 
               <p className="text-slate-600 dark:text-slate-300 font-medium">
-                {address || 'No address label yet. Click on the map to place building pin.'}
+                {isReverseGeocoding
+                  ? 'Resolving address from map pinpoint…'
+                  : address || 'No address label yet. Click on the map to place building pin.'}
               </p>
 
               {location ? (
