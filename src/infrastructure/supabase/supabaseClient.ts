@@ -64,8 +64,31 @@ export async function invokeEdgeFunction<T = any>(
       body,
     });
     if (error) {
-      const status = (error as any)?.context?.status;
-      const baseMessage = error.message || `Edge Function ${functionName} failed`;
+      const ctx = (error as any)?.context;
+      const status = ctx?.status;
+      let detailMessage = '';
+
+      if (ctx && typeof ctx.clone === 'function') {
+        try {
+          const textBody = await ctx.clone().text();
+          if (textBody) {
+            try {
+              const parsed = JSON.parse(textBody);
+              if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+                detailMessage = parsed.error.trim();
+              } else if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+                detailMessage = parsed.message.trim();
+              }
+            } catch {
+              detailMessage = textBody.trim().slice(0, 300);
+            }
+          }
+        } catch {
+          // Ignore non-readable response body
+        }
+      }
+
+      const baseMessage = detailMessage || error.message || `Edge Function ${functionName} failed`;
       const enrichedMessage =
         typeof status === 'number' && !baseMessage.includes(String(status))
           ? `${baseMessage} (status ${status})`

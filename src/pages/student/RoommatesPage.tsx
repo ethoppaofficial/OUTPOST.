@@ -10,11 +10,13 @@
  * - Facilitates sending formal roommate requests with personalized introduction notes.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Sparkles, CheckCircle2, Send, ShieldCheck, XCircle } from 'lucide-react';
+import { useAuth } from '../../application/context/AuthContext';
 import { authService } from '../../application/services/authService';
 import { roommateService } from '../../application/services/roommateService';
+import { appEventBus } from '../../infrastructure/events/eventBus';
 import { VerificationBadge, VerificationTick, Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { StudentProfile, User } from '../../domain/types';
@@ -35,20 +37,30 @@ interface MatchItem {
  * and handles dispatch of connection/pairing invitations.
  */
 export const RoommatesPage: React.FC = () => {
+  const { currentUser } = useAuth();
   const session = authService.getSession();
+  const activeUserId = currentUser?.id || session.user.id;
   const [selectedMatch, setSelectedMatch] = useState<MatchItem | null>(null);
   const [requestSentStudentId, setRequestSentStudentId] = useState<string | null>(null);
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const [requestNote, setRequestNote] = useState(
     'Hi! I noticed our study habits, budget, and campus lifestyle align well. Would love to team up for accommodation!'
   );
+
+  useEffect(() => {
+    const unsub = appEventBus.subscribe('roommatesUpdated', () => {
+      setRefreshRevision((n) => n + 1);
+    });
+    return unsub;
+  }, []);
 
   // Filter state
   const [genderFilter, setGenderFilter] = useState('all');
   const [minScore, setMinScore] = useState(50);
 
   const matches: MatchItem[] = useMemo(() => {
-    return roommateService.getCompatibilityMatches(session.user.id);
-  }, [session.user.id, requestSentStudentId]);
+    return roommateService.getCompatibilityMatches(activeUserId);
+  }, [activeUserId, requestSentStudentId, refreshRevision]);
 
   const filteredMatches = matches.filter((m) => {
     if (m.compatibility.score < minScore) return false;
@@ -57,7 +69,7 @@ export const RoommatesPage: React.FC = () => {
   });
 
   const handleSendRequest = (targetStudentId: string) => {
-    const res = roommateService.sendRoommateRequest(session.user.id, targetStudentId, requestNote);
+    const res = roommateService.sendRoommateRequest(activeUserId, targetStudentId, requestNote);
     if (res.success) {
       setRequestSentStudentId(targetStudentId);
       setSelectedMatch(null);

@@ -1,17 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, CheckCircle2, XCircle, Clock, MessageSquare, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../../application/context/AuthContext';
 import { authService } from '../../application/services/authService';
 import { roommateService } from '../../application/services/roommateService';
+import { appEventBus } from '../../infrastructure/events/eventBus';
 import { VerificationBadge, Badge } from '../../components/ui/Badge';
 
 export const RoommateRequestsPage: React.FC = () => {
+  const { currentUser } = useAuth();
   const session = authService.getSession();
+  const activeUserId = currentUser?.id || session.user.id;
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [, setRefreshKey] = useState(0);
 
-  const received = roommateService.getReceivedRequests(session.user.id);
-  const sent = roommateService.getSentRequests(session.user.id);
+  useEffect(() => {
+    return appEventBus.subscribe('roommatesUpdated', () => {
+      setRefreshKey((k) => k + 1);
+    });
+  }, []);
+
+  const received = roommateService.getReceivedRequests(activeUserId);
+  const sent = roommateService.getSentRequests(activeUserId);
 
   const handleAccept = (requestId: string) => {
     roommateService.acceptRoommateRequest(requestId);

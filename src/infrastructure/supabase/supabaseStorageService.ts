@@ -341,6 +341,14 @@ export class SupabaseStorageService {
         throw new Error('Reservation record could not be verified for receipt upload.');
       }
 
+      if (reservation.student_id !== studentId) {
+        throw new Error('You can only upload receipts for your own reservations.');
+      }
+
+      if (reservation.status !== 'pending_payment' && reservation.status !== 'payment_submitted') {
+        throw new Error(`Cannot upload a payment receipt for a ${reservation.status} reservation.`);
+      }
+
       const { data: invoiceRow } = await supabase
         .from('invoices')
         .select('id')
@@ -361,27 +369,56 @@ export class SupabaseStorageService {
         throw new Error(`Failed to upload receipt file: ${uploadError.message}`);
       }
 
-      const { error: insertError } = await supabase.from('payment_receipts').insert({
-        id: receiptId,
-        reservation_id: params.reservationId,
-        invoice_id: invoiceRow?.id ?? null,
-        student_id: studentId,
-        landlord_id: reservation.landlord_id,
-        property_id: reservation.property_id,
-        storage_path: storagePath,
-        file_name: cleanName,
-        content_type: contentType,
-        file_size: params.file.size,
-        amount_paid: params.amountPaid,
-        payment_reference: params.paymentReference || 'DIRECT_TRANSFER',
-        payer_bank_name: params.payerBankName || 'Bank',
-        payment_date: params.paymentDate || new Date().toISOString(),
-        status: 'pending_review',
+      const paymentDateIso = params.paymentDate || new Date().toISOString();
+      const { error: rpcError } = await supabase.rpc('submit_payment_receipt_atomic', {
+        p_receipt_id: receiptId,
+        p_reservation_id: params.reservationId,
+        p_storage_path: storagePath,
+        p_file_name: cleanName,
+        p_content_type: contentType,
+        p_file_size: params.file.size,
+        p_amount_paid: params.amountPaid,
+        p_payment_reference: params.paymentReference || 'DIRECT_TRANSFER',
+        p_payer_bank_name: params.payerBankName || 'Bank',
+        p_payment_date: paymentDateIso,
       });
 
-      if (insertError) {
-        await this.deletePrivateAsset('payment-receipts', storagePath);
-        throw new Error(`Failed to record payment receipt metadata: ${insertError.message}`);
+      if (rpcError) {
+        const rpcCode = String((rpcError as any)?.code || '');
+        const rpcMsg = String(rpcError.message || '').toLowerCase();
+        const isMissingRpc =
+          rpcCode === '42883' ||
+          rpcCode === 'PGRST202' ||
+          rpcMsg.includes('submit_payment_receipt_atomic') ||
+          rpcMsg.includes('could not find the function');
+
+        if (!isMissingRpc) {
+          await this.deletePrivateAsset('payment-receipts', storagePath);
+          throw new Error(`Failed to record payment receipt: ${rpcError.message}`);
+        }
+
+        const { error: insertError } = await supabase.from('payment_receipts').insert({
+          id: receiptId,
+          reservation_id: params.reservationId,
+          invoice_id: invoiceRow?.id ?? null,
+          student_id: studentId,
+          landlord_id: reservation.landlord_id,
+          property_id: reservation.property_id,
+          storage_path: storagePath,
+          file_name: cleanName,
+          content_type: contentType,
+          file_size: params.file.size,
+          amount_paid: params.amountPaid,
+          payment_reference: params.paymentReference || 'DIRECT_TRANSFER',
+          payer_bank_name: params.payerBankName || 'Bank',
+          payment_date: paymentDateIso,
+          status: 'pending_review',
+        });
+
+        if (insertError) {
+          await this.deletePrivateAsset('payment-receipts', storagePath);
+          throw new Error(`Failed to record payment receipt metadata: ${insertError.message}`);
+        }
       }
 
       return {
@@ -440,7 +477,7 @@ export class SupabaseStorageService {
   }
 
   /**
-   * Upload Chat Attachment through Supabase Edge Function session
+   * Upload Chat Attachment through Supabase Edge Function session (with direct RLS Storage fallback)
    */
   async uploadChatAttachmentWithSession(params: {
     conversationId: string;
@@ -478,6 +515,86 @@ export class SupabaseStorageService {
       fileSize: params.file.size,
     });
 
+    if (sessionError && isEdgeFunctionUnavailableError(sessionError)) {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      const senderId = authData?.user?.id;
+      if (authErr || !senderId) {
+        throw new Error('Please sign in to send chat attachments.');
+      }
+
+      const { data: participant, error: partErr } = await supabase
+        .from('conversation_participants')
+        .select('id')
+        .eq('conversation_id', params.conversationId)
+        .eq('user_id', senderId)
+        .maybeSingle();
+
+      if (partErr || !participant) {
+        throw new Error('You must be a participant in this conversation to upload attachments.');
+      }
+
+      const messageId = crypto.randomUUID();
+      const storagePath = `${params.conversationId}/${senderId}/${messageId}/${cleanName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('chat-attachments')
+        .upload(storagePath, params.file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`Failed to upload attachment file: ${uploadError.message}`);
+      }
+
+      const nowIso = new Date().toISOString();
+      const messageText = params.text?.trim() || `Sent an attachment: ${cleanName}`;
+      const attachmentMetadata = {
+        storage_path: storagePath,
+        file_name: cleanName,
+        content_type: contentType,
+        file_size: params.file.size,
+        uploaded_by: senderId,
+        uploaded_at: nowIso,
+      };
+
+      const { data: messageRow, error: msgError } = await supabase
+        .from('messages')
+        .insert({
+          id: messageId,
+          conversation_id: params.conversationId,
+          sender_id: senderId,
+          text: messageText,
+          attachment: attachmentMetadata,
+        })
+        .select('id, created_at, text')
+        .single();
+
+      if (msgError) {
+        await this.deletePrivateAsset('chat-attachments', storagePath);
+        throw new Error(`Failed to record chat attachment message: ${msgError.message}`);
+      }
+
+      await supabase
+        .from('conversations')
+        .update({
+          last_message_text: messageText,
+          last_message_at: messageRow?.created_at || nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', params.conversationId);
+
+      return {
+        messageId: messageRow?.id || messageId,
+        storagePath,
+        fileName: cleanName,
+        contentType,
+        fileSize: params.file.size,
+        createdAt: messageRow?.created_at || nowIso,
+        text: messageRow?.text || messageText,
+      };
+    }
+
     if (sessionError || !sessionData?.messageId) {
       throw new Error(`Failed to initialize chat attachment upload: ${sessionError?.message || 'Session failed'}`);
     }
@@ -511,6 +628,7 @@ export class SupabaseStorageService {
     });
 
     if (finalizeError) {
+      await this.deletePrivateAsset('chat-attachments', storagePath);
       throw new Error(`Failed to finalize chat attachment: ${finalizeError.message}`);
     }
 

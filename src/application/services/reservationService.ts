@@ -15,7 +15,6 @@
 
 import { Reservation, ReservationMode, Invoice, PaymentReceipt } from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
-import { invokeEdgeFunction } from '../../infrastructure/supabase/supabaseClient';
 import { storageService } from './storageService';
 
 class ReservationService {
@@ -272,16 +271,6 @@ class ReservationService {
     }
 
     const receipt = repository.reviewPaymentReceipt(receiptId, decision, landlordId, reason);
-
-    // Invoke Supabase Edge Function 'review-payment-receipt'
-    invokeEdgeFunction('review-payment-receipt', {
-      receiptId,
-      decision,
-      rejectionReason: reason,
-    }).catch((err) => {
-      console.warn('[ReservationService] review-payment-receipt edge function notice:', err?.message || err);
-    });
-
     return { success: !!receipt, receipt };
   }
 

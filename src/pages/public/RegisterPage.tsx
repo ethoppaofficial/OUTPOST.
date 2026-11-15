@@ -28,6 +28,8 @@ export const RegisterPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [requiresConfirmation, setRequiresConfirmation] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
@@ -162,14 +164,37 @@ export const RegisterPage: React.FC = () => {
             {requiresConfirmation ? (
               <div className="space-y-3">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  We sent a confirmation link to <strong className="text-slate-800 dark:text-slate-200">{email}</strong>. Confirm your email address, then sign in to upload your verification documents.
+                  We sent a confirmation link to <strong className="text-slate-800 dark:text-slate-200">{email}</strong>. Click the link in your email to confirm your account — you will be directed to the Sign In page to log in using your registered password.
                 </p>
-                <Link
-                  to="/login"
-                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-                >
-                  Continue to Sign In
-                </Link>
+                {resendMessage && (
+                  <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{resendMessage}</p>
+                )}
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <Link
+                    to="/login"
+                    className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                  >
+                    Continue to Sign In
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={resending}
+                    onClick={async () => {
+                      setResending(true);
+                      setResendMessage(null);
+                      const res = await authService.resendVerificationEmail(email);
+                      setResendMessage(
+                        res.success
+                          ? 'Confirmation link resent. Please check your inbox or spam folder.'
+                          : res.error || 'Could not resend confirmation email.'
+                      );
+                      setResending(false);
+                    }}
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {resending ? 'Resending…' : 'Resend Confirmation Email'}
+                  </button>
+                </div>
               </div>
             ) : (
               <p className="text-xs text-slate-500">

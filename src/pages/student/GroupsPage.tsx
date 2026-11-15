@@ -31,6 +31,7 @@ import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
 import { groupChatService } from '../../application/services/groupChatService';
 import { chatService } from '../../application/services/chatService';
+import { appEventBus } from '../../infrastructure/events/eventBus';
 import { AccommodationGroup, GroupInvitation } from '../../domain/types';
 import { Badge } from '../../components/ui/Badge';
 
@@ -61,6 +62,7 @@ export const GroupsPage: React.FC = () => {
 
   useEffect(() => {
     refreshData();
+    return appEventBus.subscribe('groupsUpdated', refreshData);
   }, [activeUserId]);
 
   const myGroups = allGroups.filter((g) => g.memberIds.includes(activeUserId));

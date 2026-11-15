@@ -96,7 +96,7 @@ serve(async (req) => {
       });
     }
 
-    if (reservation.status === 'cancelled' || reservation.status === 'expired') {
+    if (reservation.status !== 'pending_payment' && reservation.status !== 'payment_submitted') {
       return new Response(JSON.stringify({ error: `Cannot upload receipt for a ${reservation.status} reservation` }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -87,20 +87,41 @@ const RecoveryHashHandler: React.FC = () => {
     if (typeof window === 'undefined') return;
     const hash = window.location.hash || '';
     const search = window.location.search || '';
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+    const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
 
-    const isRecoveryHash =
-      hash.includes('type=recovery') ||
-      hash.includes('access_token=') ||
-      hash.includes('error_code=') ||
-      hash.includes('otp_expired') ||
-      hash.includes('error=access_denied');
+    const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
+    const isConfirmedFlow = searchParams.get('confirmed') === '1';
 
-    const isRecoveryQuery =
-      search.includes('type=recovery') ||
-      search.includes('error_code=') ||
-      search.includes('error=access_denied');
+    const hasAuthError = Boolean(
+      hashParams.get('error') ||
+        hashParams.get('error_code') ||
+        searchParams.get('error') ||
+        searchParams.get('error_code') ||
+        hash.includes('otp_expired') ||
+        search.includes('otp_expired')
+    );
 
-    if ((isRecoveryHash || isRecoveryQuery) && window.location.pathname !== '/reset-password') {
+    const isSignupConfirmation =
+      flowType === 'signup' ||
+      flowType === 'email' ||
+      flowType === 'email_change' ||
+      isConfirmedFlow;
+
+    if (isSignupConfirmation) {
+      if (window.location.pathname !== '/login') {
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set('confirmed', '1');
+        window.location.replace(`/login?${nextParams.toString()}${hash}`);
+      }
+      return;
+    }
+
+    const isRecoveryFlow =
+      flowType === 'recovery' ||
+      (hasAuthError && window.location.pathname !== '/login');
+
+    if (isRecoveryFlow && window.location.pathname !== '/reset-password') {
       const destination = `/reset-password${search}${hash}`;
       window.location.replace(destination);
     }

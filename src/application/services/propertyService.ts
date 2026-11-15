@@ -532,6 +532,37 @@ class PropertyService {
     return repository.updatePropertyAvailability(propertyId, unitId, count);
   }
 
+  public async updateUnitAvailabilityPersisted(
+    propertyId: string,
+    unitId: string,
+    availableSpaces: number,
+    totalCapacity?: number
+  ): Promise<{ success: boolean; property?: Property; error?: string }> {
+    if (typeof (repository as any).updateUnitAvailabilityPersisted === 'function') {
+      return (repository as any).updateUnitAvailabilityPersisted(
+        propertyId,
+        unitId,
+        availableSpaces,
+        totalCapacity
+      );
+    }
+    this.updatePropertyAvailability(propertyId, unitId, availableSpaces);
+    const updated = this.getPropertyById(propertyId);
+    return { success: Boolean(updated), property: updated };
+  }
+
+  public async submitPropertyReport(params: {
+    propertyId: string;
+    reporterId: string;
+    reason: string;
+    details: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    if (typeof (repository as any).submitPropertyReportPersisted === 'function') {
+      return (repository as any).submitPropertyReportPersisted(params);
+    }
+    return { success: true };
+  }
+
   /**
    * Performs trusted nearby accommodation ranking for an authenticated student.
    * Calls the trusted Supabase Edge Function or database procedure in live mode.

@@ -73,6 +73,8 @@ export const PropertyDetailPage: React.FC = () => {
   const [reportReason, setReportReason] = useState<any>('Misleading photos');
   const [reportDetails, setReportDetails] = useState('');
   const [reportSubmitted, setReportSubmitted] = useState(false);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [submittingReservation, setSubmittingReservation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -243,13 +245,40 @@ export const PropertyDetailPage: React.FC = () => {
     }
   };
 
-  const handleReportSubmit = (e: React.FormEvent) => {
+  const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setReportSubmitted(true);
-    setTimeout(() => {
+    setReportError(null);
+    if (!currentUser || currentUser.id === 'anonymous') {
       setReportModalOpen(false);
-      setReportSubmitted(false);
-    }, 2000);
+      navigate('/login');
+      return;
+    }
+
+    setReportSubmitting(true);
+    try {
+      const result = await propertyService.submitPropertyReport({
+        propertyId: property.id,
+        reporterId: currentUser.id,
+        reason: String(reportReason),
+        details: reportDetails,
+      });
+
+      if (!result.success) {
+        setReportError(result.error || 'Could not submit safety report. Please try again.');
+        return;
+      }
+
+      setReportSubmitted(true);
+      setReportDetails('');
+      setTimeout(() => {
+        setReportModalOpen(false);
+        setReportSubmitted(false);
+      }, 2000);
+    } catch (err: any) {
+      setReportError(err?.message || 'Could not submit safety report. Please try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
   };
 
   return (
@@ -780,6 +809,11 @@ export const PropertyDetailPage: React.FC = () => {
           </div>
         ) : (
           <form onSubmit={handleReportSubmit} className="space-y-4 text-xs">
+            {reportError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
+                {reportError}
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="font-semibold text-slate-700 dark:text-slate-300">Reason for Report</label>
               <select
@@ -802,6 +836,7 @@ export const PropertyDetailPage: React.FC = () => {
                 onChange={(e) => setReportDetails(e.target.value)}
                 placeholder="Explain the specific issue observed..."
                 rows={3}
+                minLength={5}
                 required
                 className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
               />
@@ -810,16 +845,20 @@ export const PropertyDetailPage: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setReportModalOpen(false)}
+                onClick={() => {
+                  setReportError(null);
+                  setReportModalOpen(false);
+                }}
                 className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold"
+                disabled={reportSubmitting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-semibold"
               >
-                Submit Safety Report
+                {reportSubmitting ? 'Submitting…' : 'Submit Safety Report'}
               </button>
             </div>
           </form>

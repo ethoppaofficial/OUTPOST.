@@ -67,6 +67,7 @@ export class SupabaseRepository {
   private isLiveInitialized = false;
   private propertiesInitPromise: Promise<void> | null = null;
   private activeUserId: string = '';
+  private hydratedUserId: string = '';
   private notificationsRealtimeChannel: any = null;
   private notificationsRealtimeUserId: string = '';
 
@@ -964,14 +965,22 @@ export class SupabaseRepository {
         )
         .subscribe();
 
-        // 3. Hydrate authenticated user's conversations, messages & portfolio when a session exists
+        // 3. Hydrate authenticated user's conversations, messages, notifications & portfolio when a session exists
         const { data: authData } = await supabase.auth.getUser();
         if (authData?.user?.id) {
-          this.activeUserId = authData.user.id;
-          await Promise.all([
-            this.hydrateUserConversationsAndMessages(authData.user.id),
-            this.hydrateUserSessionContext(authData.user.id),
-          ]);
+          const uid = authData.user.id;
+          if (!this.activeUserId) {
+            this.activeUserId = uid;
+          }
+          if (this.getUserById(uid)) {
+            this.hydratedUserId = uid;
+            await Promise.all([
+              this.hydrateUserConversationsAndMessages(uid),
+              this.hydrateUserSessionContext(uid),
+              this.fetchNotificationsFromSupabase(uid),
+            ]);
+            this.subscribeToNotificationsRealtime(uid);
+          }
         }
       } catch (err) {
         console.warn('[SupabaseRepository] Live initialization notice:', err);
@@ -1014,27 +1023,35 @@ export class SupabaseRepository {
     return this.users.find((u) => u.email.toLowerCase() === normalized);
   }
 
-  public createUser(user: User): User {
+  public cacheUser(user: User): User {
     const existingIdx = this.users.findIndex((u) => u.id === user.id);
     if (existingIdx >= 0) {
       this.users[existingIdx] = user;
     } else {
       this.users.push(user);
     }
+    return user;
+  }
+
+  public createUser(user: User): User {
+    this.cacheUser(user);
 
     // Profile role and account_status are authoritatively initialized by the database trigger (handle_new_user).
-    // The client only synchronizes mutable personal details.
-    supabase
-      .from('profiles')
-      .update({
-        full_name: user.fullName || user.email.split('@')[0],
-        avatar_url: user.avatarUrl || null,
-        phone: user.phone || null,
-      })
-      .eq('id', user.id)
-      .then(({ error }) => {
-        if (error) console.warn('[SupabaseRepository] createUser sync warning:', error.message);
-      });
+    // Only synchronize non-empty personal details when explicitly requested.
+    const updates: Record<string, any> = {};
+    if (user.fullName && user.fullName.trim()) updates.full_name = user.fullName.trim();
+    if (user.avatarUrl && !/^(data:|blob:)/i.test(user.avatarUrl)) updates.avatar_url = user.avatarUrl;
+    if (user.phone && user.phone.trim()) updates.phone = user.phone.trim();
+
+    if (Object.keys(updates).length > 0) {
+      supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .then(({ error }) => {
+          if (error) console.warn('[SupabaseRepository] createUser sync warning:', error.message);
+        });
+    }
 
     return user;
   }
@@ -1142,9 +1159,11 @@ export class SupabaseRepository {
 
   public setActiveUserId(userId: string): void {
     const changed = this.activeUserId !== userId;
+    const needsHydration = Boolean(userId && (changed || this.hydratedUserId !== userId));
     this.activeUserId = userId;
     appEventBus.publish('userChanged', userId);
-    if (changed && userId && typeof window !== 'undefined') {
+    if (needsHydration && userId && typeof window !== 'undefined') {
+      this.hydratedUserId = userId;
       this.hydrateUserConversationsAndMessages(userId).catch((err) =>
         console.warn('[SupabaseRepository] Chat hydration notice:', err?.message || err)
       );
@@ -1158,26 +1177,179 @@ export class SupabaseRepository {
     }
   }
 
+  private mapSupabaseRoommatePrefRow(row: any): RoommatePreference {
+    let extra: any = {};
+    if (typeof row?.bio === 'string' && row.bio.trim().startsWith('{')) {
+      try {
+        extra = JSON.parse(row.bio);
+      } catch {
+        extra = {};
+      }
+    }
+
+    const cleanlinessFromRating =
+      Number(row.cleanliness_rating) >= 4
+        ? 'Extremely Neat / Daily'
+        : Number(row.cleanliness_rating) <= 2
+        ? 'Relaxed'
+        : 'Moderate / Weekly';
+
+    const sleepFromDb =
+      row.sleep_habit === 'early_bird'
+        ? 'Sleeps Before 11pm'
+        : row.sleep_habit === 'night_owl'
+        ? 'Irregular / Night Shift'
+        : 'Sleeps Midnight - 2am';
+
+    const studyFromDb =
+      row.study_habit === 'silent'
+        ? 'Library Focused'
+        : row.study_habit === 'group_friendly'
+        ? 'Night Owl'
+        : 'Early Bird';
+
+    const smokingFromDb =
+      row.smoking_preference === 'outside_only'
+        ? 'Outdoor Only'
+        : row.smoking_preference === 'flexible'
+        ? "Doesn't Mind"
+        : 'Non-Smoker Only';
+
+    const guestFromDb =
+      row.guest_policy === 'no_guests'
+        ? 'No Overnight Guests'
+        : row.guest_policy === 'frequent'
+        ? 'Frequent Visitors OK'
+        : 'Weekends Only';
+
+    return {
+      studentId: row.student_id,
+      preferredNeighbourhoods:
+        Array.isArray(row.preferred_area) && row.preferred_area.length > 0
+          ? row.preferred_area
+          : ['Dambare'],
+      minBudget: Number(row.budget_min || 0),
+      maxBudget: Number(row.budget_max || 500000),
+      moveInPeriod: extra.moveInPeriod || 'Immediate',
+      studyHabits: extra.studyHabits || studyFromDb,
+      sleepSchedule: extra.sleepSchedule || sleepFromDb,
+      cleanliness: extra.cleanliness || cleanlinessFromRating,
+      smoking: extra.smoking || smokingFromDb,
+      guestPreference: extra.guestPreference || guestFromDb,
+      noiseTolerance: extra.noiseTolerance || 'Quiet Environment Essential',
+      roomSharing: extra.roomSharing || 'Open to 2-Person Shared',
+      genderPreference: extra.genderPreference || 'Same Gender Only',
+    };
+  }
+
+  private mapRoommatePrefToDbRow(pref: RoommatePreference): Record<string, any> {
+    const minBudget = Math.max(0, Number(pref.minBudget || 0));
+    const maxBudget = Math.max(minBudget, Number(pref.maxBudget || minBudget));
+    const cleanlinessRating =
+      pref.cleanliness === 'Extremely Neat / Daily'
+        ? 5
+        : pref.cleanliness === 'Relaxed'
+        ? 1
+        : 3;
+    const sleepHabit =
+      pref.sleepSchedule === 'Sleeps Before 11pm'
+        ? 'early_bird'
+        : pref.sleepSchedule === 'Irregular / Night Shift'
+        ? 'night_owl'
+        : 'flexible';
+    const studyHabit =
+      pref.studyHabits === 'Library Focused'
+        ? 'silent'
+        : pref.studyHabits === 'Night Owl'
+        ? 'group_friendly'
+        : 'moderate';
+    const smokingPref =
+      pref.smoking === 'Outdoor Only'
+        ? 'outside_only'
+        : pref.smoking === "Doesn't Mind"
+        ? 'flexible'
+        : 'no_smoking';
+    const guestPolicy =
+      pref.guestPreference === 'No Overnight Guests'
+        ? 'no_guests'
+        : pref.guestPreference === 'Frequent Visitors OK'
+        ? 'frequent'
+        : 'occasional';
+
+    return {
+      student_id: pref.studentId,
+      budget_min: minBudget,
+      budget_max: maxBudget,
+      preferred_area:
+        Array.isArray(pref.preferredNeighbourhoods) && pref.preferredNeighbourhoods.length > 0
+          ? pref.preferredNeighbourhoods
+          : ['Dambare'],
+      cleanliness_rating: cleanlinessRating,
+      sleep_habit: sleepHabit,
+      study_habit: studyHabit,
+      smoking_preference: smokingPref,
+      guest_policy: guestPolicy,
+      bio: JSON.stringify({
+        moveInPeriod: pref.moveInPeriod,
+        studyHabits: pref.studyHabits,
+        sleepSchedule: pref.sleepSchedule,
+        cleanliness: pref.cleanliness,
+        smoking: pref.smoking,
+        guestPreference: pref.guestPreference,
+        noiseTolerance: pref.noiseTolerance,
+        roomSharing: pref.roomSharing,
+        genderPreference: pref.genderPreference,
+      }),
+    };
+  }
+
   private async hydrateUserSessionContext(userId: string): Promise<void> {
     if (!userId) return;
     try {
-      const [landlordProps, { data: groupRows }, { data: studentProf }, { data: landlordProf }] =
-        await Promise.all([
-          this.selectPropertiesResilient((selectClause) =>
-            Promise.resolve(
-              supabase
-                .from('properties')
-                .select(selectClause)
-                .eq('landlord_id', userId)
-            )
-          ).catch(() => []),
-          supabase
-            .from('accommodation_groups')
-            .select('*, group_members(user_id, role, joined_at, profiles(full_name))')
-            .eq('is_active', true),
-          supabase.from('student_profiles').select('*').eq('user_id', userId).maybeSingle(),
-          supabase.from('landlord_profiles').select('*').eq('user_id', userId).maybeSingle(),
-        ]);
+      const [
+        landlordProps,
+        { data: groupRows },
+        { data: studentProf },
+        { data: landlordProf },
+        { data: prefRows },
+        { data: reqRows },
+        { data: peerStudentRows },
+        { data: joinReqRows },
+        { data: inviteRows },
+      ] = await Promise.all([
+        this.selectPropertiesResilient((selectClause) =>
+          Promise.resolve(
+            supabase
+              .from('properties')
+              .select(selectClause)
+              .eq('landlord_id', userId)
+          )
+        ).catch(() => []),
+        supabase
+          .from('accommodation_groups')
+          .select('*, group_members(user_id, role, joined_at, profiles(full_name))')
+          .eq('is_active', true),
+        supabase.from('student_profiles').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('landlord_profiles').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('roommate_preferences').select('*'),
+        supabase
+          .from('roommate_requests')
+          .select('*')
+          .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('student_profiles')
+          .select('user_id, institution, campus, faculty, department, study_level, registration_number, gender, bio, is_profile_verified, profiles(id, full_name, avatar_url, role, account_status, created_at)')
+          .limit(200),
+        supabase
+          .from('group_join_requests')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('group_invitations')
+          .select('*')
+          .order('created_at', { ascending: false }),
+      ]);
 
       if (Array.isArray(landlordProps) && landlordProps.length > 0) {
         const mappedProps: Property[] = landlordProps.map((row: any) =>
@@ -1203,11 +1375,78 @@ export class SupabaseRepository {
         ]).catch(() => {});
       }
 
-      if (Array.isArray(groupRows) && groupRows.length > 0) {
+      if (Array.isArray(peerStudentRows)) {
+        for (const row of peerStudentRows) {
+          const pRel = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+          const uid = row.user_id;
+          if (!uid) continue;
+          const fullName = pRel?.full_name || this.getUserById(uid)?.fullName || 'OUTPOST Student';
+          if (!this.getUserById(uid)) {
+            this.cacheUser({
+              id: uid,
+              email: '',
+              fullName,
+              avatarUrl: pRel?.avatar_url || '',
+              role: 'student',
+              accountStatus: (pRel?.account_status as any) || 'active',
+              emailVerified: true,
+              createdAt: pRel?.created_at || new Date().toISOString(),
+            });
+          }
+          const sp: StudentProfile = {
+            userId: uid,
+            fullName,
+            phone: this.getUserById(uid)?.phone || '',
+            institutionName: row.institution || 'Bayero University Kano',
+            university: row.institution || 'Bayero University Kano',
+            campus: row.campus || 'New Campus',
+            faculty: row.faculty || undefined,
+            department: row.department || undefined,
+            studyLevel: row.study_level || 'Undergraduate (Year 1)',
+            programme: this.getUserById(uid)?.programme || '',
+            registrationNumber: row.registration_number || '',
+            gender: row.gender === 'female' ? 'Female' : row.gender === 'male' ? 'Male' : 'Other',
+            preferredLocation: this.getUserById(uid)?.preferences?.preferredLocation || 'Dambare',
+            bio: row.bio || undefined,
+            isProfileVerified: Boolean(row.is_profile_verified),
+          };
+          this.studentProfiles = [sp, ...this.studentProfiles.filter((item) => item.userId !== uid)];
+        }
+      }
+
+      if (Array.isArray(prefRows)) {
+        this.roommatePreferences = prefRows.map((row: any) => this.mapSupabaseRoommatePrefRow(row));
+      }
+
+      if (Array.isArray(reqRows)) {
+        this.roommateRequests = reqRows.map((row: any) => {
+          const senderSp = this.getStudentProfile(row.sender_id);
+          const receiverSp = this.getStudentProfile(row.receiver_id);
+          const senderUsr = this.getUserById(row.sender_id);
+          const receiverUsr = this.getUserById(row.receiver_id);
+          return {
+            id: row.id,
+            senderId: row.sender_id,
+            senderName: senderSp?.fullName || senderUsr?.fullName || 'Student',
+            senderAvatar: senderUsr?.avatarUrl,
+            senderRegNumber: senderSp?.registrationNumber || '',
+            receiverId: row.receiver_id,
+            receiverName: receiverSp?.fullName || receiverUsr?.fullName || 'Student',
+            status: row.status,
+            compatibilityScore: 80,
+            message: row.message || '',
+            note: row.message || '',
+            createdAt: row.created_at,
+            updatedAt: row.updated_at || row.created_at,
+          };
+        });
+      }
+
+      if (Array.isArray(groupRows)) {
         this.groups = groupRows.map((g: any) => {
           const members = (g.group_members || []).map((gm: any) => ({
             userId: gm.user_id,
-            name: gm.profiles?.full_name || 'Student',
+            name: gm.profiles?.full_name || this.getUserById(gm.user_id)?.fullName || 'Student',
             role: gm.user_id === g.leader_id ? 'owner' : (gm.role === 'admin' ? 'admin' : 'member'),
             status: 'active' as const,
             joinedAt: gm.joined_at || g.created_at,
@@ -1216,6 +1455,7 @@ export class SupabaseRepository {
           const adminIds = members
             .filter((m: any) => m.role === 'owner' || m.role === 'admin')
             .map((m: any) => m.userId);
+          const linkedProp = g.target_property_id ? this.getPropertyById(g.target_property_id) : undefined;
           return {
             id: g.id,
             name: g.name,
@@ -1229,10 +1469,52 @@ export class SupabaseRepository {
             members,
             maxCapacity: g.max_members || 4,
             targetPropertyId: g.target_property_id || undefined,
+            targetPropertyName: linkedProp?.title,
+            targetPropertyTitle: linkedProp?.title,
             status: g.is_active === false ? 'closed' : 'active',
-            visibility: 'discoverable',
+            visibility: g.visibility || 'discoverable',
             createdAt: g.created_at,
             updatedAt: g.updated_at || g.created_at,
+          };
+        });
+      }
+
+      if (Array.isArray(joinReqRows)) {
+        this.joinRequests = joinReqRows.map((row: any) => {
+          const sp = this.getStudentProfile(row.student_id);
+          const usr = this.getUserById(row.student_id);
+          return {
+            id: row.id,
+            groupId: row.group_id,
+            userId: row.student_id,
+            userName: sp?.fullName || usr?.fullName || 'Student',
+            userAvatar: usr?.avatarUrl,
+            regNumber: sp?.registrationNumber || '',
+            status: row.status === 'accepted' ? 'approved' : (row.status === 'rejected' ? 'rejected' : 'pending'),
+            requestedAt: row.created_at,
+            reviewedAt: row.updated_at !== row.created_at ? row.updated_at : undefined,
+          };
+        });
+      }
+
+      if (Array.isArray(inviteRows)) {
+        this.invitations = inviteRows.map((row: any) => {
+          const grp = this.getGroupById(row.group_id);
+          const senderSp = this.getStudentProfile(row.invited_by);
+          const senderUsr = this.getUserById(row.invited_by);
+          const recSp = this.getStudentProfile(row.student_id);
+          return {
+            id: row.id,
+            groupId: row.group_id,
+            groupName: grp?.name || 'Accommodation Cohort',
+            senderId: row.invited_by,
+            senderName: senderSp?.fullName || senderUsr?.fullName || 'Group Leader',
+            receiverId: row.student_id,
+            receiverName: recSp?.fullName,
+            receiverRegNumber: recSp?.registrationNumber,
+            status: row.status || 'pending',
+            createdAt: row.created_at,
+            updatedAt: row.updated_at || row.created_at,
           };
         });
       }
@@ -1246,11 +1528,14 @@ export class SupabaseRepository {
           institutionName: studentProf.institution || 'Bayero University Kano',
           university: studentProf.institution || 'Bayero University Kano',
           campus: studentProf.campus || 'New Campus',
+          faculty: studentProf.faculty || undefined,
+          department: studentProf.department || undefined,
           studyLevel: studentProf.study_level || 'Undergraduate (Year 1)',
           programme: userRecord?.programme || '',
           registrationNumber: studentProf.registration_number || '',
           gender: (studentProf.gender === 'female' ? 'Female' : studentProf.gender === 'male' ? 'Male' : 'Other'),
           preferredLocation: userRecord?.preferences?.preferredLocation || 'Dambare',
+          bio: studentProf.bio || undefined,
           isProfileVerified: Boolean(studentProf.is_profile_verified),
         };
         this.studentProfiles = [sp, ...this.studentProfiles.filter((p) => p.userId !== userId)];
@@ -1264,13 +1549,16 @@ export class SupabaseRepository {
           phone: landlordProf.phone || '',
           contactAddress: landlordProf.business_address || '',
           idType: 'National ID (NIN)',
-          idReference: '',
+          idReference: landlordProf.tax_id || '',
           verificationStatus: (landlordProf.verification_status as any) || 'not_started',
           rejectionReason: landlordProf.rejection_reason || undefined,
           verifiedAt: landlordProf.verified_at || undefined,
         };
         this.landlordProfiles = [lp, ...this.landlordProfiles.filter((p) => p.userId !== userId)];
       }
+
+      appEventBus.publish('groupsUpdated', this.groups);
+      appEventBus.publish('roommatesUpdated', this.roommateRequests);
     } catch (err) {
       console.warn('[SupabaseRepository] Session context hydration error:', err);
     }
@@ -1278,6 +1566,7 @@ export class SupabaseRepository {
 
   public clearActiveUserId(): void {
     this.activeUserId = '';
+    this.hydratedUserId = '';
     appEventBus.publish('userChanged', '');
   }
 
@@ -1291,7 +1580,9 @@ export class SupabaseRepository {
     this.messages = {};
     this.conversations = [];
     this.studentDocs = [];
+    this.roommatePreferences = [];
     this.roommateRequests = [];
+    this.groups = [];
     this.invitations = [];
     this.joinRequests = [];
   }
@@ -1370,20 +1661,27 @@ export class SupabaseRepository {
       this.studentProfiles.push(profile);
     }
 
+    const payload: Record<string, any> = {
+      user_id: profile.userId,
+      institution: profile.institutionName || profile.university || 'Bayero University Kano',
+      campus: profile.campus || 'New Campus',
+      study_level: profile.studyLevel || null,
+      gender: profile.gender?.toLowerCase() || 'other',
+    };
+    if (profile.registrationNumber && profile.registrationNumber.trim()) {
+      payload.registration_number = profile.registrationNumber.trim().toUpperCase();
+    }
+    if (profile.faculty !== undefined) payload.faculty = profile.faculty || null;
+    if (profile.department !== undefined) payload.department = profile.department || null;
+    if (profile.bio !== undefined) payload.bio = profile.bio || null;
+
+    if (this.getUserById(this.activeUserId)?.role === 'admin' && profile.isProfileVerified !== undefined) {
+      payload.is_profile_verified = profile.isProfileVerified;
+    }
+
     supabase
       .from('student_profiles')
-      .upsert(
-        {
-          user_id: profile.userId,
-          institution: profile.institutionName || profile.university,
-          campus: profile.campus,
-          study_level: profile.studyLevel,
-          registration_number: profile.registrationNumber,
-          gender: profile.gender?.toLowerCase() || 'other',
-          is_profile_verified: profile.isProfileVerified ?? false,
-        },
-        { onConflict: 'user_id' }
-      )
+      .upsert(payload, { onConflict: 'user_id' })
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] saveStudentProfile warning:', error.message);
       });
@@ -2194,6 +2492,111 @@ export class SupabaseRepository {
       });
   }
 
+  public async updateUnitAvailabilityPersisted(
+    propertyId: string,
+    unitId: string,
+    availableSpaces: number,
+    totalCapacity?: number
+  ): Promise<{ success: boolean; property?: Property; error?: string }> {
+    const nextAvail = Math.max(0, Math.floor(Number(availableSpaces)));
+    const nextCap = totalCapacity !== undefined ? Math.max(1, nextAvail, Math.floor(Number(totalCapacity))) : undefined;
+
+    const { data, error } = await supabase.rpc('update_unit_availability_atomic', {
+      p_property_id: propertyId,
+      p_unit_id: unitId,
+      p_available_spaces: nextAvail,
+      p_capacity: nextCap ?? null,
+    });
+
+    if (error) {
+      const code = String((error as any)?.code || '');
+      const msg = String(error.message || '').toLowerCase();
+      const missingRpc =
+        code === '42883' ||
+        code === 'PGRST202' ||
+        msg.includes('update_unit_availability_atomic') ||
+        msg.includes('could not find the function');
+
+      if (!missingRpc) {
+        return { success: false, error: error.message };
+      }
+
+      const unitPayload: Record<string, any> = {
+        available_spaces: nextAvail,
+        is_active: nextAvail > 0,
+      };
+      if (nextCap !== undefined) unitPayload.capacity = nextCap;
+
+      const { error: unitErr } = await supabase
+        .from('units')
+        .update(unitPayload)
+        .eq('id', unitId)
+        .eq('property_id', propertyId);
+
+      if (unitErr) {
+        return { success: false, error: unitErr.message };
+      }
+    }
+
+    const prop = this.getPropertyById(propertyId);
+    if (prop) {
+      const updatedRooms = (prop.rooms || []).map((room) =>
+        room.id === unitId
+          ? {
+              ...room,
+              availableSpaces: Number((data as any)?.available_spaces ?? nextAvail),
+              totalCapacity: Number((data as any)?.capacity ?? nextCap ?? Math.max(room.totalCapacity, nextAvail)),
+            }
+          : room
+      );
+      const updatedProp: Property = {
+        ...prop,
+        rooms: updatedRooms,
+        availableSpaces: Number(
+          (data as any)?.property_available_spaces ??
+            updatedRooms.reduce((sum, r) => sum + r.availableSpaces, 0)
+        ),
+        totalCapacity: Number(
+          (data as any)?.property_total_spaces ??
+            updatedRooms.reduce((sum, r) => sum + r.totalCapacity, 0)
+        ),
+        updatedAt: new Date().toISOString(),
+      };
+      this.mergePropertiesIntoCache([updatedProp]);
+      return { success: true, property: updatedProp };
+    }
+
+    const refreshed = await this.fetchPropertyByIdOrSlugFromSupabase(propertyId).catch(() => undefined);
+    return { success: true, property: refreshed };
+  }
+
+  public async submitPropertyReportPersisted(params: {
+    propertyId: string;
+    reporterId: string;
+    reason: string;
+    details: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const cleanReason = params.reason.trim();
+    const cleanDetails = params.details.trim();
+    if (!cleanReason || cleanDetails.length < 5) {
+      return { success: false, error: 'Please provide at least 5 characters explaining the issue.' };
+    }
+
+    const { error } = await supabase.from('property_reports').insert({
+      property_id: params.propertyId,
+      reporter_id: params.reporterId,
+      reason: cleanReason,
+      details: cleanDetails,
+      status: 'open',
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  }
+
   // Roommate Preferences & Matching
   public getRoommatePreferences(): RoommatePreference[] {
     return [...this.roommatePreferences];
@@ -2211,22 +2614,15 @@ export class SupabaseRepository {
       this.roommatePreferences.push(pref);
     }
 
+    const dbPayload = this.mapRoommatePrefToDbRow(pref);
     supabase
       .from('roommate_preferences')
-      .upsert({
-        student_id: pref.studentId,
-        budget_min: pref.minBudget,
-        budget_max: pref.maxBudget,
-        preferred_area: pref.preferredNeighbourhoods || [],
-        cleanliness_rating: 5,
-        sleep_habit: pref.sleepSchedule,
-        study_habit: pref.studyHabits,
-        smoking_preference: pref.smoking,
-      })
+      .upsert(dbPayload, { onConflict: 'student_id' })
       .then(({ error }) => {
         if (error) console.warn('[SupabaseRepository] saveRoommatePreference warning:', error.message);
       });
 
+    appEventBus.publish('roommatesUpdated', this.roommateRequests);
     return pref;
   }
 
@@ -2341,7 +2737,7 @@ export class SupabaseRepository {
     return group;
   }
 
-  public syncGroupConversation(group: AccommodationGroup): Conversation {
+  public syncGroupConversation(group: AccommodationGroup, persistDb: boolean = true): Conversation {
     let conv = this.conversations.find((c) => c.groupId === group.id);
     const now = new Date().toISOString();
     const participants: ConversationParticipant[] = group.members.map((m) => {
@@ -2353,19 +2749,72 @@ export class SupabaseRepository {
       };
     });
 
+    const nextTitle = `${group.name} (Cohort)`;
+    const existingConv = Boolean(conv);
+
     if (conv) {
-      conv.title = `${group.name} (Cohort)`;
-      conv.name = `${group.name} (Cohort)`;
+      const prevIds = new Set(conv.participantIds);
+      const nextIds = new Set(group.memberIds);
+      const removedIds = conv.participantIds.filter((uid) => !nextIds.has(uid));
+      const addedIds = group.memberIds.filter((uid) => !prevIds.has(uid));
+
+      conv.title = nextTitle;
+      conv.name = nextTitle;
       conv.participantIds = [...group.memberIds];
       conv.participants = participants;
       conv.updatedAt = now;
+
+      if (persistDb) {
+        const convId = conv.id;
+        supabase
+          .from('conversations')
+          .upsert(
+            {
+              id: convId,
+              type: 'group',
+              title: nextTitle,
+              group_id: group.id,
+              updated_at: now,
+            },
+            { onConflict: 'id' }
+          )
+          .then(async ({ error }) => {
+            if (error) {
+              console.warn('[SupabaseRepository] syncGroupConversation upsert warning:', error.message);
+              return;
+            }
+            const orderedEnsureIds = [
+              group.leaderId,
+              ...(addedIds.length > 0 ? addedIds : group.memberIds).filter((uid) => uid !== group.leaderId),
+            ].filter(Boolean);
+            for (const uid of orderedEnsureIds) {
+              const { error: partErr } = await supabase
+                .from('conversation_participants')
+                .upsert({ conversation_id: convId, user_id: uid }, { onConflict: 'conversation_id,user_id' });
+              if (partErr) {
+                console.warn('[SupabaseRepository] syncGroupConversation add participant warning:', partErr.message);
+              }
+            }
+          });
+
+        for (const uid of removedIds) {
+          supabase
+            .from('conversation_participants')
+            .delete()
+            .eq('conversation_id', convId)
+            .eq('user_id', uid)
+            .then(({ error }) => {
+              if (error) console.warn('[SupabaseRepository] syncGroupConversation remove participant warning:', error.message);
+            });
+        }
+      }
     } else {
       conv = {
         id: crypto.randomUUID(),
         type: 'group',
         groupId: group.id,
-        title: `${group.name} (Cohort)`,
-        name: `${group.name} (Cohort)`,
+        title: nextTitle,
+        name: nextTitle,
         participantIds: [...group.memberIds],
         participants,
         createdBy: group.leaderId,
@@ -2375,31 +2824,38 @@ export class SupabaseRepository {
       };
       this.conversations.unshift(conv);
 
-      supabase
-        .from('conversations')
-        .insert({
-          id: conv.id,
-          type: 'group',
-          title: conv.title,
-          group_id: group.id,
-        })
-        .then(async ({ error }) => {
-          if (!error && conv) {
-            // Insert group leader (auth.uid()) first so RLS is_conversation_participant passes for peer rows
-            const orderedIds = [
-              group.leaderId,
-              ...conv.participantIds.filter((uid) => uid !== group.leaderId),
-            ].filter(Boolean);
-            for (const uid of orderedIds) {
-              await supabase
-                .from('conversation_participants')
-                .upsert({ conversation_id: conv.id, user_id: uid }, { onConflict: 'conversation_id,user_id' });
+      if (persistDb) {
+        supabase
+          .from('conversations')
+          .upsert(
+            {
+              id: conv.id,
+              type: 'group',
+              title: conv.title,
+              group_id: group.id,
+            },
+            { onConflict: 'id' }
+          )
+          .then(async ({ error }) => {
+            if (!error && conv) {
+              // Insert group leader (auth.uid()) first so RLS is_conversation_participant passes for peer rows
+              const orderedIds = [
+                group.leaderId,
+                ...conv.participantIds.filter((uid) => uid !== group.leaderId),
+              ].filter(Boolean);
+              for (const uid of orderedIds) {
+                await supabase
+                  .from('conversation_participants')
+                  .upsert({ conversation_id: conv.id, user_id: uid }, { onConflict: 'conversation_id,user_id' });
+              }
             }
-          }
-        });
+          });
+      }
     }
 
-    appEventBus.publish('conversationsUpdated', this.conversations);
+    if (!existingConv || persistDb) {
+      appEventBus.publish('conversationsUpdated', this.conversations);
+    }
     return conv;
   }
 
@@ -2412,7 +2868,8 @@ export class SupabaseRepository {
     visibility: 'discoverable' | 'invite_only' | 'request_required' = 'discoverable'
   ): AccommodationGroup {
     const leaderProfile = this.getStudentProfile(leaderId);
-    const leaderName = leaderProfile?.fullName || 'Group Leader';
+    const leaderName = leaderProfile?.fullName || this.getUserById(leaderId)?.fullName || 'Group Leader';
+    const targetProp = targetPropertyId ? this.getPropertyById(targetPropertyId) : undefined;
     const now = new Date().toISOString();
 
     const group: AccommodationGroup = {
@@ -2436,12 +2893,16 @@ export class SupabaseRepository {
       ],
       maxCapacity,
       targetPropertyId,
+      targetPropertyName: targetProp?.title,
+      targetPropertyTitle: targetProp?.title,
       status: 'active',
       visibility,
       createdAt: now,
       updatedAt: now,
     };
     this.groups.unshift(group);
+    this.syncGroupConversation(group, false);
+    appEventBus.publish('groupsUpdated', this.groups);
 
     supabase
       .from('accommodation_groups')
@@ -2450,10 +2911,11 @@ export class SupabaseRepository {
         name: group.name,
         description: group.description,
         leader_id: leaderId,
-        budget_per_member: 250000,
-        target_area: 'Dambare',
+        budget_per_member: Math.max(1, targetProp?.pricePerSession || 250000),
+        target_area: targetProp?.neighbourhood || 'Dambare',
         target_property_id: targetPropertyId || null,
         max_members: group.maxCapacity,
+        visibility,
       })
       .then(async ({ error }) => {
         if (error) {
@@ -2463,7 +2925,7 @@ export class SupabaseRepository {
         await supabase
           .from('group_members')
           .upsert({ group_id: group.id, user_id: leaderId, role: 'admin' }, { onConflict: 'group_id,user_id' });
-        this.syncGroupConversation(group);
+        this.syncGroupConversation(group, true);
       });
 
     return group;
@@ -2486,6 +2948,16 @@ export class SupabaseRepository {
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
     this.syncGroupConversation(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('accommodation_groups')
+      .update({ name: trimmed, updated_at: group.updatedAt })
+      .eq('id', groupId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] renameGroup warning:', error.message);
+      });
+
     return { success: true, group };
   }
 
@@ -2511,6 +2983,17 @@ export class SupabaseRepository {
 
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_members')
+      .update({ role: 'admin' })
+      .eq('group_id', groupId)
+      .eq('user_id', targetUserId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] promoteMemberToAdmin warning:', error.message);
+      });
+
     return { success: true };
   }
 
@@ -2534,6 +3017,17 @@ export class SupabaseRepository {
 
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_members')
+      .update({ role: 'member' })
+      .eq('group_id', groupId)
+      .eq('user_id', targetUserId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] demoteAdmin warning:', error.message);
+      });
+
     return { success: true };
   }
 
@@ -2557,6 +3051,17 @@ export class SupabaseRepository {
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
     this.syncGroupConversation(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_members')
+      .delete()
+      .eq('group_id', groupId)
+      .eq('user_id', targetUserId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] removeMember warning:', error.message);
+      });
+
     return { success: true };
   }
 
@@ -2567,11 +3072,16 @@ export class SupabaseRepository {
       return { success: false, error: 'You are not a member of this group.' };
     }
 
+    let nextLeaderId: string | null = null;
     if (group.leaderId === userId && group.memberIds.length > 1) {
-      const nextLeader = group.memberIds.find((id) => id !== userId)!;
-      group.leaderId = nextLeader;
-      if (!group.adminIds?.includes(nextLeader)) {
-        group.adminIds = [...(group.adminIds || []), nextLeader];
+      nextLeaderId = group.memberIds.find((id) => id !== userId) || null;
+      if (nextLeaderId) {
+        group.leaderId = nextLeaderId;
+        if (!group.adminIds?.includes(nextLeaderId)) {
+          group.adminIds = [...(group.adminIds || []), nextLeaderId];
+        }
+        const nextMember = group.members.find((m) => m.userId === nextLeaderId);
+        if (nextMember) nextMember.role = 'owner';
       }
     }
 
@@ -2581,6 +3091,32 @@ export class SupabaseRepository {
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
     this.syncGroupConversation(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    (async () => {
+      try {
+        if (nextLeaderId) {
+          await supabase
+            .from('group_members')
+            .update({ role: 'admin' })
+            .eq('group_id', groupId)
+            .eq('user_id', nextLeaderId);
+          await supabase
+            .from('accommodation_groups')
+            .update({ leader_id: nextLeaderId, updated_at: group.updatedAt })
+            .eq('id', groupId);
+        }
+        const { error } = await supabase
+          .from('group_members')
+          .delete()
+          .eq('group_id', groupId)
+          .eq('user_id', userId);
+        if (error) console.warn('[SupabaseRepository] leaveGroup warning:', error.message);
+      } catch (err: any) {
+        console.warn('[SupabaseRepository] leaveGroup error:', err?.message || err);
+      }
+    })();
+
     return { success: true };
   }
 
@@ -2600,9 +3136,10 @@ export class SupabaseRepository {
       return this.requestToJoinGroup(groupId, userId);
     }
     const user = this.getUserById(userId);
+    const sp = this.getStudentProfile(userId);
     group.members.push({
       userId,
-      name: user?.fullName || 'Member',
+      name: sp?.fullName || user?.fullName || 'Member',
       role: 'member',
       status: 'active',
       joinedAt: new Date().toISOString(),
@@ -2611,6 +3148,15 @@ export class SupabaseRepository {
     group.updatedAt = new Date().toISOString();
     this.updateGroup(group);
     this.syncGroupConversation(group);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_members')
+      .upsert({ group_id: groupId, user_id: userId, role: 'member' }, { onConflict: 'group_id,user_id' })
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] joinGroup warning:', error.message);
+      });
+
     return { success: true };
   }
 
@@ -2620,6 +3166,12 @@ export class SupabaseRepository {
   ): { success: boolean; error?: string; pendingApproval?: boolean } {
     const group = this.getGroupById(groupId);
     if (!group) return { success: false, error: 'Group not found.' };
+    const existingPending = this.joinRequests.find(
+      (r) => r.groupId === groupId && r.userId === userId && r.status === 'pending'
+    );
+    if (existingPending) {
+      return { success: true, pendingApproval: true };
+    }
     const user = this.getUserById(userId);
     const student = this.getStudentProfile(userId);
     const req: GroupJoinRequest = {
@@ -2632,6 +3184,23 @@ export class SupabaseRepository {
       requestedAt: new Date().toISOString(),
     };
     this.joinRequests.unshift(req);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_join_requests')
+      .upsert(
+        {
+          id: req.id,
+          group_id: groupId,
+          student_id: userId,
+          status: 'pending',
+        },
+        { onConflict: 'group_id,student_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] requestToJoinGroup warning:', error.message);
+      });
+
     return { success: true, pendingApproval: true };
   }
 
@@ -2651,9 +3220,42 @@ export class SupabaseRepository {
     req.status = action === 'approve' ? 'approved' : 'rejected';
     req.reviewedAt = new Date().toISOString();
     req.reviewedBy = actorId;
+
+    const dbStatus = action === 'approve' ? 'accepted' : 'rejected';
+    supabase
+      .from('group_join_requests')
+      .update({ status: dbStatus, updated_at: req.reviewedAt })
+      .eq('id', requestId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] respondToJoinRequest warning:', error.message);
+      });
+
     if (action === 'approve' && !group.memberIds.includes(req.userId)) {
-      this.joinGroup(req.groupId, req.userId);
+      if (group.memberIds.length >= group.maxCapacity) {
+        return { success: false, error: 'This group has reached its maximum capacity.' };
+      }
+      const user = this.getUserById(req.userId);
+      const sp = this.getStudentProfile(req.userId);
+      group.members.push({
+        userId: req.userId,
+        name: sp?.fullName || user?.fullName || req.userName || 'Member',
+        role: 'member',
+        status: 'active',
+        joinedAt: new Date().toISOString(),
+      });
+      group.memberIds.push(req.userId);
+      group.updatedAt = new Date().toISOString();
+      this.updateGroup(group);
+      this.syncGroupConversation(group);
+      supabase
+        .from('group_members')
+        .upsert({ group_id: group.id, user_id: req.userId, role: 'member' }, { onConflict: 'group_id,user_id' })
+        .then(({ error }) => {
+          if (error) console.warn('[SupabaseRepository] respondToJoinRequest member insert warning:', error.message);
+        });
     }
+
+    appEventBus.publish('groupsUpdated', this.groups);
     return { success: true };
   }
 
@@ -2676,12 +3278,30 @@ export class SupabaseRepository {
       groupId,
       groupName: group.name,
       senderId,
-      senderName: sender?.fullName || 'Group Leader',
+      senderName: sender?.fullName || this.getUserById(senderId)?.fullName || 'Group Leader',
       receiverId,
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
     this.invitations.unshift(inv);
+    appEventBus.publish('groupsUpdated', this.groups);
+
+    supabase
+      .from('group_invitations')
+      .upsert(
+        {
+          id: inv.id,
+          group_id: groupId,
+          invited_by: senderId,
+          student_id: receiverId,
+          status: 'pending',
+        },
+        { onConflict: 'group_id,student_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] inviteStudentToGroup warning:', error.message);
+      });
+
     return { success: true };
   }
 
@@ -2693,9 +3313,41 @@ export class SupabaseRepository {
     const inv = this.invitations.find((i) => i.id === inviteId);
     if (!inv) return false;
     inv.status = action === 'accept' ? 'accepted' : 'rejected';
+
+    supabase
+      .from('group_invitations')
+      .update({ status: inv.status, updated_at: new Date().toISOString() })
+      .eq('id', inviteId)
+      .then(({ error }) => {
+        if (error) console.warn('[SupabaseRepository] respondToGroupInvitation warning:', error.message);
+      });
+
     if (action === 'accept') {
-      this.joinGroup(inv.groupId, inv.receiverId);
+      const group = this.getGroupById(inv.groupId);
+      if (group && !group.memberIds.includes(inv.receiverId) && group.memberIds.length < group.maxCapacity) {
+        const user = this.getUserById(inv.receiverId);
+        const sp = this.getStudentProfile(inv.receiverId);
+        group.members.push({
+          userId: inv.receiverId,
+          name: sp?.fullName || user?.fullName || 'Member',
+          role: 'member',
+          status: 'active',
+          joinedAt: new Date().toISOString(),
+        });
+        group.memberIds.push(inv.receiverId);
+        group.updatedAt = new Date().toISOString();
+        this.updateGroup(group);
+        this.syncGroupConversation(group);
+        supabase
+          .from('group_members')
+          .upsert({ group_id: group.id, user_id: inv.receiverId, role: 'member' }, { onConflict: 'group_id,user_id' })
+          .then(({ error }) => {
+            if (error) console.warn('[SupabaseRepository] respondToGroupInvitation member insert warning:', error.message);
+          });
+      }
     }
+
+    appEventBus.publish('groupsUpdated', this.groups);
     return true;
   }
 
@@ -3645,7 +4297,11 @@ export class SupabaseRepository {
 
       const { error: updErr } = await supabase
         .from('reservations')
-        .update({ status: 'cancelled', notes: reason?.trim() || null, updated_at: new Date().toISOString() })
+        .update({
+          status: 'cancelled',
+          cancellation_reason: reason?.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', reservationId);
       if (updErr) {
         return { success: false, message: updErr.message };
@@ -4007,7 +4663,10 @@ export class SupabaseRepository {
       if (res) res.status = 'confirmed';
       if (inv) inv.status = 'paid';
     } else {
-      if (res) res.status = 'pending_payment';
+      if (res) {
+        res.status = 'rejected';
+        res.cancellationReason = rejectionReason;
+      }
       if (inv) inv.status = 'unpaid';
     }
 

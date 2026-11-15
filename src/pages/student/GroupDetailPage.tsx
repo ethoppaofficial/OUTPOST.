@@ -28,6 +28,7 @@ import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
 import { groupChatService } from '../../application/services/groupChatService';
 import { chatService } from '../../application/services/chatService';
+import { appEventBus } from '../../infrastructure/events/eventBus';
 import { AccommodationGroup, GroupMemberRecord, GroupJoinRequest, StudentProfile } from '../../domain/types';
 import { Badge, VerificationBadge, VerificationTick } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
@@ -85,6 +86,7 @@ export const GroupDetailPage: React.FC = () => {
 
   useEffect(() => {
     refreshGroup();
+    return appEventBus.subscribe('groupsUpdated', refreshGroup);
   }, [groupId, location.pathname, activeUserId]);
 
   // Handle direct chat redirect if /chat accessed

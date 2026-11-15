@@ -12,25 +12,107 @@
  * - Displays error messaging for invalid credentials, unverified accounts, or network timeouts.
  */
 
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { LogIn, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
+import { supabase } from '../../infrastructure/supabase/supabaseClient';
+import { repository } from '../../infrastructure/repositories';
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { signInWithGoogle, connected, authUser, signInWithEmail, profileStatus, profileError, signOut } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const confirmationSignOutPendingRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(location.search || window.location.search || '');
+    const hashStr = window.location.hash || '';
+    const hashParams = new URLSearchParams(hashStr.replace(/^#/, ''));
+    const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
+
+    const isConfirmationArrival =
+      searchParams.get('confirmed') === '1' ||
+      flowType === 'signup' ||
+      flowType === 'email';
+
+    if (!isConfirmationArrival) return;
+
+    const authErrorCode =
+      hashParams.get('error_code') ||
+      searchParams.get('error_code') ||
+      hashParams.get('error') ||
+      searchParams.get('error');
+    const authErrorDesc =
+      hashParams.get('error_description') || searchParams.get('error_description');
+
+    if (authErrorCode || authErrorDesc || hashStr.includes('otp_expired')) {
+      confirmationSignOutPendingRef.current = false;
+      setConfirmationMessage(null);
+      setError(
+        authErrorDesc
+          ? authErrorDesc.replace(/\+/g, ' ')
+          : 'Your email confirmation link is invalid or has expired. Enter your email below and resend confirmation, or sign in if already confirmed.'
+      );
+      window.history.replaceState({}, '', '/login');
+      return;
+    }
+
+    confirmationSignOutPendingRef.current = true;
+    setError(null);
+    setConfirmationMessage(
+      'Your email address has been confirmed! Sign in below using the email and password you provided during registration.'
+    );
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // Wait for Supabase client to settle any URL token/PKCE confirmation callback first
+        await supabase.auth.getSession();
+        if (!cancelled && confirmationSignOutPendingRef.current) {
+          await supabase.auth.signOut({ scope: 'local' });
+          repository.clearActiveSession();
+          confirmationSignOutPendingRef.current = false;
+        }
+      } catch {
+        // Non-fatal cleanup
+      } finally {
+        if (!cancelled && (window.location.search || window.location.hash)) {
+          window.history.replaceState({}, '', '/login');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.search]);
+
+  useEffect(() => {
+    if (confirmationSignOutPendingRef.current && authUser) {
+      confirmationSignOutPendingRef.current = false;
+      void supabase.auth.signOut({ scope: 'local' }).then(() => {
+        repository.clearActiveSession();
+      });
+    }
+  }, [authUser]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    confirmationSignOutPendingRef.current = false;
     setError(null);
+    setResendStatus(null);
     setSubmitting(true);
 
     try {
@@ -84,6 +166,15 @@ export const LoginPage: React.FC = () => {
 
       {/* Login Card */}
       <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xl space-y-5">
+        {confirmationMessage && (
+          <div
+            role="status"
+            className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-start gap-2.5"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+            <span>{confirmationMessage}</span>
+          </div>
+        )}
         {profileStatus === 'profile_error' && authUser && (
           <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-start justify-between gap-2">
             <div className="flex items-start gap-2">
@@ -143,9 +234,42 @@ export const LoginPage: React.FC = () => {
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>{error}</span>
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+              {(error.toLowerCase().includes('not been confirmed') ||
+                error.toLowerCase().includes('email not confirmed') ||
+                error.toLowerCase().includes('expired') ||
+                error.toLowerCase().includes('confirmation link')) && (
+                <div className="pl-6">
+                  <button
+                    type="button"
+                    disabled={resending}
+                    onClick={async () => {
+                      setResending(true);
+                      setResendStatus(null);
+                      const res = await authService.resendVerificationEmail(email);
+                      setResendStatus(
+                        res.success
+                          ? 'A new confirmation link has been sent to your email.'
+                          : res.error || 'Could not resend confirmation email.'
+                      );
+                      setResending(false);
+                    }}
+                    className="font-semibold text-emerald-700 dark:text-emerald-300 underline hover:no-underline disabled:opacity-50"
+                  >
+                    {resending ? 'Sending confirmation link…' : 'Resend confirmation email'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {resendStatus && (
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200">
+              {resendStatus}
             </div>
           )}
 

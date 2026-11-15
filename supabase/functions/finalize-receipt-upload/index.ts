@@ -98,6 +98,16 @@ serve(async (req) => {
       });
     }
 
+    if (reservation.status !== 'pending_payment' && reservation.status !== 'payment_submitted') {
+      return new Response(
+        JSON.stringify({ error: `Cannot finalize receipt for a ${reservation.status} reservation` }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     const numericAmount = amountPaid !== undefined && amountPaid !== null ? Number(amountPaid) : Number(reservation.amount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       return new Response(JSON.stringify({ error: 'amountPaid must be a positive number' }), {

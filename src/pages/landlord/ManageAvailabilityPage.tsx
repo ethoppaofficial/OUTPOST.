@@ -30,7 +30,9 @@ export const ManageAvailabilityPage: React.FC = () => {
       .filter((r) => r.propertyId === propertyId)
   );
   const [loading, setLoading] = useState(!property);
+  const [updatingRoomId, setUpdatingRoomId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const loadAvailability = useCallback(async () => {
     if (!propertyId) {
@@ -69,32 +71,36 @@ export const ManageAvailabilityPage: React.FC = () => {
     return <div className="text-center py-12 text-slate-500">Property not found.</div>;
   }
 
-  const handleUpdateCapacity = (roomId: string, change: number) => {
-    const updatedRooms = property.rooms.map((room) => {
-      if (room.id === roomId) {
-        const nextAvail = Math.max(0, room.availableSpaces + change);
-        return {
-          ...room,
-          availableSpaces: nextAvail,
-          totalCapacity: Math.max(nextAvail, room.totalCapacity + change),
-        };
+  const handleUpdateCapacity = async (roomId: string, change: number) => {
+    const targetRoom = property.rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+
+    const nextAvail = Math.max(0, targetRoom.availableSpaces + change);
+    const nextCap = Math.max(1, nextAvail, targetRoom.totalCapacity + change);
+
+    setUpdatingRoomId(roomId);
+    setErrorMsg(null);
+    setMessage(null);
+    try {
+      const res = await propertyService.updateUnitAvailabilityPersisted(
+        property.id,
+        roomId,
+        nextAvail,
+        nextCap
+      );
+      if (!res.success) {
+        setErrorMsg(res.error || 'Could not update unit availability.');
+        return;
       }
-      return room;
-    });
-
-    const newTotalAvail = updatedRooms.reduce((acc, r) => acc + r.availableSpaces, 0);
-    const newTotalCap = updatedRooms.reduce((acc, r) => acc + r.totalCapacity, 0);
-
-    const updated = propertyService.updateProperty(property.id, {
-      rooms: updatedRooms,
-      availableSpaces: newTotalAvail,
-      totalCapacity: newTotalCap,
-    });
-
-    if (updated) {
-      setProperty(updated);
+      if (res.property) {
+        setProperty(res.property);
+      }
       setMessage('Inventory spaces updated successfully.');
       setTimeout(() => setMessage(null), 3000);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Could not update unit availability.');
+    } finally {
+      setUpdatingRoomId(null);
     }
   };
 
@@ -129,6 +135,12 @@ export const ManageAvailabilityPage: React.FC = () => {
         </p>
       </div>
 
+      {errorMsg && (
+        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs">
+          {errorMsg}
+        </div>
+      )}
+
       {message && (
         <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 text-xs">
           {message}
@@ -159,16 +171,19 @@ export const ManageAvailabilityPage: React.FC = () => {
 
               <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                 <button
-                  onClick={() => handleUpdateCapacity(room.id, -1)}
-                  disabled={room.availableSpaces <= 0}
+                  type="button"
+                  onClick={() => void handleUpdateCapacity(room.id, -1)}
+                  disabled={room.availableSpaces <= 0 || updatingRoomId === room.id}
                   className="p-1.5 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-40"
                   aria-label="Decrease space"
                 >
                   <Minus className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => handleUpdateCapacity(room.id, 1)}
-                  className="p-1.5 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                  type="button"
+                  onClick={() => void handleUpdateCapacity(room.id, 1)}
+                  disabled={updatingRoomId === room.id}
+                  className="p-1.5 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-40"
                   aria-label="Increase space"
                 >
                   <Plus className="w-4 h-4" />

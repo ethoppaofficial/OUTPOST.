@@ -78,12 +78,29 @@ class AuthService {
       if (!error && data?.user) {
         sbUser = data.user;
       } else {
+        const rawMsg = error?.message || 'Invalid email or password.';
+        if (rawMsg.toLowerCase().includes('email not confirmed')) {
+          return {
+            success: false,
+            error: 'Your email address has not been confirmed yet. Please click the confirmation link sent to your email before signing in.',
+          };
+        }
         // Do NOT fall back to local/seed records without credential verification.
-        return { success: false, error: error?.message || 'Invalid email or password.' };
+        return { success: false, error: rawMsg };
       }
 
       const userId = sbUser.id;
       repository.setActiveUserId(userId);
+
+      // Sync registration metadata captured prior to email confirmation if companion fields are blank
+      const meta = sbUser.user_metadata || {};
+      if (meta.phone && sbUser.email_confirmed_at) {
+        await supabase
+          .from('profiles')
+          .update({ phone: String(meta.phone).trim() })
+          .eq('id', userId)
+          .is('phone', null);
+      }
 
       // Fetch user profile from Supabase profiles table with bounded retries
       let profile: any = null;
@@ -135,6 +152,25 @@ class AuthService {
         return { success: false, error: 'Administrator account is not active.' };
       }
 
+      if (validRole === 'landlord' && (meta.company_name || meta.business_address || meta.tax_id)) {
+        const { data: existingLp } = await supabase
+          .from('landlord_profiles')
+          .select('company_name, business_address, tax_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (existingLp && (!existingLp.company_name || !existingLp.business_address || !existingLp.tax_id)) {
+          await supabase
+            .from('landlord_profiles')
+            .update({
+              company_name: existingLp.company_name || meta.company_name || profile.full_name,
+              business_address: existingLp.business_address || meta.business_address || null,
+              tax_id: existingLp.tax_id || meta.tax_id || null,
+            })
+            .eq('user_id', userId);
+        }
+      }
+
       const existing = repository.getUserById(userId);
       const authenticatedUser: User = {
         ...(existing || {
@@ -151,9 +187,10 @@ class AuthService {
         emailVerified: Boolean(sbUser.email_confirmed_at),
         fullName: profile.full_name || sbUser.user_metadata?.full_name || '',
         avatarUrl: profile.avatar_url || sbUser.user_metadata?.avatar_url || '',
+        phone: profile.phone || meta.phone || existing?.phone,
       };
 
-      repository.createUser(authenticatedUser);
+      repository.cacheUser(authenticatedUser);
       return { success: true, user: authenticatedUser };
     } catch (err: any) {
       return { success: false, error: err.message || 'Authentication failed.' };
@@ -246,10 +283,15 @@ class AuthService {
     }
 
     try {
+      const emailRedirectTo = typeof window !== 'undefined'
+        ? `${window.location.origin}/login?confirmed=1`
+        : undefined;
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: emailNorm,
         password: data.password,
         options: {
+          emailRedirectTo,
           data: {
             full_name: data.fullName.trim(),
             role: 'student',
@@ -258,6 +300,7 @@ class AuthService {
             university: data.university,
             campus: data.campus,
             study_level: data.studyLevel,
+            programme: data.programme.trim(),
             gender: data.gender?.toLowerCase() || 'other',
           },
         },
@@ -388,14 +431,22 @@ class AuthService {
     }
 
     try {
+      const emailRedirectTo = typeof window !== 'undefined'
+        ? `${window.location.origin}/login?confirmed=1`
+        : undefined;
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: emailNorm,
         password: data.password,
         options: {
+          emailRedirectTo,
           data: {
             full_name: data.legalName.trim(),
             role: 'landlord',
             phone: data.phone.trim(),
+            company_name: data.businessName?.trim() || data.legalName.trim(),
+            business_address: data.contactAddress.trim(),
+            tax_id: data.idReference.trim(),
           },
         },
       });
@@ -547,13 +598,22 @@ class AuthService {
     }
   }
 
-  public async resendVerificationEmail(): Promise<{ success: boolean; error?: string }> {
+  public async resendVerificationEmail(emailOverride?: string): Promise<{ success: boolean; error?: string }> {
     const user = this.getCurrentUser();
-    if (!user || !user.email) {
-      return { success: false, error: 'No active user session.' };
+    const targetEmail = (emailOverride || user?.email || '').trim().toLowerCase();
+    if (!targetEmail) {
+      return { success: false, error: 'Enter your registered email address first.' };
     }
     try {
-      const { error } = await supabase.auth.resend({ type: 'signup', email: user.email });
+      const emailRedirectTo = typeof window !== 'undefined'
+        ? `${window.location.origin}/login?confirmed=1`
+        : undefined;
+
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: targetEmail,
+        options: emailRedirectTo ? { emailRedirectTo } : undefined,
+      });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (err: any) {

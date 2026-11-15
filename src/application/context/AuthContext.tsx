@@ -221,7 +221,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           landlordProfile: resolvedLandlordProfile || undefined,
         };
 
-        repository.createUser(resolvedUser);
+        if (typeof (repository as any).cacheUser === 'function') {
+          (repository as any).cacheUser(resolvedUser);
+        } else {
+          repository.createUser(resolvedUser);
+        }
         repository.setActiveUserId(user.id);
         setCurrentUser(resolvedUser);
         setLandlordProfile(resolvedLandlordProfile);
