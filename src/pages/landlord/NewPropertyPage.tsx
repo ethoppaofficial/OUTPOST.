@@ -13,15 +13,14 @@
 
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Search, Navigation, AlertTriangle, MapPin, Loader2, X, Compass, Shield } from 'lucide-react';
+import { Building2, Plus, ArrowLeft, CheckCircle2, AlertCircle, Navigation, AlertTriangle, MapPin, Loader2, Compass, Shield } from 'lucide-react';
 import { useAuth } from '../../application/context/AuthContext';
 import { propertyService } from '../../application/services/propertyService';
 import { LandlordPinPicker } from '../../components/map/LandlordPinPicker';
 import { LandlordPinPlacementMapModal, PinLocationValue } from '../../components/map/LandlordPinPlacementMapModal';
 import { PropertyImageCaptureUpload } from '../../components/property/PropertyImageCaptureUpload';
-import { HousingArea, LocationPrecision, PropertyLocation, GeocodingSuggestion } from '../../domain/types';
+import { HousingArea, LocationPrecision, PropertyLocation } from '../../domain/types';
 import { AREA_CENTERS, encodeGeohash, computePublicCoordinates } from '../../domain/geoUtils';
-import { searchAddress, resultMentionsArea, getPrecisionLabel } from '../../application/services/geocodingService';
 import { requestCurrentDevicePosition, GeolocationErrorResult } from '../../application/services/geolocationService';
 import { appConfig } from '../../infrastructure/config/appConfig';
 
@@ -87,19 +86,17 @@ export const NewPropertyPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Address geocoding states
-  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  const [addressSuggestions, setAddressSuggestions] = useState<GeocodingSuggestion[]>([]);
-  const [geocodingWarning, setGeocodingWarning] = useState<string | null>(null);
-  const [geocodingSuccess, setGeocodingSuccess] = useState<string | null>(null);
-
   // Private property-point device location capture states
   const [isCapturingDeviceLocation, setIsCapturingDeviceLocation] = useState(false);
   const [deviceLocationCaptured, setDeviceLocationCaptured] = useState(false);
   const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
+  const [deviceLocationWarning, setDeviceLocationWarning] = useState<string | null>(null);
+  const [deviceLocationSuccess, setDeviceLocationSuccess] = useState<string | null>(null);
 
   const handleCaptureDeviceLocation = async () => {
     setDeviceLocationError(null);
+    setDeviceLocationWarning(null);
+    setDeviceLocationSuccess(null);
     setIsCapturingDeviceLocation(true);
 
     try {
@@ -121,11 +118,11 @@ export const NewPropertyPage: React.FC = () => {
         throw new Error('Device coordinates received are invalid or out of range.');
       }
 
-      // Check case-study boundary: Danbare and Rimin Gata around Kano
+      // Check Kano housing area boundary: Danbare and Rimin Gata around Kano
       // Latitudes around Kano: ~11.8 to 12.2, Longitudes: ~8.3 to 8.6
       const isWithinKanoCorridor = lat >= 11.8 && lat <= 12.2 && lon >= 8.3 && lon <= 8.6;
       if (!isWithinKanoCorridor) {
-        setGeocodingWarning(
+        setDeviceLocationWarning(
           `Notice: Your current device coordinates (${lat.toFixed(4)}, ${lon.toFixed(4)}) appear to be outside the BUK New Site (Dambare/Rimin Gata) corridor. Please confirm your physical property location.`
         );
       }
@@ -145,7 +142,7 @@ export const NewPropertyPage: React.FC = () => {
 
       setHasCustomCoordinates(true);
       setDeviceLocationCaptured(true);
-      setGeocodingSuccess(
+      setDeviceLocationSuccess(
         `Property location captured successfully from your device (GPS accuracy: ~${Math.round(position.accuracyMeters || 10)}m). This point will be stored privately and used only for approximate nearby search after administrator verification.`
       );
     } catch (err: any) {
@@ -156,61 +153,6 @@ export const NewPropertyPage: React.FC = () => {
     } finally {
       setIsCapturingDeviceLocation(false);
     }
-  };
-
-  const handleSearchAddress = async () => {
-    if (!address.trim()) {
-      setError('Please type a property address to search.');
-      return;
-    }
-    setIsSearchingAddress(true);
-    setError(null);
-    setGeocodingWarning(null);
-    try {
-      const results = await searchAddress(address, locationData.area);
-      setAddressSuggestions(results);
-      if (results.length === 0) {
-        setGeocodingWarning(
-          `No matching geocoding results found in ${locationData.area}. Please refine the address text or place the pin manually on the map.`
-        );
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Address search failed. Please try again.');
-    } finally {
-      setIsSearchingAddress(false);
-    }
-  };
-
-  const handleSelectSuggestion = (suggestion: GeocodingSuggestion) => {
-    const [longitude, latitude] = suggestion.center;
-
-    if (!resultMentionsArea(suggestion, locationData.area)) {
-      setGeocodingWarning(
-        `Notice: Selected result (${suggestion.placeName}) may be outside ${locationData.area}. Please verify or adjust the marker to the building.`
-      );
-    } else {
-      setGeocodingWarning(null);
-    }
-
-    const precisionInfo = getPrecisionLabel(suggestion.placeType);
-    const pub = computePublicCoordinates(latitude, longitude, precisionInfo.precision, locationData.area);
-
-    setLocationData({
-      area: locationData.area,
-      latitude,
-      longitude,
-      geohash: encodeGeohash(latitude, longitude),
-      precision: precisionInfo.precision,
-      publicLatitude: pub.publicLatitude,
-      publicLongitude: pub.publicLongitude,
-      publicLocationLabel: pub.publicLocationLabel,
-    });
-
-    setHasCustomCoordinates(true);
-    setAddress(suggestion.placeName);
-    setAddressSuggestions([]);
-    setGeocodingSuccess(`Marker positioned at: ${suggestion.placeName}`);
-    setTimeout(() => setGeocodingSuccess(null), 4000);
   };
 
   const availableAmenities = [
@@ -444,17 +386,17 @@ export const NewPropertyPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Case Study Area & Typed Address Geocoding */}
+          {/* Housing Area & Property Address */}
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white pb-1 border-b border-slate-200 dark:border-slate-700">
               <MapPin className="w-4 h-4 text-emerald-600" />
-              <span>Property Location & Address Geocoding</span>
+              <span>Property Area & Address</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
-                  Select Case-Study Area
+                  Select Housing Area
                 </label>
                 <select
                   value={locationData.area}
@@ -485,81 +427,16 @@ export const NewPropertyPage: React.FC = () => {
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
                   Full Property Address
                 </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="e.g. Plot 18, Dambare Off-Campus Layout, Gwarzo Road"
-                    className="flex-1 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSearchAddress}
-                    disabled={isSearchingAddress}
-                    className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer flex-shrink-0"
-                  >
-                    {isSearchingAddress ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5" />
-                    )}
-                    <span>Search Address</span>
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  required
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="e.g. Plot 18, Dambare Layout, Gwarzo Road"
+                  className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200"
+                />
               </div>
             </div>
-
-            {/* Geocoding Warning or Success */}
-            {geocodingWarning && (
-              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                <span>{geocodingWarning}</span>
-              </div>
-            )}
-
-            {geocodingSuccess && (
-              <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                <span>{geocodingSuccess}</span>
-              </div>
-            )}
-
-            {/* Search Results Suggestion List */}
-            {addressSuggestions.length > 0 && (
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
-                <div className="px-3 py-2 bg-slate-100/70 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex justify-between items-center">
-                  <span>Search results ({addressSuggestions.length})</span>
-                  <span>Select matching location</span>
-                </div>
-                {addressSuggestions.map((item) => {
-                  const info = getPrecisionLabel(item.placeType);
-                  return (
-                    <div
-                      key={item.id}
-                      className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
-                          {item.placeName}
-                        </p>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          {info.label} • {locationData.area}, Kano State
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSuggestion(item)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs cursor-pointer flex-shrink-0"
-                      >
-                        Select
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
             {/* Selected Location Details & Device Point Capture */}
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
@@ -609,6 +486,20 @@ export const NewPropertyPage: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {deviceLocationWarning && (
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span>{deviceLocationWarning}</span>
+                </div>
+              )}
+
+              {deviceLocationSuccess && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>{deviceLocationSuccess}</span>
+                </div>
+              )}
 
               {/* Device location capture error display */}
               {deviceLocationError && (
@@ -708,7 +599,7 @@ export const NewPropertyPage: React.FC = () => {
           <LandlordPinPlacementMapModal
             isOpen={isPinModalOpen}
             area={locationData.area}
-            caseStudyViewport={{
+            areaViewport={{
               center: [
                 AREA_CENTERS[locationData.area]?.longitude || 8.4187,
                 AREA_CENTERS[locationData.area]?.latitude || 11.9842,

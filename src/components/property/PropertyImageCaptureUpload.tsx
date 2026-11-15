@@ -55,7 +55,6 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
   const [flashActive, setFlashActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const mobileCameraInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
@@ -330,7 +329,7 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
       </div>
 
       {/* Action Buttons: Take Camera Photo & Upload Photos */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Button 1: Live Camera Viewfinder */}
         <button
           type="button"
@@ -375,40 +374,13 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
             </div>
           </div>
         </button>
-
-        {/* Button 3: Mobile Native Camera Quick Snap */}
-        <button
-          type="button"
-          onClick={() => mobileCameraInputRef.current?.click()}
-          disabled={images.length >= maxImages}
-          className="flex items-center justify-center gap-2.5 p-3.5 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 bg-slate-50 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed sm:col-span-2 lg:col-span-1"
-        >
-          <div className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center group-hover:scale-105 transition-transform">
-            <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <div className="text-left">
-            <div className="font-bold text-slate-900 dark:text-white">Device Camera Direct</div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-              Trigger phone camera shutter
-            </div>
-          </div>
-        </button>
       </div>
 
-      {/* Hidden file inputs */}
+      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
         accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-        multiple
-        onChange={handleFilesSelected}
-        className="hidden"
-      />
-      <input
-        ref={mobileCameraInputRef}
-        type="file"
-        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-        capture="environment"
         multiple
         onChange={handleFilesSelected}
         className="hidden"
@@ -639,11 +611,11 @@ export const PropertyImageCaptureUpload: React.FC<PropertyImageCaptureUploadProp
                     type="button"
                     onClick={() => {
                       setIsCameraOpen(false);
-                      mobileCameraInputRef.current?.click();
+                      fileInputRef.current?.click();
                     }}
                     className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer"
                   >
-                    Open Device Camera Directly
+                    Upload Photos from Device
                   </button>
                 </div>
               )}

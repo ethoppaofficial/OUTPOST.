@@ -4,9 +4,8 @@ import type { Map, Marker, MapMouseEvent } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   mapConfig,
-  getMaptilerApiKey,
-  setMaptilerApiKey,
-  isMapTilerConfigured,
+  getEffectiveMapStyle,
+  getEffectiveAttribution,
   subscribeToMapConfig,
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
@@ -17,8 +16,9 @@ import {
   reverseGeocodeCoordinates,
 } from '../../application/services/geocodingService';
 import { requestCurrentDevicePosition, type GeolocationErrorResult } from '../../application/services/geolocationService';
+import { AREA_CENTERS } from '../../domain/geoUtils';
 import type { GeocodingSuggestion } from '../../domain/types';
-import { Search, MapPin, Navigation, AlertTriangle, Check, Key, Loader2, X, ExternalLink } from 'lucide-react';
+import { Search, MapPin, Navigation, AlertTriangle, Loader2, X } from 'lucide-react';
 
 export type HousingArea = 'Dambare' | 'Rimin Gata';
 export type LocationSource =
@@ -45,7 +45,7 @@ export interface PinLocationValue {
 export interface LandlordPinPlacementMapModalProps {
   isOpen: boolean;
   area: HousingArea;
-  caseStudyViewport: { center: [number, number]; zoom: number };
+  areaViewport: { center: [number, number]; zoom: number };
   initialLocation?: Partial<PinLocationValue>;
   mapStyleUrl?: string;
   mapAttribution?: string;
@@ -83,10 +83,10 @@ export const LandlordPinPlacementMapModal: React.FC<
 > = ({
   isOpen,
   area: initialArea,
-  caseStudyViewport,
+  areaViewport,
   initialLocation,
   mapStyleUrl,
-  mapAttribution = mapConfig.attribution,
+  mapAttribution,
   onClose,
   onConfirm,
   onReverseGeocode = ({ latitude, longitude }) =>
@@ -95,6 +95,7 @@ export const LandlordPinPlacementMapModal: React.FC<
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  const fallbackAppliedRef = useRef(false);
 
   const [selectedArea, setSelectedArea] = useState<HousingArea>(initialArea);
   const [location, setLocation] = useState<PinLocationValue | null>(null);
@@ -109,25 +110,49 @@ export const LandlordPinPlacementMapModal: React.FC<
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [areaWarning, setAreaWarning] = useState<string | null>(null);
-  const [hasMapKey, setHasMapKey] = useState(isMapTilerConfigured());
-  const [manualKeyInput, setManualKeyInput] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
+  const [usingRasterFallback, setUsingRasterFallback] = useState(false);
 
-  const activeStyleUrl = mapStyleUrl || mapConfig.styleUrl;
+  const activeStyleUrl = mapStyleUrl || getEffectiveMapStyle(usingRasterFallback);
+  const activeAttribution =
+    mapAttribution || getEffectiveAttribution(usingRasterFallback);
+
+  // Refs to avoid tearing down and recreating the MapLibre instance on click/precision updates
+  const selectedAreaRef = useRef(selectedArea);
+  const precisionRef = useRef(precision);
+  const addressRef = useRef(address);
+  const onReverseGeocodeRef = useRef(onReverseGeocode);
+  const initialLocationRef = useRef(initialLocation);
+
+  useEffect(() => {
+    selectedAreaRef.current = selectedArea;
+  }, [selectedArea]);
+  useEffect(() => {
+    precisionRef.current = precision;
+  }, [precision]);
+  useEffect(() => {
+    addressRef.current = address;
+  }, [address]);
+  useEffect(() => {
+    onReverseGeocodeRef.current = onReverseGeocode;
+  }, [onReverseGeocode]);
+  useEffect(() => {
+    initialLocationRef.current = initialLocation;
+  }, [initialLocation]);
 
   useEffect(() => {
     const unsub = subscribeToMapConfig(() => {
-      setHasMapKey(isMapTilerConfigured());
-      if (mapRef.current && mapConfig.styleUrl) {
+      if (mapRef.current && !mapStyleUrl) {
         try {
-          mapRef.current.setStyle(mapConfig.styleUrl);
+          fallbackAppliedRef.current = false;
+          setUsingRasterFallback(false);
+          mapRef.current.setStyle(getEffectiveMapStyle(false) as any);
         } catch (e) {
           console.warn('Could not update map style:', e);
         }
       }
     });
     return unsub;
-  }, []);
+  }, [mapStyleUrl]);
 
   const setSelectedLocation = useCallback(
     async (
@@ -148,17 +173,17 @@ export const LandlordPinPlacementMapModal: React.FC<
         longitude,
         source,
         accuracyMeters,
-        area: selectedArea,
-        precision,
-        formattedAddress: sourceAddress || address || undefined,
+        area: selectedAreaRef.current,
+        precision: precisionRef.current,
+        formattedAddress: sourceAddress || addressRef.current || undefined,
       };
       setLocation(nextLocation);
       mapRef.current?.flyTo({ center: [longitude, latitude], zoom: 17, essential: true });
 
-      if (!sourceAddress && onReverseGeocode) {
+      if (!sourceAddress && onReverseGeocodeRef.current) {
         setIsReverseGeocoding(true);
         try {
-          const result = await onReverseGeocode({ latitude, longitude });
+          const result = await onReverseGeocodeRef.current({ latitude, longitude });
           if (result) {
             setAddress(result);
             setLocation((current) =>
@@ -172,7 +197,7 @@ export const LandlordPinPlacementMapModal: React.FC<
         }
       }
     },
-    [address, onReverseGeocode, precision, selectedArea],
+    [],
   );
 
   // Address search with debouncing
@@ -208,7 +233,6 @@ export const LandlordPinPlacementMapModal: React.FC<
   const handleSelectSuggestion = (suggestion: GeocodingSuggestion) => {
     const [longitude, latitude] = suggestion.center;
 
-    // Verify area match
     if (!resultMentionsArea(suggestion, selectedArea)) {
       setAreaWarning(
         `Notice: This result (${suggestion.placeName}) may be outside ${selectedArea}. Please drag the pin on the map to place it at the exact building location.`,
@@ -222,7 +246,6 @@ export const LandlordPinPlacementMapModal: React.FC<
     setAddress(suggestion.placeName);
     setSuggestions([]);
 
-    // Update map marker
     const map = mapRef.current;
     if (map) {
       if (markerRef.current) {
@@ -247,32 +270,32 @@ export const LandlordPinPlacementMapModal: React.FC<
     void setSelectedLocation(latitude, longitude, 'address_search', undefined, suggestion.placeName);
   };
 
-  // Initialize MapLibre
+  // Initialize MapLibre once when modal opens
   useEffect(() => {
-    if (!isOpen || !mapContainerRef.current || mapRef.current) return;
+    if (!isOpen || !mapContainerRef.current) return;
 
-    const initialLatitude = initialLocation?.latitude;
-    const initialLongitude = initialLocation?.longitude;
+    fallbackAppliedRef.current = false;
+    setUsingRasterFallback(false);
+
+    const initLoc = initialLocationRef.current;
+    const initialLatitude = initLoc?.latitude;
+    const initialLongitude = initLoc?.longitude;
     const hasInitialLocation =
       typeof initialLatitude === 'number' &&
       typeof initialLongitude === 'number' &&
       isValidCoordinate(initialLatitude, initialLongitude);
 
-    const styleToLoad = activeStyleUrl;
+    const styleToLoad = mapStyleUrl || getEffectiveMapStyle(false);
 
-    if (!styleToLoad) {
-      setError('Map configuration is incomplete. Please contact the administrator.');
-      return;
-    }
-
+    let map: Map | null = null;
     try {
-      const map = new maplibregl.Map({
+      map = new maplibregl.Map({
         container: mapContainerRef.current,
-        style: styleToLoad,
+        style: styleToLoad as any,
         center: hasInitialLocation
           ? [initialLongitude as number, initialLatitude as number]
-          : caseStudyViewport.center,
-        zoom: hasInitialLocation ? 17 : caseStudyViewport.zoom,
+          : areaViewport.center,
+        zoom: hasInitialLocation ? 17 : areaViewport.zoom,
         attributionControl: false,
       });
 
@@ -283,11 +306,11 @@ export const LandlordPinPlacementMapModal: React.FC<
         ? {
             latitude: initialLatitude as number,
             longitude: initialLongitude as number,
-            accuracyMeters: initialLocation?.accuracyMeters,
-            source: initialLocation?.source ?? 'manual_pin',
-            area: selectedArea,
-            precision: initialLocation?.precision ?? 'nearby_building',
-            formattedAddress: initialLocation?.formattedAddress,
+            accuracyMeters: initLoc?.accuracyMeters,
+            source: initLoc?.source ?? 'manual_pin',
+            area: selectedAreaRef.current,
+            precision: initLoc?.precision ?? 'nearby_building',
+            formattedAddress: initLoc?.formattedAddress,
           }
         : null;
 
@@ -308,6 +331,7 @@ export const LandlordPinPlacementMapModal: React.FC<
       }
 
       const handleMapClick = (event: MapMouseEvent) => {
+        if (!map) return;
         const { lat, lng } = event.lngLat;
         const existingMarker = markerRef.current;
 
@@ -332,9 +356,15 @@ export const LandlordPinPlacementMapModal: React.FC<
       };
 
       const handleMapError = (e: any) => {
-        console.warn('MapLibre error in Landlord modal:', e);
-        if (!getMaptilerApiKey()) {
-          setError('Map configuration is incomplete. Please contact the administrator.');
+        console.warn('MapLibre tile/style fallback check in Landlord modal:', e);
+        if (map && !fallbackAppliedRef.current) {
+          fallbackAppliedRef.current = true;
+          setUsingRasterFallback(true);
+          try {
+            map.setStyle(getEffectiveMapStyle(true) as any);
+          } catch {
+            // Ignore secondary fallback error
+          }
         }
       };
 
@@ -342,20 +372,45 @@ export const LandlordPinPlacementMapModal: React.FC<
       map.on('error', handleMapError);
 
       map.on('load', () => {
-        map.resize();
+        map?.resize();
         applyMapTilerBuildingsLayer(map);
       });
 
+      const resizeObserver = new ResizeObserver(() => {
+        map?.resize();
+      });
+      resizeObserver.observe(mapContainerRef.current);
+
+      const resizeTimer = window.setTimeout(() => {
+        map?.resize();
+      }, 180);
+
       return () => {
+        window.clearTimeout(resizeTimer);
+        resizeObserver.disconnect();
         markerRef.current?.remove();
         markerRef.current = null;
-        map.remove();
+        map?.remove();
         mapRef.current = null;
       };
     } catch (err: any) {
       setError(err?.message || 'Failed to initialize MapLibre GL JS engine.');
     }
-  }, [activeStyleUrl, caseStudyViewport.center, caseStudyViewport.zoom, initialLocation, isOpen, selectedArea, setSelectedLocation]);
+  }, [isOpen, mapStyleUrl, areaViewport.center, areaViewport.zoom, setSelectedLocation]);
+
+  // Smoothly recenter when landlord switches area (Dambare / Rimin Gata)
+  const handleAreaChange = (nextArea: HousingArea) => {
+    setSelectedArea(nextArea);
+    setAreaWarning(null);
+    const center = AREA_CENTERS[nextArea];
+    if (center && mapRef.current) {
+      mapRef.current.flyTo({
+        center: [center.longitude, center.latitude],
+        zoom: 15,
+        essential: true,
+      });
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -405,15 +460,6 @@ export const LandlordPinPlacementMapModal: React.FC<
     }
   };
 
-  const handleSaveManualKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualKeyInput.trim()) return;
-    setMaptilerApiKey(manualKeyInput.trim());
-    setKeySaved(true);
-    setError(null);
-    setTimeout(() => setKeySaved(false), 2000);
-  };
-
   const handleConfirm = () => {
     if (!location) {
       setError('Please search an address or place the pin on the actual building before confirming.');
@@ -454,7 +500,7 @@ export const LandlordPinPlacementMapModal: React.FC<
                 Pin Property Building Location
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {selectedArea}, Kano State • MapTiler Streets & Address Geocoding
+                {selectedArea}, Kano State • {mapConfig.providerName} & Address Search
               </p>
             </div>
           </div>
@@ -477,7 +523,7 @@ export const LandlordPinPlacementMapModal: React.FC<
               <select
                 id="area-select"
                 value={selectedArea}
-                onChange={(e) => setSelectedArea(e.target.value as HousingArea)}
+                onChange={(e) => handleAreaChange(e.target.value as HousingArea)}
                 className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200"
               >
                 <option value="Dambare">Dambare</option>
@@ -549,38 +595,6 @@ export const LandlordPinPlacementMapModal: React.FC<
           </div>
         </div>
 
-        {/* Missing API Key Banner */}
-        {!hasMapKey && (
-          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 sm:px-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-200">
-                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                <span>Map configuration is incomplete. Please contact the administrator.</span>
-              </div>
-              <form onSubmit={handleSaveManualKey} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={manualKeyInput}
-                  onChange={(e) => setManualKeyInput(e.target.value)}
-                  placeholder="Enter MapTiler API Key"
-                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono"
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
-                >
-                  Save
-                </button>
-              </form>
-            </div>
-            {keySaved && (
-              <p className="text-[10px] text-emerald-600 font-semibold mt-1">
-                MapTiler key saved successfully! Reloading map...
-              </p>
-            )}
-          </div>
-        )}
-
         {/* Area Warning Banner */}
         {areaWarning && (
           <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900/60 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
@@ -592,17 +606,17 @@ export const LandlordPinPlacementMapModal: React.FC<
         {/* Main Grid: Map & Details Sidebar */}
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
           {/* Map Canvas */}
-          <div className="relative min-h-[400px] bg-slate-200 dark:bg-slate-800">
+          <div className="relative min-h-[420px] bg-slate-200 dark:bg-slate-800">
             <div ref={mapContainerRef} className="absolute inset-0" />
 
             {/* Instruction tooltip */}
             <div className="pointer-events-none absolute left-3 top-3 rounded-xl bg-white/95 dark:bg-slate-900/95 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 shadow-md border border-slate-200 dark:border-slate-800">
-              💡 Type address above, or click/drag green marker to the exact building.
+              Type address above, or click/drag green marker to the exact building.
             </div>
 
             {/* Attribution */}
             <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-[10px] text-slate-600 shadow dark:bg-slate-900/90 dark:text-slate-300">
-              {mapAttribution}
+              {activeAttribution}
             </div>
           </div>
 
@@ -678,7 +692,7 @@ export const LandlordPinPlacementMapModal: React.FC<
                 </dl>
               ) : (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                  ⚠️ No marker placed yet. Search an address or click the map.
+                  No marker placed yet. Search an address or click the map.
                 </p>
               )}
             </div>

@@ -212,13 +212,13 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
   // Subscribe to reactive Map Configuration changes (e.g., MapTiler key, style change)
   useEffect(() => {
     const unsubscribe = subscribeToMapConfig(() => {
-      const newStyle = getEffectiveMapStyle();
+      const newStyle = getEffectiveMapStyle(false);
       setActiveStyleUrl(newStyle);
       setIsUsingFallback(false);
-      setAttributionText(getEffectiveAttribution());
+      setAttributionText(getEffectiveAttribution(false));
       if (mapInstanceRef.current && newStyle) {
         try {
-          mapInstanceRef.current.setStyle(newStyle);
+          mapInstanceRef.current.setStyle(newStyle as any);
         } catch (e) {
           console.warn('Could not update map style dynamically:', e);
         }
@@ -592,6 +592,9 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         console.warn('MapLibre style/tile notice:', e);
         if (!isUsingFallback && isMounted) {
           setIsUsingFallback(true);
+          const fallbackStyle = getEffectiveMapStyle(true);
+          setActiveStyleUrl(fallbackStyle);
+          setAttributionText(getEffectiveAttribution(true));
         }
       });
 

@@ -126,7 +126,7 @@ export const UserSearchPage: React.FC = () => {
         </button>
       </form>
 
-      {/* Case Study Quick Test Chips */}
+      {/* Quick Sample Registration Numbers */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="font-semibold text-slate-600 dark:text-slate-400">Quick Examples:</span>
         {['BUK/23/ENG/01492', 'BUK/22/CHS/00812', 'BUK/24/FCS/02105'].map((sample) => (

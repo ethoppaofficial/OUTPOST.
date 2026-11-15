@@ -5,7 +5,6 @@ import { supabase } from '../../infrastructure/supabase/supabaseClient';
 import { propertyService } from '../../application/services/propertyService';
 import {
   mapConfig,
-  getMaptilerApiKey,
   subscribeToMapConfig,
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
@@ -58,7 +57,7 @@ export interface StudentVerifiedPropertiesMapProps {
   mapStyleUrl?: string;
   mapAttribution?: string;
   initialArea?: HousingArea;
-  caseStudyViewports: Record<
+  areaViewports: Record<
     HousingArea,
     { center: [number, number]; zoom: number }
   >;
@@ -156,7 +155,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
   mapStyleUrl,
   mapAttribution = mapConfig.attribution,
   initialArea = 'Dambare',
-  caseStudyViewports,
+  areaViewports,
   onPropertyOpen,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -169,7 +168,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hasMapKey, setHasMapKey] = useState(Boolean(getMaptilerApiKey()));
+  const fallbackAppliedRef = useRef(false);
 
   // Device Geolocation State
   const [isLocating, setIsLocating] = useState(false);
@@ -181,10 +180,10 @@ export const StudentVerifiedPropertiesMap: React.FC<
 
   useEffect(() => {
     const unsubscribe = subscribeToMapConfig(() => {
-      setHasMapKey(Boolean(getMaptilerApiKey()));
       if (mapRef.current && mapConfig.styleUrl) {
         try {
-          mapRef.current.setStyle(mapConfig.styleUrl);
+          fallbackAppliedRef.current = false;
+          mapRef.current.setStyle(mapConfig.styleUrl as any);
         } catch (e) {
           console.warn('Could not update map style dynamically:', e);
         }
@@ -366,15 +365,11 @@ export const StudentVerifiedPropertiesMap: React.FC<
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    if (!activeStyle) {
-      setError('Map configuration is incomplete. Please contact the administrator.');
-      return;
-    }
-
-    const viewport = caseStudyViewports[initialArea];
+    fallbackAppliedRef.current = false;
+    const viewport = areaViewports[initialArea];
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: activeStyle,
+      style: activeStyle as any,
       center: viewport.center,
       zoom: viewport.zoom,
       attributionControl: false,
@@ -384,15 +379,21 @@ export const StudentVerifiedPropertiesMap: React.FC<
     mapRef.current = map;
 
     map.on('load', () => {
+      map.resize();
       applyMapTilerBuildingsLayer(map);
     });
 
     const handleMapError = () => {
-      if (!getMaptilerApiKey()) {
-        setError('Map configuration is incomplete. Please contact the administrator.');
-      } else {
-        setError('The map tiles could not be loaded. The verified property list is still available.');
+      if (!fallbackAppliedRef.current) {
+        fallbackAppliedRef.current = true;
+        try {
+          map.setStyle(mapConfig.fallbackStyle as any);
+          return;
+        } catch {
+          // Ignore and show non-blocking notice below
+        }
       }
+      setError('The map tiles could not be loaded. The verified property list is still available.');
     };
     map.on('error', handleMapError);
 
@@ -408,16 +409,16 @@ export const StudentVerifiedPropertiesMap: React.FC<
       map.remove();
       mapRef.current = null;
     };
-  }, [caseStudyViewports, initialArea, activeStyle]);
+  }, [areaViewports, initialArea, activeStyle]);
 
   // Handle area change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const viewport = caseStudyViewports[area];
+    const viewport = areaViewports[area];
     map.flyTo({ center: viewport.center, zoom: viewport.zoom, essential: true });
-  }, [area, caseStudyViewports]);
+  }, [area, areaViewports]);
 
   // Update Markers when properties change
   useEffect(() => {
@@ -661,7 +662,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
           </button>
 
           <MapStyleSelector />
-          <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Case-study area">
+          <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Housing area">
             {(['Dambare', 'Rimin Gata'] as HousingArea[]).map((item) => (
               <button
                 key={item}
@@ -713,7 +714,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
             <button
               type="button"
               onClick={() => {
-                const viewport = caseStudyViewports[area];
+                const viewport = areaViewports[area];
                 mapRef.current?.flyTo({ center: viewport.center, zoom: viewport.zoom, essential: true });
                 setIsOutsideStudyArea(false);
               }}
@@ -731,14 +732,6 @@ export const StudentVerifiedPropertiesMap: React.FC<
           >
             <X className="w-3.5 h-3.5" />
           </button>
-        </div>
-      )}
-
-      {/* Missing Key State */}
-      {!hasMapKey && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-          <span>Map configuration is incomplete. Please contact the administrator.</span>
         </div>
       )}
 

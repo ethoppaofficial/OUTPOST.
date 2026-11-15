@@ -164,7 +164,7 @@ export const InvoicePage: React.FC = () => {
               </div>
               <span className="font-extrabold tracking-tight text-lg text-slate-950">OUTPOST</span>
             </div>
-            <p className="text-[11px] text-slate-500">Off-Campus Student Accommodation Platform (BUK Case Study)</p>
+            <p className="text-[11px] text-slate-500">Off-Campus Student Accommodation Platform (BUK Corridor)</p>
             <p className="text-[11px] text-slate-500">Dambare & Rimin Gata, Kano State, Nigeria</p>
           </div>
 

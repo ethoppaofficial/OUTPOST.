@@ -1,16 +1,48 @@
 /**
  * OUTPOST MapLibre & MapTiler Centralized Configuration
  *
- * Configures MapLibre GL JS, MapTiler Streets vector tiles,
- * and MapTiler Geocoding API.
+ * Uses MapTiler Streets vector tiles when VITE_MAPTILER_API_KEY is configured,
+ * and falls back seamlessly to keyless OpenFreeMap Liberty vector tiles and
+ * OpenStreetMap raster tiles so interactive maps work out of the box.
  */
+
+import type { StyleSpecification } from 'maplibre-gl';
 
 const LOCAL_STORAGE_KEY_MAPTILER = 'outpost_maptiler_api_key';
 const LOCAL_STORAGE_KEY_3D_BUILDINGS = 'outpost_maptiler_3d_buildings';
 const listeners: Array<() => void> = [];
 
+export const OPENFREEMAP_LIBERTY_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+export const OSM_RASTER_FALLBACK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    'osm-raster': {
+      type: 'raster',
+      tiles: [
+        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+    },
+  },
+  layers: [
+    {
+      id: 'osm-raster-layer',
+      type: 'raster',
+      source: 'osm-raster',
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+};
+
 export function getMaptilerApiKey(): string | undefined {
-  const envKey = (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim();
+  const envKey = import.meta.env
+    ? (import.meta.env.VITE_MAPTILER_API_KEY as string | undefined)?.trim()
+    : undefined;
   if (envKey) return envKey;
   try {
     const local = localStorage.getItem(LOCAL_STORAGE_KEY_MAPTILER)?.trim();
@@ -37,7 +69,7 @@ export function setMaptilerApiKey(key: string): void {
 export function is3DBuildingsEnabled(): boolean {
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY_3D_BUILDINGS);
-    return saved !== null ? saved === 'true' : true; // Enabled by default
+    return saved !== null ? saved === 'true' : true;
   } catch {
     return true;
   }
@@ -84,12 +116,14 @@ export const mapConfig = {
     return getMaptilerApiKey();
   },
 
-  get styleUrl(): string | undefined {
+  get styleUrl(): string {
     const key = getMaptilerApiKey();
     return key
       ? `${MAPTILER_STREETS_BASE_URL}${encodeURIComponent(key)}`
-      : undefined;
+      : OPENFREEMAP_LIBERTY_STYLE_URL;
   },
+
+  fallbackStyle: OSM_RASTER_FALLBACK_STYLE,
 
   get buildingsTilesUrl(): string | undefined {
     const key = getMaptilerApiKey();
@@ -102,9 +136,15 @@ export const mapConfig = {
 
   geocodingBaseUrl: MAPTILER_GEOCODING_BASE_URL,
 
-  attribution: '© MapTiler © OpenStreetMap contributors',
+  get attribution(): string {
+    return getMaptilerApiKey()
+      ? '© MapTiler © OpenStreetMap contributors'
+      : '© OpenFreeMap © OpenStreetMap contributors';
+  },
 
-  providerName: 'MapTiler',
+  get providerName(): string {
+    return getMaptilerApiKey() ? 'MapTiler Streets' : 'OpenFreeMap Streets';
+  },
 
   // Centered on Dambare / BUK New Campus corridor in Kano, Nigeria
   // MapLibre coordinate order: [longitude, latitude]
@@ -112,17 +152,24 @@ export const mapConfig = {
   defaultZoom: 15,
 };
 
-export function getEffectiveMapStyle(): string | undefined {
+export function getEffectiveMapStyle(useRasterFallback = false): string | StyleSpecification {
+  if (useRasterFallback) {
+    return OSM_RASTER_FALLBACK_STYLE;
+  }
   return mapConfig.styleUrl;
 }
 
-export function getEffectiveAttribution(): string {
+export function getEffectiveAttribution(useRasterFallback = false): string {
+  if (useRasterFallback) {
+    return '© OpenStreetMap contributors';
+  }
   return mapConfig.attribution;
 }
 
 /**
  * Injects MapTiler Buildings tiles (https://cloud.maptiler.com/tiles/buildings/)
- * as an interactive 3D fill-extrusion layer on the MapLibre map instance.
+ * as an interactive 3D fill-extrusion layer when a MapTiler API key is configured.
+ * OpenFreeMap Liberty already bundles building footprints natively.
  */
 export function applyMapTilerBuildingsLayer(map: any): void {
   const apiKey = getMaptilerApiKey();
@@ -140,7 +187,7 @@ export function applyMapTilerBuildingsLayer(map: any): void {
     if (map.getLayer && map.getLayer('3d-buildings')) {
       try {
         map.removeLayer('3d-buildings');
-      } catch (e) {
+      } catch {
         // Ignore removal error
       }
     }
@@ -148,7 +195,6 @@ export function applyMapTilerBuildingsLayer(map: any): void {
   }
 
   try {
-    // Add source if missing
     if (!map.getSource('maptiler-buildings')) {
       map.addSource('maptiler-buildings', {
         type: 'vector',
@@ -157,7 +203,6 @@ export function applyMapTilerBuildingsLayer(map: any): void {
     }
 
     if (!map.getLayer('3d-buildings')) {
-      // Find the first symbol layer to position 3D buildings underneath street/poi labels
       const style = map.getStyle ? map.getStyle() : null;
       let labelLayerId: string | undefined;
       if (style && Array.isArray(style.layers)) {

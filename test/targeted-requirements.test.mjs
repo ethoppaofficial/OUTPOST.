@@ -626,6 +626,57 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
       assert.equal(emptyOtpRes.success, false);
       assert.match(emptyOtpRes.error || '', /required/i);
     });
+
+    test('Maps & Pin Placement Modal work without VITE_MAPTILER_API_KEY via OpenFreeMap/OSM + Nominatim fallback', async () => {
+      const mapCfg = await import('../src/infrastructure/config/mapConfig.ts');
+      const geoSvc = await import('../src/application/services/geocodingService.ts');
+      const modalSrc = read('src/components/map/LandlordPinPlacementMapModal.tsx');
+      const pickerSrc = read('src/components/map/LandlordPinPicker.tsx');
+      const studentMapSrc = read('src/components/map/StudentVerifiedPropertiesMap.tsx');
+
+      assert.ok(mapCfg.getEffectiveMapStyle(), 'Default map style must never be undefined');
+      assert.equal(typeof mapCfg.getEffectiveMapStyle(false), 'string');
+      assert.equal(typeof mapCfg.getEffectiveMapStyle(true), 'object');
+      assert.ok(mapCfg.getEffectiveAttribution(false).includes('OpenStreetMap'));
+
+      assert.doesNotMatch(modalSrc, /Map configuration is incomplete/);
+      assert.doesNotMatch(modalSrc, /Enter MapTiler API Key/);
+      assert.doesNotMatch(pickerSrc, /Map configuration is incomplete/);
+      assert.doesNotMatch(studentMapSrc, /Map configuration is incomplete/);
+
+      const geoSrc = read('src/application/services/geocodingService.ts');
+      assert.doesNotMatch(geoSrc, /Map configuration is incomplete/);
+      assert.match(geoSrc, /nominatim\.openstreetmap\.org/);
+      assert.equal(
+        geoSvc.resultMentionsArea(
+          {
+            id: 'test-1',
+            placeName: 'Danbare, Kumbotso, Kano, Nigeria',
+            center: [8.4187, 11.9842],
+            longitude: 8.4187,
+            latitude: 11.9842,
+          },
+          'Dambare',
+        ),
+        true,
+      );
+    });
+
+    test('Removed Search Address button, Device Camera Direct button, and all case-study copy from UI', () => {
+      const newPropSrc = read('src/pages/landlord/NewPropertyPage.tsx');
+      const uploadSrc = read('src/components/property/PropertyImageCaptureUpload.tsx');
+      const invoiceSrc = read('src/pages/student/InvoicePage.tsx');
+      const locationsSrc = read('src/domain/locations.ts');
+      const studentMapSrc = read('src/components/map/StudentVerifiedPropertiesMap.tsx');
+
+      assert.doesNotMatch(newPropSrc, /Search Address/);
+      assert.doesNotMatch(uploadSrc, /Device Camera Direct|Trigger phone camera shutter/);
+
+      for (const content of [newPropSrc, uploadSrc, invoiceSrc, locationsSrc, studentMapSrc]) {
+        assert.doesNotMatch(content, /case[- _]?study/i);
+      }
+    });
   });
 });
+
 

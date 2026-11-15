@@ -11,8 +11,8 @@
 
 import { HousingLocation } from './types';
 
-export const CASE_STUDY_DISCLAIMER =
-  'OUTPOST is a housing-discovery case-study platform for off-campus accommodation around Bayero University Kano. Development listings and user records may be demonstration data and are not official university endorsements.';
+export const PLATFORM_DISCLAIMER =
+  'OUTPOST is an off-campus student housing discovery platform around Bayero University Kano. Development listings and user records may be demonstration data and are not official university endorsements.';
 
 export const HOUSING_LOCATIONS: HousingLocation[] = [
   {

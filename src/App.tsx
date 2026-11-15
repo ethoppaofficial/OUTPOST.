@@ -4,7 +4,7 @@
  * @description Master application component defining client-side routing, persona route guards, and application context hierarchy.
  *
  * Routing Architecture:
- * - Public routes: Home, Listings, Listing Detail, Login, Admin Login, Register, Forgot Password, Case-Study Map.
+ * - Public routes: Home, Listings, Listing Detail, Login, Admin Login, Register, Forgot Password, Verified Housing Map.
  * - Student routes: Dashboard, Document Verification, Roommates, Preferences, Requests, User Search, Groups, Reservations, Invoices, Chat.
  * - Landlord routes: Dashboard, Properties, New Listing, Availability Management, Payment Receipts, Verification Submission.
  * - Admin routes: Dashboard, Verification Queue, Property Approvals, User Directory, Disputes, Reports, Audit Logs, Settings, Account.

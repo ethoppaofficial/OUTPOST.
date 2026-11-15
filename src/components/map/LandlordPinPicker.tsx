@@ -4,7 +4,6 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { HousingArea, LocationPrecision } from '../../domain/types';
 import {
   mapConfig,
-  getMaptilerApiKey,
   subscribeToMapConfig,
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
@@ -49,15 +48,15 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
   const [currentLng, setCurrentLng] = useState<number>(initialLongitude ?? defaultCoords.longitude);
   const [area, setArea] = useState<HousingArea>(initialArea);
   const [precision, setPrecision] = useState<LocationPrecision>(initialPrecision);
-  const [mapKeyMissing, setMapKeyMissing] = useState(!getMaptilerApiKey());
+  const fallbackAppliedRef = useRef(false);
 
   // Subscribe to config changes
   useEffect(() => {
     const unsubscribe = subscribeToMapConfig(() => {
-      setMapKeyMissing(!getMaptilerApiKey());
       if (mapRef.current && mapConfig.styleUrl) {
         try {
-          mapRef.current.setStyle(mapConfig.styleUrl);
+          fallbackAppliedRef.current = false;
+          mapRef.current.setStyle(mapConfig.styleUrl as any);
         } catch (e) {
           console.warn('Could not update style in LandlordPinPicker', e);
         }
@@ -99,15 +98,12 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
+    fallbackAppliedRef.current = false;
     const styleUrl = mapConfig.styleUrl;
-    if (!styleUrl) {
-      setMapKeyMissing(true);
-      return;
-    }
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleUrl,
+      style: styleUrl as any,
       center: [currentLng, currentLat],
       zoom: 15,
       attributionControl: false,
@@ -116,6 +112,7 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
     map.on('load', () => {
+      map.resize();
       applyMapTilerBuildingsLayer(map);
     });
 
@@ -161,12 +158,23 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
     }
 
     map.on('error', () => {
-      if (!getMaptilerApiKey()) {
-        setMapKeyMissing(true);
+      if (!fallbackAppliedRef.current) {
+        fallbackAppliedRef.current = true;
+        try {
+          map.setStyle(mapConfig.fallbackStyle as any);
+        } catch {
+          // Ignore fallback errors
+        }
       }
     });
 
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+    });
+    resizeObserver.observe(mapContainerRef.current);
+
     return () => {
+      resizeObserver.disconnect();
       marker.remove();
       map.remove();
     };
@@ -228,21 +236,6 @@ export const LandlordPinPicker: React.FC<LandlordPinPickerProps> = ({
       {/* Map Canvas */}
       <div className="relative w-full h-80 sm:h-96 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950">
         <div ref={mapContainerRef} className="w-full h-full" />
-
-        {/* Missing key message */}
-        {mapKeyMissing && (
-          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 text-center z-20">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-amber-300 dark:border-amber-800 max-w-sm space-y-2">
-              <AlertTriangle className="w-6 h-6 text-amber-500 mx-auto" />
-              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                Map configuration is incomplete. Please contact the administrator.
-              </p>
-              <p className="text-[10px] text-slate-500">
-                Ensure VITE_MAPTILER_API_KEY is configured in your environment.
-              </p>
-            </div>
-          </div>
-        )}
 
         {/* Floating Instruction Banner */}
         <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 dark:bg-slate-900/95 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200/90 dark:border-slate-800 shadow-md backdrop-blur-xs">
