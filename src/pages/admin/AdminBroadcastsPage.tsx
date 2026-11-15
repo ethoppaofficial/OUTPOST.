@@ -13,6 +13,8 @@ import {
   Search,
   Clock,
   RefreshCw,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   adminService,
@@ -47,9 +49,9 @@ const AUDIENCE_OPTIONS: Array<{
     icon: GraduationCap,
   },
   {
-    id: 'individual',
-    label: 'Individual User',
-    description: 'Send a direct notification to one specific user',
+    id: 'specific_users',
+    label: 'Specific Users',
+    description: 'Pick one or multiple individual users to notify',
     icon: UserCheck,
   },
 ];
@@ -59,9 +61,11 @@ export const AdminBroadcastsPage: React.FC = () => {
   const initialUserId = searchParams.get('userId') || '';
 
   const [targetAudience, setTargetAudience] = useState<BroadcastAudience>(
-    initialUserId ? 'individual' : 'all_users'
+    initialUserId ? 'specific_users' : 'all_users'
   );
-  const [targetUserId, setTargetUserId] = useState(initialUserId);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>(
+    initialUserId ? [initialUserId] : []
+  );
   const [userSearch, setUserSearch] = useState('');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
@@ -96,8 +100,8 @@ export const AdminBroadcastsPage: React.FC = () => {
 
   useEffect(() => {
     if (initialUserId) {
-      setTargetAudience('individual');
-      setTargetUserId(initialUserId);
+      setTargetAudience('specific_users');
+      setSelectedUserIds((prev) => (prev.includes(initialUserId) ? prev : [...prev, initialUserId]));
     }
   }, [initialUserId]);
 
@@ -113,16 +117,18 @@ export const AdminBroadcastsPage: React.FC = () => {
           u.id.toLowerCase().includes(q)
         );
       })
-      .slice(0, 60);
+      .slice(0, 80);
   }, [users, userSearch]);
 
-  const selectedIndividual = useMemo(
-    () => users.find((u) => u.id === targetUserId),
-    [users, targetUserId]
+  const selectedUsers = useMemo(
+    () => users.filter((u) => selectedUserIds.includes(u.id)),
+    [users, selectedUserIds]
   );
 
+  const isSpecificTarget = targetAudience === 'specific_users' || targetAudience === 'individual';
+
   const estimatedRecipientCount = useMemo(() => {
-    if (targetAudience === 'individual') return targetUserId ? 1 : 0;
+    if (isSpecificTarget) return selectedUserIds.length;
     if (targetAudience === 'all_landlords') {
       return users.filter((u) => u.role === 'landlord' && (u.status || u.accountStatus) !== 'suspended').length;
     }
@@ -130,15 +136,21 @@ export const AdminBroadcastsPage: React.FC = () => {
       return users.filter((u) => u.role === 'student' && (u.status || u.accountStatus) !== 'suspended').length;
     }
     return users.filter((u) => (u.status || u.accountStatus) !== 'suspended').length;
-  }, [targetAudience, targetUserId, users]);
+  }, [isSpecificTarget, targetAudience, selectedUserIds.length, users]);
+
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (targetAudience === 'individual' && !targetUserId) {
-      setError('Please select a specific user recipient.');
+    if (isSpecificTarget && selectedUserIds.length === 0) {
+      setError('Please select at least one specific user recipient.');
       return;
     }
 
@@ -148,18 +160,24 @@ export const AdminBroadcastsPage: React.FC = () => {
         targetAudience,
         title,
         message,
-        targetUserId: targetAudience === 'individual' ? targetUserId : undefined,
+        targetUserId: isSpecificTarget ? selectedUserIds[0] : undefined,
+        targetUserIds: isSpecificTarget ? selectedUserIds : undefined,
       });
 
       setSuccess(
-        `Broadcast notification delivered to ${res.recipientCount} ${
+        `Broadcast saved and delivered to ${res.recipientCount} ${
           res.recipientCount === 1 ? 'recipient' : 'recipients'
         }.`
       );
       setTitle('');
       setMessage('');
-      const refreshedHistory = await adminService.getBroadcastHistory().catch(() => history);
-      setHistory(refreshedHistory);
+      if (res.broadcast) {
+        setHistory((prev) => [res.broadcast!, ...prev.filter((item) => item.id !== res.broadcast!.id)]);
+      }
+      const refreshedHistory = await adminService.getBroadcastHistory().catch(() => null);
+      if (refreshedHistory && refreshedHistory.length > 0) {
+        setHistory(refreshedHistory);
+      }
     } catch (err: any) {
       setError(err?.message || 'Failed to send broadcast notification.');
     } finally {
@@ -171,7 +189,15 @@ export const AdminBroadcastsPage: React.FC = () => {
     if (audience === 'all_users') return 'Every User';
     if (audience === 'all_landlords') return 'Every Landlord';
     if (audience === 'all_students') return 'Every Student';
-    return 'Individual User';
+    if (audience === 'specific_users') return 'Specific Users';
+    return 'Specific User';
+  };
+
+  const getAudienceBadgeVariant = (audience: BroadcastAudience) => {
+    if (audience === 'all_users') return 'success';
+    if (audience === 'all_landlords') return 'warning';
+    if (audience === 'all_students') return 'info';
+    return 'default';
   };
 
   return (
@@ -185,7 +211,7 @@ export const AdminBroadcastsPage: React.FC = () => {
             Broadcast Messages &amp; User Notifications
           </h1>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Send urgent announcements or direct notices to every user, every landlord, every student, or an individual user.
+            Send urgent announcements or direct notices to every user, every landlord, every student, or specific users. Every broadcast is archived below.
           </p>
         </div>
 
@@ -226,7 +252,9 @@ export const AdminBroadcastsPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {AUDIENCE_OPTIONS.map((opt) => {
               const Icon = opt.icon;
-              const active = targetAudience === opt.id;
+              const active =
+                targetAudience === opt.id ||
+                (opt.id === 'specific_users' && targetAudience === 'individual');
               return (
                 <button
                   key={opt.id}
@@ -249,19 +277,60 @@ export const AdminBroadcastsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Individual User Picker */}
-        {targetAudience === 'individual' && (
+        {/* Multi-user Specific Recipient Picker */}
+        {isSpecificTarget && (
           <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Choose Recipient User
+                Choose Recipient Users ({selectedUserIds.length} selected)
               </label>
-              {selectedIndividual && (
-                <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                  Selected: {selectedIndividual.fullName || selectedIndividual.name} ({selectedIndividual.role})
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {filteredUsers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedUserIds((prev) =>
+                        Array.from(new Set([...prev, ...filteredUsers.map((u) => u.id)]))
+                      )
+                    }
+                    className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
+                  >
+                    Select matching ({filteredUsers.length})
+                  </button>
+                )}
+                {selectedUserIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedUserIds([])}
+                    className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Clear selection
+                  </button>
+                )}
+              </div>
             </div>
+
+            {selectedUsers.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedUsers.map((u) => (
+                  <span
+                    key={u.id}
+                    className="inline-flex items-center gap-1 rounded-lg bg-purple-100 dark:bg-purple-900/50 px-2 py-1 text-[11px] font-semibold text-purple-800 dark:text-purple-200"
+                  >
+                    <span>{u.fullName || u.name || u.email}</span>
+                    <span className="opacity-70">({u.role})</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleUserSelection(u.id)}
+                      className="ml-0.5 hover:text-rose-600 cursor-pointer"
+                      aria-label={`Remove ${u.fullName || u.email}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
 
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -269,24 +338,49 @@ export const AdminBroadcastsPage: React.FC = () => {
                 type="text"
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Search user by name, email, role, or ID..."
+                placeholder="Search users by name, email, role, or ID..."
                 className="w-full pl-8 pr-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
               />
             </div>
 
-            <select
-              value={targetUserId}
-              onChange={(e) => setTargetUserId(e.target.value)}
-              required
-              className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-            >
-              <option value="">-- Select recipient account --</option>
-              {filteredUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {(u.fullName || u.name || 'User')} ({u.role}) — {u.email}
-                </option>
-              ))}
-            </select>
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredUsers.length === 0 ? (
+                <p className="p-3 text-center text-xs text-slate-400">No matching users found.</p>
+              ) : (
+                filteredUsers.map((u) => {
+                  const checked = selectedUserIds.includes(u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => toggleUserSelection(u.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-xs transition cursor-pointer ${
+                        checked
+                          ? 'bg-purple-50/70 dark:bg-purple-950/30'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900 dark:text-white truncate">
+                          {u.fullName || u.name || 'User'}{' '}
+                          <span className="text-[10px] font-bold uppercase text-slate-400">({u.role})</span>
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">{u.email}</p>
+                      </div>
+                      <span
+                        className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                          checked
+                            ? 'bg-purple-600 border-purple-600 text-white'
+                            : 'border-slate-300 dark:border-slate-600'
+                        }`}
+                      >
+                        {checked && <Check className="w-3.5 h-3.5" />}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
 
@@ -322,7 +416,7 @@ export const AdminBroadcastsPage: React.FC = () => {
               className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
             />
             <div className="flex justify-between text-[11px] text-slate-400">
-              <span>Delivered immediately to each user&apos;s OUTPOST Notification Bell &amp; Inbox.</span>
+              <span>Delivered immediately to each user&apos;s OUTPOST Notification Bell &amp; Inbox and logged in broadcast history.</span>
               <span>{message.length} / 2000</span>
             </div>
           </div>
@@ -330,7 +424,11 @@ export const AdminBroadcastsPage: React.FC = () => {
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="text-xs text-slate-500 dark:text-slate-400">
-            Estimated recipients:{' '}
+            Target audience:{' '}
+            <strong className="text-slate-900 dark:text-white">
+              {formatAudienceBadge(targetAudience)}
+            </strong>{' '}
+            · Estimated recipients:{' '}
             <strong className="text-slate-900 dark:text-white">
               {loadingData ? '…' : estimatedRecipientCount}
             </strong>
@@ -363,7 +461,7 @@ export const AdminBroadcastsPage: React.FC = () => {
             <Clock className="w-4 h-4 text-purple-600" />
             <span>Sent Broadcast History</span>
           </h2>
-          <span className="text-[11px] text-slate-400">{history.length} recent</span>
+          <span className="text-[11px] text-slate-400">{history.length} saved</span>
         </div>
 
         {loadingData ? (
@@ -376,32 +474,41 @@ export const AdminBroadcastsPage: React.FC = () => {
             No broadcast messages have been sent yet.
           </p>
         ) : (
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {history.map((item) => (
-              <div key={item.id} className="py-4 space-y-1.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant={item.targetAudience === 'individual' ? 'info' : 'warning'}>
-                      {formatAudienceBadge(item.targetAudience)}
-                    </Badge>
-                    {item.targetUserName && (
-                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        → {item.targetUserName}
+          <div className="space-y-3">
+            {history.map((item) => {
+              const targetSummary =
+                item.targetUserNames && item.targetUserNames.length > 0
+                  ? item.targetUserNames.join(', ')
+                  : item.targetUserName;
+              return (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-4 space-y-2"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant={getAudienceBadgeVariant(item.targetAudience)}>
+                        Audience: {formatAudienceBadge(item.targetAudience)}
+                      </Badge>
+                      {targetSummary && (
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          → {targetSummary}
+                        </span>
+                      )}
+                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                        {item.recipientCount} {item.recipientCount === 1 ? 'recipient' : 'recipients'}
                       </span>
-                    )}
-                    <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                      {item.recipientCount} {item.recipientCount === 1 ? 'recipient' : 'recipients'}
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-400">
-                    {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
-                  </span>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{item.title}</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">{item.message}</p>
+                  <p className="text-[11px] text-slate-400">Sent by {item.senderName}</p>
                 </div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">{item.title}</h3>
-                <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">{item.message}</p>
-                <p className="text-[11px] text-slate-400">Sent by {item.senderName}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

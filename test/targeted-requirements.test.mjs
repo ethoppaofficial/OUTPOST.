@@ -378,4 +378,232 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
       assert.match(errorUtilsSrc, /ERR_STORAGE_VALIDATION/);
     });
   });
+
+  describe('Migration 14: Student Reservation Deletion, Preset Avatars & broadcast_messages Persistence', () => {
+    const m14 = read('supabase/migrations/20261114000014_broadcast_messages_presets_and_delete_fixes.sql');
+    const avatarSrc = read('src/components/common/Avatar.tsx');
+    const uploaderSrc = read('src/components/common/ProfileAvatarUploader.tsx');
+    const presetsSrc = read('src/assets/avatars/index.ts');
+    const appShellSrc = read('src/components/layout/AppShell.tsx');
+    const broadcastPageSrc = read('src/pages/admin/AdminBroadcastsPage.tsx');
+
+    test('Migration 14 defines broadcast_messages table, RLS, delete_student_reservation_atomic, and preset avatar RPC', () => {
+      assert.match(m14, /CREATE TABLE IF NOT EXISTS public\.broadcast_messages/i);
+      assert.match(m14, /target_audience IN \('all_users', 'all_landlords', 'all_students', 'specific_users', 'individual'\)/i);
+      assert.match(m14, /target_user_ids UUID\[\]/i);
+      assert.match(m14, /ALTER TABLE public\.broadcast_messages ENABLE ROW LEVEL SECURITY/i);
+      assert.match(m14, /CREATE OR REPLACE FUNCTION public\.admin_send_broadcast/i);
+      assert.match(m14, /INSERT INTO public\.broadcast_messages/i);
+
+      assert.match(m14, /CREATE POLICY "Students or admins delete non-confirmed reservations"/i);
+      assert.match(m14, /CREATE OR REPLACE FUNCTION public\.delete_student_reservation_atomic/i);
+
+      assert.match(m14, /ADD COLUMN IF NOT EXISTS avatar_preset_id TEXT/i);
+      assert.match(m14, /CREATE OR REPLACE FUNCTION public\.update_own_profile_avatar\(\s*p_avatar_url TEXT DEFAULT NULL,\s*p_avatar_preset_id TEXT DEFAULT NULL/i);
+      assert.match(m14, /ALTER PUBLICATION supabase_realtime ADD TABLE public\.notifications/i);
+    });
+
+    test('Preset profile avatars are wired into ProfileAvatarUploader, Avatar, and AppShell', () => {
+      assert.match(presetsSrc, /export const AVATAR_PRESETS/);
+      assert.match(presetsSrc, /id:\s*'owl'/);
+      assert.match(presetsSrc, /id:\s*'gradcap'/);
+      assert.match(uploaderSrc, /AVATAR_PRESETS\.map/);
+      assert.match(uploaderSrc, /updateUserAvatarPresetPersisted/);
+      assert.match(avatarSrc, /startsWith\('preset:'\)/);
+      assert.match(appShellSrc, /<Avatar/);
+
+      const supaRepoSrc = read('src/infrastructure/supabase/supabaseRepository.ts');
+      assert.match(supaRepoSrc, /delete_student_reservation_atomic/);
+      assert.match(supaRepoSrc, /\[DELETED_BY_STUDENT\]/);
+      assert.match(supaRepoSrc, /softDeletedActiveHold/);
+    });
+
+    test('reservationService.deleteReservation releases occupied hold spaces and removes reservation', () => {
+      const delPropId = '99999999-9999-4999-8999-999999999991';
+      const delUnitId = '99999999-9999-4999-8999-999999999992';
+      repository.createProperty({
+        id: delPropId,
+        locationId: 'loc-dambare',
+        landlordId: '33333333-3333-4333-8333-333333333333',
+        landlordName: 'Alhaji Sani Bello',
+        landlordVerified: true,
+        title: 'Reservation Delete Test Hostel',
+        slug: 'reservation-delete-test-hostel',
+        description: 'Hostel for reservation delete test',
+        propertyType: 'Self-Contained',
+        accommodationType: 'Single Room',
+        genderPolicy: 'Mixed',
+        address: 'Plot 8 Danbare Road',
+        city: 'Kano',
+        neighbourhood: 'Dambare',
+        campus: 'New Campus',
+        university: 'Bayero University Kano',
+        distanceKm: 0.5,
+        pricePerSession: 150000,
+        billingPeriod: 'Academic Session (1 Year)',
+        depositAmount: 10000,
+        utilitiesIncluded: true,
+        amenities: ['Water'],
+        houseRules: [],
+        images: [],
+        totalCapacity: 1,
+        availableSpaces: 1,
+        verificationStatus: 'approved',
+        rooms: [
+          {
+            id: delUnitId,
+            propertyId: delPropId,
+            name: 'Room D1',
+            type: 'Self-Contained',
+            totalCapacity: 1,
+            availableSpaces: 1,
+            pricePerSession: 150000,
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const targetProp = repository.getPropertyById(delPropId);
+      assert.ok(targetProp, 'Expected seeded property');
+      const targetRoom = targetProp.rooms[0];
+
+      const created = reservationService.createReservation(
+        'stu-delete-test-1',
+        targetProp.id,
+        targetRoom.id,
+        undefined,
+        'hold'
+      );
+      assert.equal(created.success, true, created.message || 'Expected reservation creation to succeed');
+      assert.ok(created.reservation?.id);
+      assert.equal(targetRoom.availableSpaces, 0);
+
+      const deleted = reservationService.deleteReservation(created.reservation.id);
+      assert.equal(deleted.success, true);
+      assert.equal(targetRoom.availableSpaces, 1);
+      assert.equal(repository.getReservationById(created.reservation.id), undefined);
+    });
+
+    test('adminService.sendBroadcast saves to broadcast_messages and getBroadcastHistory hydrates audience & recipients', async () => {
+      assert.match(broadcastPageSrc, /Sent Broadcast History/);
+      assert.match(broadcastPageSrc, /Audience: \{formatAudienceBadge/);
+
+      const broadcastMessagesTable = [];
+      const notificationsTable = [];
+      const auditLogsTable = [];
+      const profilesData = [
+        { id: 'admin-1', email: 'admin@outpost.ng', full_name: 'Campus Admin', role: 'admin', account_status: 'active' },
+        { id: 'stu-1', email: 'aminu@buk.edu.ng', full_name: 'Aminu Kano', role: 'student', account_status: 'active' },
+        { id: 'll-1', email: 'sani@outpost.ng', full_name: 'Alhaji Sani', role: 'landlord', account_status: 'active' },
+      ];
+
+      const makeMockClient = ({ rpcMissing }) => ({
+        auth: {
+          async getUser() {
+            return { data: { user: { id: 'admin-1', email: 'admin@outpost.ng' } }, error: null };
+          },
+        },
+        from(table) {
+          const filters = [];
+          const inFilters = [];
+          const q = {
+            select() { return q; },
+            eq(col, val) { filters.push((r) => r[col] === val); return q; },
+            in(col, vals) { inFilters.push((r) => Array.isArray(vals) && vals.includes(r[col])); return q; },
+            order() { return q; },
+            limit() { return q; },
+            async maybeSingle() {
+              const rows = table === 'profiles' ? profilesData : [];
+              const found = rows.find((r) => filters.every((fn) => fn(r)));
+              return { data: found || null, error: null };
+            },
+            async insert(payload) {
+              const arr = Array.isArray(payload) ? payload : [payload];
+              if (table === 'broadcast_messages') broadcastMessagesTable.push(...arr);
+              if (table === 'notifications') notificationsTable.push(...arr);
+              if (table === 'audit_logs') auditLogsTable.push(...arr);
+              return { data: arr, error: null };
+            },
+            then(resolve, reject) {
+              let source = [];
+              if (table === 'profiles') source = profilesData;
+              if (table === 'broadcast_messages') source = broadcastMessagesTable;
+              const filtered = source.filter(
+                (r) => filters.every((fn) => fn(r)) && inFilters.every((fn) => fn(r))
+              );
+              return Promise.resolve({ data: filtered, error: null }).then(resolve, reject);
+            },
+          };
+          return q;
+        },
+        async rpc(fnName, params) {
+          if (rpcMissing) {
+            return {
+              data: null,
+              error: { code: 'PGRST202', message: `Could not find the function public.${fnName} in the schema cache` },
+            };
+          }
+          const created = new Date().toISOString();
+          broadcastMessagesTable.unshift({
+            id: 'bc-rpc-1',
+            sender_id: 'admin-1',
+            target_audience: params.p_target_audience,
+            target_user_id: params.p_target_user_id,
+            target_user_ids: params.p_target_user_ids || [],
+            title: params.p_title,
+            message: params.p_message,
+            recipient_count: 1,
+            created_at: created,
+          });
+          return {
+            data: {
+              success: true,
+              broadcast_id: 'bc-rpc-1',
+              target_audience: params.p_target_audience,
+              recipient_count: 1,
+              created_at: created,
+            },
+            error: null,
+          };
+        },
+      });
+
+      // Fallback persistence path when RPC is missing
+      const fallbackAdmin = createAdminService({ client: makeMockClient({ rpcMissing: true }) });
+      const resSpecific = await fallbackAdmin.sendBroadcast({
+        targetAudience: 'specific_users',
+        title: 'Inspect Room Notice',
+        message: 'Please review your verification upload before Friday.',
+        targetUserIds: ['stu-1', 'll-1'],
+      });
+
+      assert.equal(resSpecific.success, true);
+      assert.equal(resSpecific.recipientCount, 2);
+      assert.equal(notificationsTable.length, 2);
+      assert.equal(broadcastMessagesTable.length, 1);
+      assert.equal(broadcastMessagesTable[0].target_audience, 'specific_users');
+      assert.deepEqual(broadcastMessagesTable[0].target_user_ids, ['stu-1', 'll-1']);
+      assert.equal(auditLogsTable[0].action, 'ADMIN_SEND_BROADCAST');
+
+      // RPC path
+      const rpcAdmin = createAdminService({ client: makeMockClient({ rpcMissing: false }) });
+      const resAllLandlords = await rpcAdmin.sendBroadcast({
+        targetAudience: 'all_landlords',
+        title: 'Landlord Compliance Update',
+        message: 'Confirm payout bank details are accurate.',
+      });
+      assert.equal(resAllLandlords.success, true);
+      assert.equal(resAllLandlords.broadcastId, 'bc-rpc-1');
+
+      // History retrieval & recipient name hydration
+      const history = await fallbackAdmin.getBroadcastHistory();
+      assert.equal(history.length, 2);
+      const specificRow = history.find((h) => h.targetAudience === 'specific_users');
+      assert.ok(specificRow);
+      assert.equal(specificRow.senderName, 'Campus Admin');
+      assert.deepEqual(specificRow.targetUserNames, ['Aminu Kano', 'Alhaji Sani']);
+    });
+  });
 });
+

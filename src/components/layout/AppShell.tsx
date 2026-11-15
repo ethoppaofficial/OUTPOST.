@@ -47,6 +47,7 @@ import { notificationService } from '../../application/services/notificationServ
 import { chatService } from '../../application/services/chatService';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuth } from '../../application/context/AuthContext';
+import { Avatar } from '../common/Avatar';
 
 export interface NavItem {
   id: string;
@@ -472,21 +473,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                   title="View Account Profile"
                   className="flex items-center gap-2.5 min-w-0 flex-1 group"
                 >
-                  {session.user.avatarUrl && !avatarLoadError ? (
-                    <img
-                      src={session.user.avatarUrl}
-                      alt={session.displayName}
-                      onError={() => setAvatarLoadError(true)}
-                      className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
-                    />
-                  ) : (
-                    <div
-                      aria-label={session.displayName}
-                      className="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center ring-1 ring-slate-200 dark:ring-slate-700 flex-shrink-0 group-hover:ring-2 group-hover:ring-emerald-500 transition cursor-pointer"
-                    >
-                      {(session.displayName || 'U').trim().charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  <Avatar
+                    name={session.displayName}
+                    avatarUrl={avatarLoadError ? undefined : session.user.avatarUrl}
+                    avatarPresetId={session.user.avatarPresetId}
+                    size="md"
+                  />
                   <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
                       {session.displayName}
@@ -507,23 +499,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             ) : (
               <div className="flex flex-col items-center gap-2">
                 <Link to={profilePath} title="View Account Profile">
-                  {session.user.avatarUrl && !avatarLoadError ? (
-                    <img
-                      src={session.user.avatarUrl}
-                      alt={session.displayName}
-                      title={session.displayName}
-                      onError={() => setAvatarLoadError(true)}
-                      className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
-                    />
-                  ) : (
-                    <div
-                      aria-label={session.displayName}
-                      title={session.displayName}
-                      className="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-emerald-500 transition cursor-pointer"
-                    >
-                      {(session.displayName || 'U').trim().charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  <Avatar
+                    name={session.displayName}
+                    avatarUrl={avatarLoadError ? undefined : session.user.avatarUrl}
+                    avatarPresetId={session.user.avatarPresetId}
+                    size="md"
+                  />
                 </Link>
                 <button
                   onClick={handleLogout}

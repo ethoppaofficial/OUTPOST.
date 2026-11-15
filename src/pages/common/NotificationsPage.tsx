@@ -68,7 +68,7 @@ export const NotificationsPage: React.FC = () => {
     if (audience === 'all_users') return 'All Users';
     if (audience === 'all_landlords') return 'All Landlords';
     if (audience === 'all_students') return 'All Students';
-    if (audience === 'individual') return 'Direct Admin Message';
+    if (audience === 'specific_users' || audience === 'individual') return 'Direct Admin Message';
     return 'Platform Broadcast';
   };
 

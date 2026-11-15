@@ -82,7 +82,12 @@ export interface AdminDashboardData {
   fetchedAt: string;
 }
 
-export type BroadcastAudience = 'all_users' | 'all_landlords' | 'all_students' | 'individual';
+export type BroadcastAudience =
+  | 'all_users'
+  | 'all_landlords'
+  | 'all_students'
+  | 'specific_users'
+  | 'individual';
 
 export interface AdminBroadcastRecord {
   id: string;
@@ -90,7 +95,9 @@ export interface AdminBroadcastRecord {
   senderName: string;
   targetAudience: BroadcastAudience;
   targetUserId?: string;
+  targetUserIds?: string[];
   targetUserName?: string;
+  targetUserNames?: string[];
   title: string;
   message: string;
   recipientCount: number;
@@ -1098,27 +1105,54 @@ export function createAdminService(deps?: { client?: any }) {
     return data || { success: true, revoked: true };
   }
 
+  function isMissingTableError(error: any): boolean {
+    const code = String(error?.code || '');
+    const msg = String(error?.message || '').toLowerCase();
+    return (
+      code === '42P01' ||
+      code === 'PGRST205' ||
+      msg.includes('could not find the table') ||
+      msg.includes('does not exist')
+    );
+  }
+
   async function sendBroadcast(payload: {
     targetAudience: BroadcastAudience;
     title: string;
     message: string;
     targetUserId?: string;
+    targetUserIds?: string[];
   }): Promise<{
     success: boolean;
     broadcastId?: string;
     targetAudience: BroadcastAudience;
     recipientCount: number;
     createdAt: string;
+    broadcast?: AdminBroadcastRecord;
   }> {
     const admin = await verifyActiveAdmin();
     const audience = payload.targetAudience;
-    if (!['all_users', 'all_landlords', 'all_students', 'individual'].includes(audience)) {
+    if (
+      !['all_users', 'all_landlords', 'all_students', 'specific_users', 'individual'].includes(
+        audience
+      )
+    ) {
       throw new AdminServiceError('VALIDATION_ERROR', 'Invalid broadcast target audience selected.');
     }
 
     const cleanTitle = String(payload.title || '').trim();
     const cleanMessage = String(payload.message || '').trim();
-    const cleanTargetUserId = payload.targetUserId?.trim() || undefined;
+    const targetIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(payload.targetUserIds) ? payload.targetUserIds : []),
+          ...(payload.targetUserId ? [payload.targetUserId] : []),
+        ]
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const primaryTargetUserId = targetIds[0];
 
     if (cleanTitle.length < 2 || cleanTitle.length > 140) {
       throw new AdminServiceError('VALIDATION_ERROR', 'Message title must be between 2 and 140 characters.');
@@ -1126,43 +1160,53 @@ export function createAdminService(deps?: { client?: any }) {
     if (cleanMessage.length < 2 || cleanMessage.length > 2000) {
       throw new AdminServiceError('VALIDATION_ERROR', 'Broadcast message must be between 2 and 2000 characters.');
     }
-    if (audience === 'individual' && !cleanTargetUserId) {
-      throw new AdminServiceError('VALIDATION_ERROR', 'Please choose an individual user to message.');
+    if ((audience === 'individual' || audience === 'specific_users') && targetIds.length === 0) {
+      throw new AdminServiceError('VALIDATION_ERROR', 'Please select at least one specific user to notify.');
     }
 
     const { data, error } = await client.rpc('admin_send_broadcast', {
       p_target_audience: audience,
       p_title: cleanTitle,
       p_message: cleanMessage,
-      p_target_user_id: audience === 'individual' ? cleanTargetUserId : null,
+      p_target_user_id: primaryTargetUserId || null,
+      p_target_user_ids: targetIds.length > 0 ? targetIds : null,
     });
 
     if (error) {
       if (!isRpcMissingError(error)) {
-        throw classifySupabaseError(error, 'admin_broadcasts');
+        throw classifySupabaseError(error, 'broadcast_messages');
       }
 
-      // Graceful fallback if Migration 13 RPC is not yet pushed
-      let profileQuery = client.from('profiles').select('id, role, account_status');
-      if (audience === 'individual' && cleanTargetUserId) {
-        profileQuery = profileQuery.eq('id', cleanTargetUserId);
+      // Direct persisted fallback when admin_send_broadcast RPC is not yet pushed
+      let profileQuery = client.from('profiles').select('id, role, account_status, full_name, email');
+      if ((audience === 'individual' || audience === 'specific_users') && targetIds.length > 0) {
+        profileQuery = profileQuery.in('id', targetIds);
       } else if (audience === 'all_landlords') {
-        profileQuery = profileQuery.eq('role', 'landlord').neq('account_status', 'suspended');
+        profileQuery = profileQuery.eq('role', 'landlord');
       } else if (audience === 'all_students') {
-        profileQuery = profileQuery.eq('role', 'student').neq('account_status', 'suspended');
-      } else {
-        profileQuery = profileQuery.neq('account_status', 'suspended');
+        profileQuery = profileQuery.eq('role', 'student');
       }
 
       const { data: recipients, error: recErr } = await profileQuery;
       if (recErr) throw classifySupabaseError(recErr, 'profiles');
 
-      const recipientIds = (recipients || []).map((r: any) => r.id).filter(Boolean);
-      if (audience === 'individual' && recipientIds.length === 0) {
-        throw new AdminServiceError('VALIDATION_ERROR', 'Selected recipient account was not found.');
+      const matchedRecipients = (recipients || []).filter(
+        (r: any) =>
+          Boolean(r?.id) &&
+          (audience === 'individual' || audience === 'specific_users' || r.account_status !== 'suspended')
+      );
+      const recipientIds = matchedRecipients.map((r: any) => r.id);
+
+      if ((audience === 'individual' || audience === 'specific_users') && recipientIds.length === 0) {
+        throw new AdminServiceError('VALIDATION_ERROR', 'Selected recipient account(s) were not found.');
       }
 
+      const broadcastId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `bc-${Date.now()}`;
       const nowIso = new Date().toISOString();
+
       if (recipientIds.length > 0) {
         const rows = recipientIds.map((uid: string) => ({
           user_id: uid,
@@ -1171,87 +1215,210 @@ export function createAdminService(deps?: { client?: any }) {
           type: 'broadcast',
           link: '/notifications',
           is_read: false,
+          metadata: {
+            broadcast_id: broadcastId,
+            audience,
+            sender_id: admin.id,
+            sender_name: admin.fullName || 'OUTPOST Administration',
+          },
           created_at: nowIso,
         }));
         const { error: notifErr } = await client.from('notifications').insert(rows);
         if (notifErr) throw classifySupabaseError(notifErr, 'notifications');
       }
 
+      // Save broadcast record into broadcast_messages table
+      const { error: bmErr } = await client.from('broadcast_messages').insert({
+        id: broadcastId,
+        sender_id: admin.id,
+        target_audience: audience,
+        target_user_id: primaryTargetUserId || null,
+        target_user_ids: targetIds,
+        title: cleanTitle,
+        message: cleanMessage,
+        recipient_count: recipientIds.length,
+        created_at: nowIso,
+      });
+
+      if (bmErr) {
+        if (!isMissingTableError(bmErr)) {
+          throw classifySupabaseError(bmErr, 'broadcast_messages');
+        }
+        // Try legacy admin_broadcasts if broadcast_messages is not yet deployed
+        const legacyAudience = audience === 'specific_users' ? 'individual' : audience;
+        await client
+          .from('admin_broadcasts')
+          .insert({
+            id: broadcastId,
+            sender_id: admin.id,
+            target_audience: legacyAudience,
+            target_user_id: primaryTargetUserId || null,
+            title: cleanTitle,
+            message: cleanMessage,
+            recipient_count: recipientIds.length,
+            created_at: nowIso,
+          })
+          .then(() => undefined, () => undefined);
+      }
+
       await client.from('audit_logs').insert({
         actor_id: admin.id,
         action: 'ADMIN_SEND_BROADCAST',
-        entity_type: 'notifications',
-        entity_id: cleanTargetUserId || audience,
+        entity_type: 'broadcast_messages',
+        entity_id: broadcastId,
         details: {
           target_audience: audience,
-          target_user_id: cleanTargetUserId || null,
+          target_user_id: primaryTargetUserId || null,
+          target_user_ids: targetIds,
           title: cleanTitle,
+          message: cleanMessage,
           recipient_count: recipientIds.length,
         },
       });
 
+      const targetNames = matchedRecipients
+        .filter((r: any) => targetIds.includes(r.id))
+        .map((r: any) => r.full_name || r.email || r.id);
+
       return {
         success: true,
+        broadcastId,
         targetAudience: audience,
         recipientCount: recipientIds.length,
         createdAt: nowIso,
+        broadcast: {
+          id: broadcastId,
+          senderId: admin.id,
+          senderName: admin.fullName || 'Administrator',
+          targetAudience: audience,
+          targetUserId: primaryTargetUserId,
+          targetUserIds: targetIds,
+          targetUserName: targetNames[0],
+          targetUserNames: targetNames,
+          title: cleanTitle,
+          message: cleanMessage,
+          recipientCount: recipientIds.length,
+          createdAt: nowIso,
+        },
       };
     }
 
+    const returnedId = String((data as any)?.broadcast_id || '');
+    const returnedAudience = ((data as any)?.target_audience || audience) as BroadcastAudience;
+    const returnedCount = Number((data as any)?.recipient_count || 0);
+    const returnedCreatedAt = String((data as any)?.created_at || new Date().toISOString());
+
     return {
       success: true,
-      broadcastId: (data as any)?.broadcast_id,
-      targetAudience: ((data as any)?.target_audience || audience) as BroadcastAudience,
-      recipientCount: Number((data as any)?.recipient_count || 0),
-      createdAt: String((data as any)?.created_at || new Date().toISOString()),
+      broadcastId: returnedId || undefined,
+      targetAudience: returnedAudience,
+      recipientCount: returnedCount,
+      createdAt: returnedCreatedAt,
     };
   }
 
   async function getBroadcastHistory(): Promise<AdminBroadcastRecord[]> {
     await verifyActiveAdmin();
-    const { data, error } = await client
-      .from('admin_broadcasts')
+
+    let rows: any[] = [];
+    const { data: bmRows, error: bmErr } = await client
+      .from('broadcast_messages')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
 
-    if (error) {
-      const code = String((error as any)?.code || '');
-      const msg = String(error.message || '').toLowerCase();
-      if (code === '42P01' || msg.includes('admin_broadcasts')) {
-        return [];
+    if (!bmErr) {
+      rows = Array.isArray(bmRows) ? bmRows : [];
+    } else if (!isMissingTableError(bmErr)) {
+      throw classifySupabaseError(bmErr, 'broadcast_messages');
+    } else {
+      // Fallback 1: check legacy admin_broadcasts if broadcast_messages is not yet deployed
+      const { data: abRows, error: abErr } = await client
+        .from('admin_broadcasts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (!abErr) {
+        rows = Array.isArray(abRows) ? abRows : [];
+      } else if (isMissingTableError(abErr)) {
+        // Fallback 2: recover ADMIN_SEND_BROADCAST entries from audit_logs
+        const { data: auditRows, error: auditErr } = await client
+          .from('audit_logs')
+          .select('*')
+          .eq('action', 'ADMIN_SEND_BROADCAST')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (auditErr) {
+          throw classifySupabaseError(auditErr, 'audit_logs');
+        }
+
+        rows = (auditRows || []).map((a: any) => {
+          const d = (a.details && typeof a.details === 'object' ? a.details : {}) as Record<string, any>;
+          return {
+            id: a.entity_id || a.id,
+            sender_id: a.actor_id,
+            target_audience: d.target_audience || 'all_users',
+            target_user_id: d.target_user_id || null,
+            target_user_ids: Array.isArray(d.target_user_ids) ? d.target_user_ids : [],
+            title: d.title || 'Admin Broadcast',
+            message: d.message || '',
+            recipient_count: Number(d.recipient_count || 0),
+            created_at: a.created_at,
+          };
+        });
+      } else {
+        throw classifySupabaseError(abErr, 'admin_broadcasts');
       }
-      throw classifySupabaseError(error, 'admin_broadcasts');
     }
 
-    const rows = data || [];
-    const userIds = Array.from(
-      new Set(rows.flatMap((r: any) => [r.sender_id, r.target_user_id].filter(Boolean)))
+    const allProfileIds = Array.from(
+      new Set(
+        rows.flatMap((r: any) => [
+          r.sender_id,
+          r.target_user_id,
+          ...(Array.isArray(r.target_user_ids) ? r.target_user_ids : []),
+        ]).filter(Boolean)
+      )
     );
     const nameMap = new Map<string, string>();
 
-    if (userIds.length > 0) {
+    if (allProfileIds.length > 0) {
       const { data: profiles } = await client
         .from('profiles')
         .select('id, full_name, email')
-        .in('id', userIds);
+        .in('id', allProfileIds);
       (profiles || []).forEach((p: any) => {
         nameMap.set(p.id, p.full_name || p.email || p.id);
       });
     }
 
-    return rows.map((row: any) => ({
-      id: String(row.id),
-      senderId: String(row.sender_id),
-      senderName: nameMap.get(row.sender_id) || 'Administrator',
-      targetAudience: (row.target_audience || 'all_users') as BroadcastAudience,
-      targetUserId: row.target_user_id || undefined,
-      targetUserName: row.target_user_id ? nameMap.get(row.target_user_id) || row.target_user_id : undefined,
-      title: String(row.title || ''),
-      message: String(row.message || ''),
-      recipientCount: Number(row.recipient_count || 0),
-      createdAt: displayDate(row.created_at),
-    }));
+    return rows.map((row: any) => {
+      const targetUserIds: string[] = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(row.target_user_ids) ? row.target_user_ids : []),
+            ...(row.target_user_id ? [row.target_user_id] : []),
+          ].filter(Boolean)
+        )
+      );
+      const targetUserNames = targetUserIds.map((uid) => nameMap.get(uid) || uid);
+      return {
+        id: String(row.id),
+        senderId: String(row.sender_id || ''),
+        senderName: nameMap.get(row.sender_id) || 'Administrator',
+        targetAudience: (row.target_audience || 'all_users') as BroadcastAudience,
+        targetUserId: row.target_user_id || targetUserIds[0] || undefined,
+        targetUserIds,
+        targetUserName: targetUserNames[0],
+        targetUserNames,
+        title: String(row.title || ''),
+        message: String(row.message || ''),
+        recipientCount: Number(row.recipient_count || 0),
+        createdAt: displayDate(row.created_at),
+      };
+    });
   }
 
   async function reviewProperty(payload: {

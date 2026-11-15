@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Camera, Loader2, CheckCircle2, AlertCircle, Sparkles, RotateCcw } from 'lucide-react';
 import { Avatar } from './Avatar';
+import { AVATAR_PRESETS } from '../../assets/avatars';
 import { useAuth } from '../../application/context/AuthContext';
 import { storageService } from '../../application/services/storageService';
 import { repository } from '../../infrastructure/repositories';
@@ -18,16 +19,24 @@ interface ProfileAvatarUploaderProps {
 
 export const ProfileAvatarUploader: React.FC<ProfileAvatarUploaderProps> = ({
   title = 'Profile Photo',
-  subtitle = 'JPEG, PNG, or WebP (max 2 MB)',
+  subtitle = 'Upload JPEG, PNG, or WebP (max 2 MB) or choose a preset avatar below',
   onUpdated,
 }) => {
   const { currentUser, refreshAuthProfile } = useAuth();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [savingPresetId, setSavingPresetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   if (!currentUser) return null;
+
+  const isBusy = uploading || savingPresetId !== null;
+  const activePresetId =
+    currentUser.avatarPresetId ||
+    (currentUser.avatarUrl?.startsWith('preset:')
+      ? currentUser.avatarUrl.slice('preset:'.length).trim()
+      : undefined);
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -57,29 +66,61 @@ export const ProfileAvatarUploader: React.FC<ProfileAvatarUploaderProps> = ({
       );
 
       await refreshAuthProfile();
-      setSuccess('Profile photo updated.');
+      setSuccess('Profile photo uploaded.');
       onUpdated?.();
       setTimeout(() => setSuccess(null), 4000);
     } catch (err: unknown) {
-      console.error('[ProfileAvatarUploader] Profile photo update failed:', err instanceof Error ? err.message : err);
+      const rawMsg = err instanceof Error ? err.message : String(err || '');
+      console.error('[ProfileAvatarUploader] Profile photo update failed:', rawMsg);
       if (uploadedPath) {
         await storageService.deletePublicMediaAsset('profile-pictures', uploadedPath).catch(() => {});
       }
-      const normalized = normalizeError(err, 'Could not update profile photo.');
-      setError(normalized.userMessage);
+      if (/row-level security|permission denied|bucket|policy|not found/i.test(rawMsg)) {
+        setError(
+          'Storage upload policy could not save the file yet. Run the latest SQL migration in Supabase Dashboard > SQL Editor, or choose one of the preset avatars below.'
+        );
+      } else {
+        const normalized = normalizeError(err, 'Could not update profile photo.');
+        setError(normalized.userMessage);
+      }
     } finally {
       setUploading(false);
     }
   };
 
+  const handleSelectPreset = async (presetId: string | null) => {
+    setError(null);
+    setSuccess(null);
+    setSavingPresetId(presetId || 'clear');
+
+    try {
+      await repository.updateUserAvatarPresetPersisted(
+        currentUser.id,
+        presetId,
+        currentUser.avatarUrl
+      );
+      await refreshAuthProfile();
+      setSuccess(presetId ? 'Preset profile avatar selected.' : 'Reverted to initials avatar.');
+      onUpdated?.();
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : String(err || '');
+      console.error('[ProfileAvatarUploader] Preset selection failed:', rawMsg);
+      const normalized = normalizeError(err, 'Could not save preset avatar.');
+      setError(normalized.userMessage);
+    } finally {
+      setSavingPresetId(null);
+    }
+  };
+
   return (
-    <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+    <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Avatar
             name={currentUser.fullName || currentUser.email}
             avatarUrl={currentUser.avatarUrl}
-            avatarPresetId={currentUser.avatarPresetId}
+            avatarPresetId={activePresetId}
             size="lg"
           />
           <div>
@@ -88,19 +129,31 @@ export const ProfileAvatarUploader: React.FC<ProfileAvatarUploaderProps> = ({
           </div>
         </div>
 
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
+          {(currentUser.avatarUrl || activePresetId) && (
+            <button
+              type="button"
+              onClick={() => void handleSelectPreset(null)}
+              disabled={isBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Use Initials</span>
+            </button>
+          )}
+
           <input
             ref={inputRef}
             type="file"
             accept=".jpg,.jpeg,.png,.webp"
             className="hidden"
             onChange={handleFileSelected}
-            disabled={uploading}
+            disabled={isBusy}
           />
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            disabled={uploading}
+            disabled={isBusy}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold transition disabled:opacity-50 cursor-pointer"
           >
             {uploading ? (
@@ -111,10 +164,59 @@ export const ProfileAvatarUploader: React.FC<ProfileAvatarUploaderProps> = ({
             ) : (
               <>
                 <Camera className="w-3.5 h-3.5" />
-                <span>{currentUser.avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                <span>{currentUser.avatarUrl && !currentUser.avatarUrl.startsWith('preset:') ? 'Change Photo' : 'Upload Photo'}</span>
               </>
             )}
           </button>
+        </div>
+      </div>
+
+      {/* Preset Avatar Selector */}
+      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+          <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Or choose a preset avatar</span>
+        </div>
+
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2.5">
+          {AVATAR_PRESETS.map((preset) => {
+            const isSelected =
+              (!currentUser.avatarUrl || currentUser.avatarUrl.startsWith('preset:')) &&
+              activePresetId === preset.id;
+            const isSavingThis = savingPresetId === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                disabled={isBusy}
+                onClick={() => void handleSelectPreset(preset.id)}
+                title={preset.name}
+                aria-label={`Choose ${preset.name} preset avatar`}
+                aria-pressed={isSelected}
+                className={`group flex flex-col items-center gap-1 p-2 rounded-xl border transition cursor-pointer disabled:opacity-50 ${
+                  isSelected
+                    ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30 ring-2 ring-emerald-500/30'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                }`}
+              >
+                <div className="relative">
+                  <img
+                    src={preset.svg}
+                    alt={preset.name}
+                    className="w-10 h-10 rounded-full ring-1 ring-slate-200 dark:ring-slate-700"
+                  />
+                  {isSavingThis && (
+                    <span className="absolute inset-0 flex items-center justify-center rounded-full bg-slate-900/50 text-white">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 truncate max-w-full">
+                  {preset.name.split(' ')[1] || preset.name}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
