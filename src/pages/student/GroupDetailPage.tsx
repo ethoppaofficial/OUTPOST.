@@ -22,14 +22,23 @@ import {
   Check,
   X,
   ShieldCheck,
-  GraduationCap
+  GraduationCap,
+  Loader2,
+  Search
 } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
 import { groupChatService } from '../../application/services/groupChatService';
 import { chatService } from '../../application/services/chatService';
+import { validateStudentRegistrationNumber, normalizeRegistrationNumber } from '../../application/utils/validation';
 import { appEventBus } from '../../infrastructure/events/eventBus';
-import { AccommodationGroup, GroupMemberRecord, GroupJoinRequest, StudentProfile } from '../../domain/types';
+import {
+  AccommodationGroup,
+  GroupMemberRecord,
+  GroupJoinRequest,
+  StudentInviteCandidate,
+  StudentProfile,
+} from '../../domain/types';
 import { Badge, VerificationBadge, VerificationTick } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 
@@ -62,6 +71,9 @@ export const GroupDetailPage: React.FC = () => {
   // Invite member state
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [inviteCandidates, setInviteCandidates] = useState<StudentInviteCandidate[]>([]);
+  const [searchingInvites, setSearchingInvites] = useState(false);
+  const [invitingKey, setInvitingKey] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
 
@@ -125,6 +137,57 @@ export const GroupDetailPage: React.FC = () => {
       }
     }
   }, [userId]);
+
+  // Live Supabase search for peers by registration number or full name inside Invite Peer modal
+  useEffect(() => {
+    if (!inviteModalOpen || !groupId) return;
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) {
+      setInviteCandidates([]);
+      setSearchingInvites(false);
+      return;
+    }
+
+    let cancelled = false;
+    const localMatches: StudentInviteCandidate[] = groupChatService
+      .searchStudents(trimmed)
+      .map((sp) => ({
+        userId: sp.userId,
+        fullName: sp.fullName || 'OUTPOST Student',
+        university: sp.university || 'Bayero University Kano',
+        campus: sp.campus || 'New Campus',
+        studyLevel: sp.studyLevel || 'Undergraduate',
+        registrationNumber: sp.registrationNumber || null,
+        isProfileVerified: Boolean(sp.isProfileVerified),
+        isAlreadyMember: Boolean(group?.memberIds.includes(sp.userId)),
+        hasPendingInvite: false,
+      }));
+    setInviteCandidates(localMatches);
+    setSearchingInvites(true);
+
+    const timer = setTimeout(() => {
+      groupChatService
+        .searchStudentsForInvite(trimmed, groupId)
+        .then((results) => {
+          if (!cancelled) {
+            setInviteCandidates(results);
+          }
+        })
+        .catch(() => {
+          // Retain local matches if live search fails momentarily
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setSearchingInvites(false);
+          }
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [inviteModalOpen, searchQuery, groupId, group?.memberIds]);
 
   if (!group) {
     return (
@@ -277,19 +340,43 @@ export const GroupDetailPage: React.FC = () => {
     }
   };
 
-  // Invite candidate students
-  const searchedStudents = searchQuery.trim()
-    ? groupChatService.searchStudents(searchQuery).filter((s) => !group.memberIds.includes(s.userId))
-    : [];
+  const regCheck = validateStudentRegistrationNumber(searchQuery);
+  const directNormalizedReg = regCheck.isValid ? regCheck.normalized : '';
+  const hasExactCandidateForReg =
+    Boolean(directNormalizedReg) &&
+    inviteCandidates.some(
+      (c) => normalizeRegistrationNumber(c.registrationNumber || '') === directNormalizedReg
+    );
 
-  const handleSendInvite = (targetUserId: string) => {
+  const handleSendInvite = async (targetUserId?: string, regNumber?: string) => {
+    const key = targetUserId || regNumber || 'reg';
     setInviteError(null);
     setInviteSuccess(null);
-    const res = groupChatService.inviteMember(group.id, activeUserId, targetUserId);
-    if (res.success) {
-      setInviteSuccess('Invitation sent successfully!');
-    } else {
-      setInviteError(res.error || 'Failed to send invite.');
+    setInvitingKey(key);
+    try {
+      const res = await groupChatService.inviteMemberPersisted(group.id, activeUserId, targetUserId, regNumber);
+      if (res.success) {
+        const targetLabel =
+          res.invitation?.receiverName ||
+          res.invitation?.receiverRegNumber ||
+          regNumber ||
+          'the selected student';
+        setInviteSuccess(`Invitation sent to ${targetLabel}!`);
+        setInviteCandidates((prev) =>
+          prev.map((candidate) =>
+            candidate.userId === (res.invitation?.receiverId || targetUserId)
+              ? { ...candidate, hasPendingInvite: true }
+              : candidate
+          )
+        );
+        refreshGroup();
+      } else {
+        setInviteError(res.error || 'Failed to send invite.');
+      }
+    } catch (err: any) {
+      setInviteError(err?.message || 'Failed to send invite.');
+    } finally {
+      setInvitingKey(null);
     }
   };
 
@@ -990,6 +1077,9 @@ export const GroupDetailPage: React.FC = () => {
         onClose={() => {
           setInviteModalOpen(false);
           setSearchQuery('');
+          setInviteCandidates([]);
+          setSearchingInvites(false);
+          setInvitingKey(null);
           setInviteError(null);
           setInviteSuccess(null);
         }}
@@ -998,13 +1088,13 @@ export const GroupDetailPage: React.FC = () => {
       >
         <div className="space-y-4 p-1">
           {inviteError && (
-            <div className="p-3 rounded-xl bg-rose-50 text-rose-700 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{inviteError}</span>
             </div>
           )}
           {inviteSuccess && (
-            <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
               <span>{inviteSuccess}</span>
             </div>
@@ -1014,40 +1104,113 @@ export const GroupDetailPage: React.FC = () => {
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Search by Student Name or Reg Number
             </label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="e.g. Adebayo, Chioma, 1804..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setInviteError(null);
+                  setInviteSuccess(null);
+                }}
+                placeholder="e.g. CST/20/SWE/000011, BUK/22/CHS/00812, or name..."
+                className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              {searchingInvites && (
+                <Loader2 className="w-4 h-4 text-emerald-600 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Registration numbers are matched case-insensitively across all registered students.
+            </p>
           </div>
 
+          {directNormalizedReg && !hasExactCandidateForReg && (
+            <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                  Invite directly using <span className="font-mono text-emerald-700 dark:text-emerald-300">{directNormalizedReg}</span>
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Sends a cohort invitation to the student linked to this registration number.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={invitingKey !== null}
+                onClick={() => void handleSendInvite(undefined, directNormalizedReg)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                {invitingKey === directNormalizedReg ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <UserPlus className="w-3.5 h-3.5" />
+                )}
+                <span>Send Invite</span>
+              </button>
+            </div>
+          )}
+
           <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-            {searchedStudents.length === 0 ? (
+            {searchQuery.trim().length < 2 ? (
               <p className="text-xs text-slate-400 py-4 text-center">
-                {searchQuery.trim() ? 'No matching peers found.' : 'Type a name or registration number to search.'}
+                Type at least 2 characters of a name or registration number to search.
+              </p>
+            ) : searchingInvites && inviteCandidates.length === 0 ? (
+              <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                <span>Searching registered students…</span>
+              </div>
+            ) : inviteCandidates.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">
+                No matching peers found.
               </p>
             ) : (
-              searchedStudents.map((s) => (
+              inviteCandidates.map((s) => (
                 <div key={s.userId} className="py-2.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 font-bold text-xs flex items-center justify-center">
-                      {s.fullName[0]}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 font-bold text-xs flex items-center justify-center shrink-0 text-slate-700 dark:text-slate-200">
+                      {s.fullName?.[0] || 'S'}
                     </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">{s.fullName}</h5>
-                      <span className="text-[10px] text-slate-400">{s.university} • {s.registrationNumber || 'Verified'}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1">
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white truncate">{s.fullName}</h5>
+                        <VerificationTick type="student" isVerified={s.isProfileVerified} />
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-400">
+                        <span className="truncate">{s.university}</span>
+                        <span>•</span>
+                        <span className="font-mono font-semibold text-slate-600 dark:text-slate-300">
+                          {s.registrationNumber || 'Reg no. not linked'}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleSendInvite(s.userId)}
-                    className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Invite</span>
-                  </button>
+                  {s.isAlreadyMember ? (
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] font-semibold shrink-0">
+                      Member
+                    </span>
+                  ) : s.hasPendingInvite ? (
+                    <span className="px-2.5 py-1 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-[11px] font-semibold shrink-0">
+                      Invited
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={invitingKey !== null}
+                      onClick={() => void handleSendInvite(s.userId, s.registrationNumber || undefined)}
+                      className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1 shadow-xs shrink-0 cursor-pointer"
+                    >
+                      {invitingKey === s.userId ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <UserPlus className="w-3.5 h-3.5" />
+                      )}
+                      <span>Invite</span>
+                    </button>
+                  )}
                 </div>
               ))
             )}

@@ -29,6 +29,13 @@ class VerificationService {
     return repository.searchStudentByRegistrationNumber(regNumber);
   }
 
+  public async linkStudentRegistrationNumber(
+    userId: string,
+    regNumber: string
+  ): Promise<{ success: boolean; registrationNumber?: string; error?: string }> {
+    return repository.linkStudentRegistrationNumberFromSupabase(userId, regNumber);
+  }
+
   public async lookupStudentByRegistrationNumber(regNumber: string): Promise<PublicStudentProfile | null> {
     if (typeof (repository as any).lookupStudentByRegistrationNumberFromSupabase === 'function') {
       const remote = await (repository as any).lookupStudentByRegistrationNumberFromSupabase(regNumber);

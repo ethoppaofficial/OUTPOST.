@@ -37,6 +37,11 @@ export const StudentVerificationPage: React.FC = () => {
   );
   const [liveVerified, setLiveVerified] = useState<boolean>(Boolean(cachedStudent?.isProfileVerified));
   const [liveRegNumber, setLiveRegNumber] = useState<string>(cachedStudent?.registrationNumber || '');
+  const [editingReg, setEditingReg] = useState(false);
+  const [regInput, setRegInput] = useState<string>(cachedStudent?.registrationNumber || '');
+  const [savingReg, setSavingReg] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regSuccess, setRegSuccess] = useState<string | null>(null);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -67,6 +72,10 @@ export const StudentVerificationPage: React.FC = () => {
       }
       if (spRow?.registration_number) {
         setLiveRegNumber(spRow.registration_number);
+        setRegInput(spRow.registration_number);
+      } else if (currentUser?.studentProfile?.registrationNumber) {
+        setLiveRegNumber(currentUser.studentProfile.registrationNumber);
+        setRegInput(currentUser.studentProfile.registrationNumber);
       }
     } catch (err: unknown) {
       const normalized = normalizeError(err, 'Could not load uploaded verification documents.');
@@ -93,6 +102,33 @@ export const StudentVerificationPage: React.FC = () => {
       }
       setFile(selected);
       setFileName(check.sanitizedFileName || selected.name);
+    }
+  };
+
+  const handleSaveRegNumber = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentId || studentId === 'anonymous') {
+      setRegError('Please sign in again before linking your registration number.');
+      return;
+    }
+    setRegError(null);
+    setRegSuccess(null);
+    setSavingReg(true);
+    try {
+      const res = await verificationService.linkStudentRegistrationNumber(studentId, regInput);
+      if (res.success && res.registrationNumber) {
+        setLiveRegNumber(res.registrationNumber);
+        setRegInput(res.registrationNumber);
+        setEditingReg(false);
+        setRegSuccess(`Registration number ${res.registrationNumber} linked to your profile.`);
+      } else {
+        setRegError(res.error || 'Could not link registration number.');
+      }
+    } catch (err: unknown) {
+      const normalized = normalizeError(err, 'Could not link registration number.');
+      setRegError(normalized.userMessage);
+    } finally {
+      setSavingReg(false);
     }
   };
 
@@ -185,7 +221,23 @@ export const StudentVerificationPage: React.FC = () => {
             </div>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
-            <span className="text-slate-400 block text-[11px]">Registration No:</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400 block text-[11px]">Registration No:</span>
+              {!isProfileVerified && !editingReg && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegInput(liveRegNumber || '');
+                    setRegError(null);
+                    setRegSuccess(null);
+                    setEditingReg(true);
+                  }}
+                  className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                >
+                  {liveRegNumber ? 'Update' : 'Link Reg No'}
+                </button>
+              )}
+            </div>
             <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{liveRegNumber || 'Not supplied'}</span>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
@@ -195,6 +247,59 @@ export const StudentVerificationPage: React.FC = () => {
             </span>
           </div>
         </div>
+
+        {!isProfileVerified && (!liveRegNumber || editingReg) && (
+          <form onSubmit={handleSaveRegNumber} className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+              <input
+                type="text"
+                value={regInput}
+                onChange={(e) => {
+                  setRegInput(e.target.value);
+                  setRegError(null);
+                }}
+                placeholder="Enter your registration number (e.g. CST/20/SWE/000011)"
+                className="flex-1 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={savingReg}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {savingReg && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{savingReg ? 'Saving…' : 'Link Reg Number'}</span>
+                </button>
+                {editingReg && liveRegNumber && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingReg(false);
+                      setRegError(null);
+                    }}
+                    className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Your registration number allows peers to verify your identity and invite you to accommodation cohorts.
+            </p>
+          </form>
+        )}
+
+        {regError && (
+          <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs">
+            {regError}
+          </div>
+        )}
+        {regSuccess && (
+          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs">
+            {regSuccess}
+          </div>
+        )}
       </div>
 
       {/* Upload Form */}

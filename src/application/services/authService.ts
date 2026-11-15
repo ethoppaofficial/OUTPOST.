@@ -152,6 +152,68 @@ class AuthService {
         return { success: false, error: 'Administrator account is not active.' };
       }
 
+      if (validRole === 'student') {
+        const { data: existingSp } = await supabase
+          .from('student_profiles')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        let resolvedRegNumber = existingSp?.registration_number
+          ? normalizeRegistrationNumber(existingSp.registration_number)
+          : '';
+        const metaReg = meta.registration_number
+          ? normalizeRegistrationNumber(String(meta.registration_number))
+          : '';
+
+        if (!resolvedRegNumber && metaReg) {
+          const check = validateStudentRegistrationNumber(metaReg);
+          if (check.isValid) {
+            const { error: linkErr } = await supabase.rpc('link_student_registration_number', {
+              p_reg_number: check.normalized,
+            });
+            if (!linkErr) {
+              resolvedRegNumber = check.normalized;
+            } else {
+              await supabase
+                .from('student_profiles')
+                .update({ registration_number: check.normalized })
+                .eq('user_id', userId)
+                .is('registration_number', null);
+              resolvedRegNumber = check.normalized;
+            }
+          }
+        }
+
+        if (existingSp || resolvedRegNumber) {
+          const cachedSp: StudentProfile = {
+            userId,
+            fullName: profile.full_name || meta.full_name || 'Student',
+            phone: profile.phone || meta.phone || '',
+            institutionName: existingSp?.institution || meta.university || 'Bayero University Kano',
+            university: existingSp?.institution || meta.university || 'Bayero University Kano',
+            campus: existingSp?.campus || meta.campus || 'New Campus',
+            faculty: existingSp?.faculty || undefined,
+            department: existingSp?.department || undefined,
+            studyLevel: existingSp?.study_level || meta.study_level || 'Undergraduate',
+            programme: meta.programme || '',
+            registrationNumber: resolvedRegNumber,
+            gender:
+              existingSp?.gender === 'female'
+                ? 'Female'
+                : existingSp?.gender === 'male'
+                ? 'Male'
+                : 'Other',
+            preferredLocation: 'Dambare',
+            bio: existingSp?.bio || undefined,
+            isProfileVerified: Boolean(existingSp?.is_profile_verified),
+          };
+          if (typeof (repository as any).cacheStudentProfile === 'function') {
+            (repository as any).cacheStudentProfile(cachedSp);
+          }
+        }
+      }
+
       if (validRole === 'landlord' && (meta.company_name || meta.business_address || meta.tax_id)) {
         const { data: existingLp } = await supabase
           .from('landlord_profiles')
@@ -188,6 +250,7 @@ class AuthService {
         fullName: profile.full_name || sbUser.user_metadata?.full_name || '',
         avatarUrl: profile.avatar_url || sbUser.user_metadata?.avatar_url || '',
         phone: profile.phone || meta.phone || existing?.phone,
+        studentProfile: repository.getStudentProfile(userId) || existing?.studentProfile,
       };
 
       repository.cacheUser(authenticatedUser);

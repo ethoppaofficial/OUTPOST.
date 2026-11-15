@@ -16,7 +16,8 @@ import { supabase, isSupabaseConfigured } from '../../infrastructure/supabase/su
 import { authService } from '../services/authService';
 import { repository } from '../../infrastructure/repositories';
 import { configValidationError, BackendMode } from '../../infrastructure/config/appConfig';
-import { User, UserRole, AccountStatus, LandlordProfile } from '../../domain/types';
+import { User, UserRole, AccountStatus, LandlordProfile, StudentProfile } from '../../domain/types';
+import { normalizeRegistrationNumber, validateStudentRegistrationNumber } from '../utils/validation';
 
 export type ProfileInitializationStatus =
   | 'loading'
@@ -176,6 +177,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         let resolvedLandlordProfile: LandlordProfile | null = null;
+        let resolvedStudentProfile: StudentProfile | null = null;
+
+        if (validRole === 'student') {
+          const { data: sp } = await supabase
+            .from('student_profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (isStale()) return;
+
+          const meta = user.user_metadata || {};
+          let regNo = sp?.registration_number
+            ? normalizeRegistrationNumber(sp.registration_number)
+            : '';
+          if (!regNo && meta.registration_number) {
+            const check = validateStudentRegistrationNumber(String(meta.registration_number));
+            if (check.isValid) {
+              const { error: linkErr } = await supabase.rpc('link_student_registration_number', {
+                p_reg_number: check.normalized,
+              });
+              if (!linkErr) {
+                regNo = check.normalized;
+              } else if (sp) {
+                await supabase
+                  .from('student_profiles')
+                  .update({ registration_number: check.normalized })
+                  .eq('user_id', user.id)
+                  .is('registration_number', null);
+                regNo = check.normalized;
+              }
+            }
+          }
+
+          if (sp || regNo) {
+            resolvedStudentProfile = {
+              userId: user.id,
+              fullName: profile.full_name || meta.full_name || 'Student',
+              phone: profile.phone || meta.phone || '',
+              institutionName: sp?.institution || meta.university || 'Bayero University Kano',
+              university: sp?.institution || meta.university || 'Bayero University Kano',
+              campus: sp?.campus || meta.campus || 'New Campus',
+              faculty: sp?.faculty || undefined,
+              department: sp?.department || undefined,
+              studyLevel: sp?.study_level || meta.study_level || 'Undergraduate',
+              programme: meta.programme || '',
+              registrationNumber: regNo,
+              gender:
+                sp?.gender === 'female'
+                  ? 'Female'
+                  : sp?.gender === 'male'
+                  ? 'Male'
+                  : 'Other',
+              preferredLocation: 'Dambare',
+              bio: sp?.bio || undefined,
+              isProfileVerified: Boolean(sp?.is_profile_verified),
+            };
+            if (typeof (repository as any).cacheStudentProfile === 'function') {
+              (repository as any).cacheStudentProfile(resolvedStudentProfile);
+            }
+          }
+        }
+
         if (validRole === 'landlord') {
           const { data: lp } = await supabase
             .from('landlord_profiles')
@@ -218,6 +282,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           fullName: profile.full_name || user.user_metadata?.full_name || '',
           avatarUrl: profile.avatar_url || user.user_metadata?.avatar_url || '',
           phone: profile.phone || existingUser?.phone,
+          studentProfile: resolvedStudentProfile || existingUser?.studentProfile,
           landlordProfile: resolvedLandlordProfile || undefined,
         };
 

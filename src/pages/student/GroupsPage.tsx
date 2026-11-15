@@ -54,6 +54,7 @@ export const GroupsPage: React.FC = () => {
   );
   const [activeTab, setActiveTab] = useState<'my' | 'explore' | 'invites'>('my');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
   const refreshData = () => {
     setAllGroups(groupChatService.getGroups());
@@ -84,14 +85,29 @@ export const GroupsPage: React.FC = () => {
     }
   };
 
-  const handleRespondInvite = (inviteId: string, action: 'accept' | 'reject') => {
-    const success = groupChatService.respondToInvitation(inviteId, action);
-    if (success) {
+  const handleRespondInvite = async (inviteId: string, action: 'accept' | 'reject') => {
+    setRespondingInviteId(inviteId);
+    try {
+      const res = await groupChatService.respondToInvitationPersisted(inviteId, action);
+      if (res.success) {
+        setNotice({
+          type: 'success',
+          text: action === 'accept' ? 'Invitation accepted! You are now a cohort member.' : 'Invitation declined.',
+        });
+        refreshData();
+      } else {
+        setNotice({
+          type: 'error',
+          text: res.error || 'Could not process cohort invitation.',
+        });
+      }
+    } catch (err: any) {
       setNotice({
-        type: 'success',
-        text: action === 'accept' ? 'Invitation accepted! You are now a cohort member.' : 'Invitation declined.',
+        type: 'error',
+        text: err?.message || 'Could not process cohort invitation.',
       });
-      refreshData();
+    } finally {
+      setRespondingInviteId(null);
     }
   };
 
@@ -394,14 +410,16 @@ export const GroupsPage: React.FC = () => {
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleRespondInvite(inv.id, 'accept')}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs"
+                      disabled={respondingInviteId === inv.id}
+                      onClick={() => void handleRespondInvite(inv.id, 'accept')}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-xs cursor-pointer"
                     >
-                      Accept
+                      {respondingInviteId === inv.id ? 'Processing…' : 'Accept'}
                     </button>
                     <button
-                      onClick={() => handleRespondInvite(inv.id, 'reject')}
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50"
+                      disabled={respondingInviteId === inv.id}
+                      onClick={() => void handleRespondInvite(inv.id, 'reject')}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
                     >
                       Decline
                     </button>

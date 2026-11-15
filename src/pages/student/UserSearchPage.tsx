@@ -1,22 +1,41 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Lock, AlertCircle, Loader2 } from 'lucide-react';
+import { Search, Lock, AlertCircle, Loader2, UserPlus, CheckCircle } from 'lucide-react';
 import { verificationService } from '../../application/services/verificationService';
+import { groupChatService } from '../../application/services/groupChatService';
+import { useAuth } from '../../application/context/AuthContext';
 import { VerificationBadge, VerificationTick } from '../../components/ui/Badge';
 import { PublicStudentProfile } from '../../domain/types';
 
 export const UserSearchPage: React.FC = () => {
+  const { currentUser } = useAuth();
   const [regNumber, setRegNumber] = useState('');
   const [result, setResult] = useState<PublicStudentProfile | null>(null);
   const [searched, setSearched] = useState(false);
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const activeUserId = currentUser?.id && currentUser.id !== 'anonymous' ? currentUser.id : '';
+  const adminCohorts = activeUserId
+    ? groupChatService
+        .getGroups()
+        .filter(
+          (g) =>
+            g.status !== 'closed' &&
+            (g.leaderId === activeUserId || g.ownerId === activeUserId || g.adminIds?.includes(activeUserId)) &&
+            g.memberIds.length < g.maxCapacity
+        )
+    : [];
 
   const runLookup = async (rawValue: string) => {
     const trimmed = rawValue.trim();
     if (!trimmed) return;
     setSearching(true);
     setLookupError(null);
+    setInviteFeedback(null);
     try {
       const found = await verificationService.lookupStudentByRegistrationNumber(trimmed);
       setResult(found);
@@ -33,6 +52,41 @@ export const UserSearchPage: React.FC = () => {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     void runLookup(regNumber);
+  };
+
+  const handleQuickInvite = async () => {
+    if (!activeUserId || !result?.id) return;
+    const targetGroupId = selectedGroupId || adminCohorts[0]?.id;
+    if (!targetGroupId) return;
+    setInviting(true);
+    setInviteFeedback(null);
+    try {
+      const res = await groupChatService.inviteMemberPersisted(
+        targetGroupId,
+        activeUserId,
+        result.id,
+        result.registrationNumber || undefined
+      );
+      if (res.success) {
+        const cohortName = adminCohorts.find((g) => g.id === targetGroupId)?.name || 'cohort';
+        setInviteFeedback({
+          type: 'success',
+          text: `Cohort invitation sent to ${result.displayName} for "${cohortName}".`,
+        });
+      } else {
+        setInviteFeedback({
+          type: 'error',
+          text: res.error || 'Could not send invitation.',
+        });
+      }
+    } catch (err: any) {
+      setInviteFeedback({
+        type: 'error',
+        text: err?.message || 'Could not send invitation.',
+      });
+    } finally {
+      setInviting(false);
+    }
   };
 
   return (
@@ -164,6 +218,52 @@ export const UserSearchPage: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {adminCohorts.length > 0 && result.id !== activeUserId && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    Invite Student to Accommodation Cohort
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={selectedGroupId || adminCohorts[0]?.id || ''}
+                      onChange={(e) => setSelectedGroupId(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                    >
+                      {adminCohorts.map((cohort) => (
+                        <option key={cohort.id} value={cohort.id}>
+                          {cohort.name} ({cohort.memberIds.length}/{cohort.maxCapacity})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={inviting}
+                      onClick={() => void handleQuickInvite()}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {inviting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                      <span>{inviting ? 'Sending…' : 'Send Cohort Invite'}</span>
+                    </button>
+                  </div>
+                  {inviteFeedback && (
+                    <div
+                      className={`p-2.5 rounded-xl text-xs flex items-center gap-1.5 ${
+                        inviteFeedback.type === 'success'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                          : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                      }`}
+                    >
+                      {inviteFeedback.type === 'success' ? (
+                        <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span>{inviteFeedback.text}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                 <Link

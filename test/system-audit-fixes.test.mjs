@@ -9,6 +9,7 @@ import { roommateService } from '../src/application/services/roommateService.ts'
 import { groupChatService } from '../src/application/services/groupChatService.ts';
 import { chatService } from '../src/application/services/chatService.ts';
 import { authService } from '../src/application/services/authService.ts';
+import { verificationService } from '../src/application/services/verificationService.ts';
 import { supabase } from '../src/infrastructure/supabase/supabaseClient.ts';
 
 const read = (relPath) => fs.readFileSync(path.resolve(relPath), 'utf8');
@@ -33,6 +34,9 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
   const roommateReqsSrc = read('src/pages/student/RoommateRequestsPage.tsx');
   const groupsSrc = read('src/pages/student/GroupsPage.tsx');
   const groupDetailSrc = read('src/pages/student/GroupDetailPage.tsx');
+  const studentVerifSrc = read('src/pages/student/StudentVerificationPage.tsx');
+  const userSearchSrc = read('src/pages/student/UserSearchPage.tsx');
+  const m16 = read('supabase/migrations/20261115000016_student_reg_number_link_and_invite_search.sql');
 
   describe('1. Migration 15 Schema & Atomic RPC Fixes', () => {
     test('Defines submit_payment_receipt_atomic RPC with ownership, status guard, and SECURITY DEFINER lock', () => {
@@ -401,6 +405,202 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
       assert.match(registerPageSrc, /directed to the Sign In page to log in using your registered password/i);
       assert.match(registerPageSrc, /Resend Confirmation Email/);
       assert.match(registerPageSrc, /authService\.resendVerificationEmail/);
+    });
+  });
+
+  describe('7. Student Registration Number Linkage & Cohort Invite Flow (Migration 16)', () => {
+    test('Migration 16 defines backfill, handle_new_user linkage, link_student_registration_number, invite search & atomic RPCs', () => {
+      assert.match(m16, /UPDATE public\.student_profiles[\s\S]*registration_number = v_norm/i);
+      assert.match(m16, /CREATE OR REPLACE FUNCTION public\.handle_new_user/i);
+      assert.match(m16, /CREATE OR REPLACE FUNCTION public\.link_student_registration_number/i);
+      assert.match(m16, /CREATE OR REPLACE FUNCTION public\.search_students_for_invite/i);
+      assert.match(m16, /CREATE OR REPLACE FUNCTION public\.invite_student_to_group_atomic/i);
+      assert.match(m16, /CREATE OR REPLACE FUNCTION public\.respond_to_group_invitation_atomic/i);
+      assert.match(m16, /status IN \('cancelled', 'pending'\)/i);
+      assert.match(m16, /REVOKE EXECUTE ON FUNCTION public\.search_students_for_invite[\s\S]*FROM PUBLIC, anon/i);
+      assert.match(m16, /GRANT EXECUTE ON FUNCTION public\.invite_student_to_group_atomic[\s\S]*TO authenticated/i);
+    });
+
+    test('searchStudentByRegistrationNumber and searchStudents match case- and whitespace-insensitively', () => {
+      const peerId = '44444444-4444-4444-8444-444444444444';
+      repository.cacheStudentProfile({
+        userId: peerId,
+        fullName: 'Sadiq Umar',
+        phone: '',
+        institutionName: 'Bayero University Kano',
+        university: 'Bayero University Kano',
+        campus: 'New Campus',
+        studyLevel: '400 Level',
+        programme: 'Software Engineering',
+        registrationNumber: 'CST/20/SWE/000011',
+        gender: 'Male',
+        preferredLocation: 'Dambare',
+        isProfileVerified: true,
+      });
+
+      const exact = repository.searchStudentByRegistrationNumber('  cst/20/swe/000011 ');
+      assert.equal(exact?.userId, peerId);
+      assert.equal(exact?.registrationNumber, 'CST/20/SWE/000011');
+
+      const searched = repository.searchStudents('cst/20/swe/000011');
+      assert.ok(searched.some((p) => p.userId === peerId));
+    });
+
+    test('groupChatService.searchStudentsForInvite, inviteMemberPersisted, and respondToInvitationPersisted execute via Supabase RPCs', async () => {
+      const leaderId = '55555555-5555-4555-8555-555555555555';
+      const inviteeId = '66666666-6666-4666-8666-666666666666';
+
+      repository.cacheUser({
+        id: leaderId,
+        email: 'leader@buk.edu.ng',
+        fullName: 'Ibrahim Musa',
+        role: 'student',
+        accountStatus: 'active',
+        createdAt: new Date().toISOString(),
+      });
+      repository.setActiveUserId(leaderId);
+
+      const cohort = groupChatService.createGroup(
+        'Ethappa Property occupants group 1',
+        'Software Engineering cohort',
+        leaderId,
+        4,
+        undefined,
+        'invite_only'
+      );
+
+      const origRpc = supabase.rpc;
+      const rpcCalls = [];
+      supabase.rpc = async (fn, params) => {
+        rpcCalls.push({ fn, params });
+        if (fn === 'search_students_for_invite') {
+          return {
+            data: [
+              {
+                userId: inviteeId,
+                fullName: 'Amina Yusuf',
+                avatarUrl: null,
+                university: 'Bayero University Kano',
+                campus: 'New Campus',
+                studyLevel: '400 Level',
+                registrationNumber: 'CST/20/SWE/000011',
+                isProfileVerified: true,
+                isAlreadyMember: false,
+                hasPendingInvite: false,
+              },
+            ],
+            error: null,
+          };
+        }
+        if (fn === 'invite_student_to_group_atomic') {
+          return {
+            data: {
+              success: true,
+              invitation: {
+                id: '77777777-7777-4777-8777-777777777777',
+                groupId: cohort.id,
+                groupName: cohort.name,
+                senderId: leaderId,
+                senderName: 'Ibrahim Musa',
+                receiverId: inviteeId,
+                receiverName: 'Amina Yusuf',
+                receiverRegNumber: 'CST/20/SWE/000011',
+                status: 'pending',
+              },
+            },
+            error: null,
+          };
+        }
+        if (fn === 'respond_to_group_invitation_atomic') {
+          return {
+            data: { success: true, status: 'accepted', groupId: cohort.id },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      };
+
+      try {
+        const candidates = await groupChatService.searchStudentsForInvite('cst/20/swe/000011', cohort.id);
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].userId, inviteeId);
+        assert.equal(candidates[0].registrationNumber, 'CST/20/SWE/000011');
+
+        const inviteRes = await groupChatService.inviteMemberPersisted(
+          cohort.id,
+          leaderId,
+          undefined,
+          '  cst/20/swe/000011 '
+        );
+        assert.equal(inviteRes.success, true);
+        assert.equal(inviteRes.invitation?.receiverId, inviteeId);
+        assert.equal(inviteRes.invitation?.receiverRegNumber, 'CST/20/SWE/000011');
+
+        const pendingForInvitee = groupChatService.getPendingInvitations(inviteeId);
+        assert.equal(pendingForInvitee.length, 1);
+        assert.equal(pendingForInvitee[0].id, '77777777-7777-4777-8777-777777777777');
+
+        const acceptRes = await groupChatService.respondToInvitationPersisted(
+          pendingForInvitee[0].id,
+          'accept'
+        );
+        assert.equal(acceptRes.success, true);
+        assert.ok(groupChatService.getGroupById(cohort.id)?.memberIds.includes(inviteeId));
+
+        assert.equal(rpcCalls[0].fn, 'search_students_for_invite');
+        assert.equal(rpcCalls[1].fn, 'invite_student_to_group_atomic');
+        assert.equal(rpcCalls[1].params.p_reg_number, 'CST/20/SWE/000011');
+        assert.equal(rpcCalls[2].fn, 'respond_to_group_invitation_atomic');
+      } finally {
+        supabase.rpc = origRpc;
+      }
+    });
+
+    test('verificationService.linkStudentRegistrationNumber validates format and persists normalized registration number', async () => {
+      const studentId = '88888888-8888-4888-8888-888888888888';
+      repository.cacheUser({
+        id: studentId,
+        email: 'unlinked@buk.edu.ng',
+        fullName: 'Kabir Sani',
+        role: 'student',
+        accountStatus: 'active',
+        createdAt: new Date().toISOString(),
+      });
+
+      const invalidRes = await verificationService.linkStudentRegistrationNumber(studentId, 'ab');
+      assert.equal(invalidRes.success, false);
+      assert.match(invalidRes.error || '', /between 4 and 40 characters/i);
+
+      const origRpc = supabase.rpc;
+      supabase.rpc = async (fn, params) => {
+        if (fn === 'link_student_registration_number') {
+          return {
+            data: { success: true, userId: studentId, registrationNumber: params.p_reg_number },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      };
+
+      try {
+        const okRes = await verificationService.linkStudentRegistrationNumber(studentId, '  cst/20/swe/000099 ');
+        assert.equal(okRes.success, true);
+        assert.equal(okRes.registrationNumber, 'CST/20/SWE/000099');
+        assert.equal(repository.getStudentProfile(studentId)?.registrationNumber, 'CST/20/SWE/000099');
+        assert.equal(repository.getUserById(studentId)?.studentProfile?.registrationNumber, 'CST/20/SWE/000099');
+      } finally {
+        supabase.rpc = origRpc;
+      }
+    });
+
+    test('UI & auth flows wire registration linkage and live invite search end-to-end', () => {
+      assert.match(groupDetailSrc, /groupChatService\s*\.\s*searchStudentsForInvite/);
+      assert.match(groupDetailSrc, /groupChatService\s*\.\s*inviteMemberPersisted/);
+      assert.match(groupsSrc, /groupChatService\s*\.\s*respondToInvitationPersisted/);
+      assert.match(studentVerifSrc, /verificationService\s*\.\s*linkStudentRegistrationNumber/);
+      assert.match(userSearchSrc, /groupChatService\s*\.\s*inviteMemberPersisted/);
+      assert.match(authSvcSrc, /cacheStudentProfile/);
+      assert.match(authCtxSrc, /cacheStudentProfile/);
     });
   });
 });

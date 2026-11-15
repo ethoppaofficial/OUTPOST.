@@ -21,7 +21,11 @@ import { supabaseStorageService } from './supabaseStorageService';
 import { appEventBus } from '../events/eventBus';
 import { calculateCompatibility, CompatibilityResult } from '../../domain/matching';
 import { encodeGeohash } from '../../domain/geoUtils';
-import { validateLandlordPaymentDetails } from '../../application/utils/validation';
+import {
+  validateLandlordPaymentDetails,
+  normalizeRegistrationNumber,
+  validateStudentRegistrationNumber,
+} from '../../application/utils/validation';
 import {
   User,
   StudentProfile,
@@ -56,6 +60,7 @@ import {
   PublicProfile,
   PublicLandlordProfile,
   PublicStudentProfile,
+  StudentInviteCandidate,
 } from '../../domain/types';
 
 const IS_PROD = Boolean((import.meta as any)?.env?.PROD);
@@ -1538,7 +1543,7 @@ export class SupabaseRepository {
           bio: studentProf.bio || undefined,
           isProfileVerified: Boolean(studentProf.is_profile_verified),
         };
-        this.studentProfiles = [sp, ...this.studentProfiles.filter((p) => p.userId !== userId)];
+        this.cacheStudentProfile(sp);
       }
 
       if (landlordProf) {
@@ -1653,6 +1658,29 @@ export class SupabaseRepository {
     return this.studentProfiles.find((p) => p.userId === userId);
   }
 
+  public cacheStudentProfile(profile: StudentProfile): StudentProfile {
+    const existingIdx = this.studentProfiles.findIndex((p) => p.userId === profile.userId);
+    const existing = existingIdx >= 0 ? this.studentProfiles[existingIdx] : undefined;
+    const merged: StudentProfile = {
+      ...existing,
+      ...profile,
+      registrationNumber: profile.registrationNumber || existing?.registrationNumber || '',
+    };
+    if (existingIdx >= 0) {
+      this.studentProfiles[existingIdx] = merged;
+    } else {
+      this.studentProfiles.push(merged);
+    }
+    const cachedUser = this.getUserById(profile.userId);
+    if (cachedUser && cachedUser.role === 'student') {
+      this.cacheUser({
+        ...cachedUser,
+        studentProfile: merged,
+      });
+    }
+    return merged;
+  }
+
   public saveStudentProfile(profile: StudentProfile): StudentProfile {
     const idx = this.studentProfiles.findIndex((p) => p.userId === profile.userId);
     if (idx >= 0) {
@@ -1669,7 +1697,7 @@ export class SupabaseRepository {
       gender: profile.gender?.toLowerCase() || 'other',
     };
     if (profile.registrationNumber && profile.registrationNumber.trim()) {
-      payload.registration_number = profile.registrationNumber.trim().toUpperCase();
+      payload.registration_number = normalizeRegistrationNumber(profile.registrationNumber);
     }
     if (profile.faculty !== undefined) payload.faculty = profile.faculty || null;
     if (profile.department !== undefined) payload.department = profile.department || null;
@@ -1689,21 +1717,340 @@ export class SupabaseRepository {
     return profile;
   }
 
+  public async linkStudentRegistrationNumberFromSupabase(
+    userId: string,
+    rawRegNumber: string
+  ): Promise<{ success: boolean; registrationNumber?: string; error?: string }> {
+    const validation = validateStudentRegistrationNumber(rawRegNumber);
+    if (!validation.isValid) {
+      return { success: false, error: validation.error };
+    }
+    const normalized = validation.normalized;
+
+    const mapRegError = (err: any): string => {
+      const code = String(err?.code || '');
+      const msg = String(err?.message || '').toLowerCase();
+      if (code === '23505' || msg.includes('already registered') || msg.includes('duplicate')) {
+        return 'This student registration number is already linked to another OUTPOST account.';
+      }
+      if (msg.includes('verified student registration')) {
+        return 'Verified student registration numbers cannot be modified directly.';
+      }
+      return err?.message || 'Unable to link registration number right now.';
+    };
+
+    const applyLocalRegUpdate = (resolvedReg: string) => {
+      const user = this.getUserById(userId);
+      const existing = this.getStudentProfile(userId);
+      const updated: StudentProfile = {
+        userId,
+        fullName: existing?.fullName || user?.fullName || 'OUTPOST Student',
+        phone: existing?.phone || user?.phone || '',
+        institutionName: existing?.institutionName || user?.institution || 'Bayero University Kano',
+        university: existing?.university || user?.institution || 'Bayero University Kano',
+        campus: existing?.campus || user?.campus || 'New Campus',
+        faculty: existing?.faculty || user?.faculty,
+        department: existing?.department || user?.department,
+        studyLevel: existing?.studyLevel || user?.studyLevel || 'Undergraduate',
+        programme: existing?.programme || user?.programme || '',
+        registrationNumber: resolvedReg,
+        gender: existing?.gender || 'Other',
+        preferredLocation: existing?.preferredLocation || user?.preferences?.preferredLocation || 'Dambare',
+        bio: existing?.bio || user?.bio,
+        isProfileVerified: Boolean(existing?.isProfileVerified),
+      };
+      this.cacheStudentProfile(updated);
+      if (this.activeUserId === userId && typeof supabase.auth?.updateUser === 'function') {
+        supabase.auth.updateUser({ data: { registration_number: resolvedReg } }).catch(() => {});
+      }
+    };
+
+    try {
+      const { data, error } = await supabase.rpc('link_student_registration_number', {
+        p_reg_number: normalized,
+      });
+
+      if (!error && data && typeof data === 'object' && (data as any).success !== false) {
+        const resolvedReg = String((data as any).registrationNumber || normalized);
+        applyLocalRegUpdate(resolvedReg);
+        return { success: true, registrationNumber: resolvedReg };
+      }
+
+      if (error) {
+        const errMsg = String(error.message || '').toLowerCase();
+        const isMissingRpc =
+          error.code === 'PGRST202' ||
+          error.code === '42883' ||
+          errMsg.includes('could not find the function') ||
+          errMsg.includes('does not exist');
+        if (!isMissingRpc) {
+          return { success: false, error: mapRegError(error) };
+        }
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase();
+      if (!msg.includes('could not find the function') && !msg.includes('does not exist')) {
+        return { success: false, error: mapRegError(err) };
+      }
+    }
+
+    // Fallback when Migration 16 RPC is not yet deployed: direct PostgREST upsert
+    try {
+      const { data: existingRow } = await supabase
+        .from('student_profiles')
+        .select('user_id, registration_number, is_profile_verified')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existingRow?.is_profile_verified && normalizeRegistrationNumber(existingRow.registration_number || '') !== normalized) {
+        return { success: false, error: 'Verified student registration numbers cannot be modified directly.' };
+      }
+
+      const { error: upsertError } = await supabase
+        .from('student_profiles')
+        .upsert(
+          {
+            user_id: userId,
+            registration_number: normalized,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (upsertError) {
+        return { success: false, error: mapRegError(upsertError) };
+      }
+
+      applyLocalRegUpdate(normalized);
+      return { success: true, registrationNumber: normalized };
+    } catch (err: any) {
+      return { success: false, error: mapRegError(err) };
+    }
+  }
+
   public searchStudentByRegistrationNumber(regNumber: string): StudentProfile | undefined {
-    const norm = regNumber.trim().toUpperCase();
-    return this.studentProfiles.find((p) => p.registrationNumber?.toUpperCase() === norm);
+    const norm = normalizeRegistrationNumber(regNumber);
+    if (!norm) return undefined;
+    return this.studentProfiles.find((p) => normalizeRegistrationNumber(p.registrationNumber || '') === norm);
   }
 
   public searchStudents(queryStr: string): StudentProfile[] {
     const q = queryStr.toLowerCase().trim();
     if (!q) return [];
+    const qCompact = normalizeRegistrationNumber(queryStr);
     return this.studentProfiles.filter(
       (p) =>
         p.fullName?.toLowerCase().includes(q) ||
+        (qCompact.length > 0 && normalizeRegistrationNumber(p.registrationNumber || '').includes(qCompact)) ||
         p.registrationNumber?.toLowerCase().includes(q) ||
         p.university?.toLowerCase().includes(q) ||
         p.programme?.toLowerCase().includes(q)
     );
+  }
+
+  public async searchStudentsForInviteFromSupabase(
+    query: string,
+    groupId?: string
+  ): Promise<StudentInviteCandidate[]> {
+    const trimmed = String(query || '').trim();
+    if (trimmed.length < 2) return [];
+    const compact = normalizeRegistrationNumber(trimmed);
+    const group = groupId ? this.getGroupById(groupId) : undefined;
+
+    const isPendingForUser = (uid: string) =>
+      Boolean(
+        groupId &&
+          this.invitations.some(
+            (inv) => inv.groupId === groupId && inv.receiverId === uid && inv.status === 'pending'
+          )
+      );
+
+    const cacheDiscovered = (candidate: StudentInviteCandidate) => {
+      if (!this.getUserById(candidate.userId)) {
+        this.cacheUser({
+          id: candidate.userId,
+          email: '',
+          fullName: candidate.fullName,
+          avatarUrl: candidate.avatarUrl || '',
+          role: 'student',
+          accountStatus: 'active',
+          emailVerified: true,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      const existingSp = this.getStudentProfile(candidate.userId);
+      this.cacheStudentProfile({
+        userId: candidate.userId,
+        fullName: candidate.fullName,
+        phone: existingSp?.phone || '',
+        institutionName: candidate.university || existingSp?.institutionName || 'Bayero University Kano',
+        university: candidate.university || existingSp?.university || 'Bayero University Kano',
+        campus: candidate.campus || existingSp?.campus || 'New Campus',
+        faculty: existingSp?.faculty,
+        department: existingSp?.department,
+        studyLevel: candidate.studyLevel || existingSp?.studyLevel || 'Undergraduate',
+        programme: existingSp?.programme || '',
+        registrationNumber: candidate.registrationNumber || existingSp?.registrationNumber || '',
+        gender: existingSp?.gender || 'Other',
+        preferredLocation: existingSp?.preferredLocation || 'Dambare',
+        bio: existingSp?.bio,
+        isProfileVerified: Boolean(candidate.isProfileVerified || existingSp?.isProfileVerified),
+      });
+    };
+
+    try {
+      const { data, error } = await supabase.rpc('search_students_for_invite', {
+        p_query: trimmed,
+        p_group_id: groupId || null,
+        p_limit: 20,
+      });
+
+      if (!error && Array.isArray(data)) {
+        const mapped: StudentInviteCandidate[] = data
+          .filter((row: any) => row && row.userId)
+          .map((row: any) => {
+            const candidate: StudentInviteCandidate = {
+              userId: String(row.userId),
+              fullName: String(row.fullName || 'OUTPOST Student'),
+              avatarUrl: row.avatarUrl || null,
+              university: row.university || 'Bayero University Kano',
+              campus: row.campus || 'New Campus',
+              studyLevel: row.studyLevel || 'Undergraduate',
+              registrationNumber: row.registrationNumber || null,
+              isProfileVerified: Boolean(row.isProfileVerified),
+              isAlreadyMember: Boolean(row.isAlreadyMember || group?.memberIds.includes(String(row.userId))),
+              hasPendingInvite: Boolean(row.hasPendingInvite || isPendingForUser(String(row.userId))),
+            };
+            cacheDiscovered(candidate);
+            return candidate;
+          });
+        return mapped;
+      }
+    } catch {
+      // Fallback to live PostgREST + exact reg-number RPC lookup below
+    }
+
+    const candidates = new Map<string, StudentInviteCandidate>();
+    const addCandidate = (
+      candidate: Omit<StudentInviteCandidate, 'isAlreadyMember' | 'hasPendingInvite'> &
+        Partial<Pick<StudentInviteCandidate, 'isAlreadyMember' | 'hasPendingInvite'>>
+    ) => {
+      if (!candidate.userId) return;
+      const cachedUsr = this.getUserById(candidate.userId);
+      if (cachedUsr?.accountStatus === 'suspended') return;
+      const existing = candidates.get(candidate.userId);
+      const merged: StudentInviteCandidate = {
+        ...existing,
+        ...candidate,
+        registrationNumber: candidate.registrationNumber || existing?.registrationNumber || null,
+        isAlreadyMember: Boolean(
+          candidate.isAlreadyMember || existing?.isAlreadyMember || group?.memberIds.includes(candidate.userId)
+        ),
+        hasPendingInvite: Boolean(
+          candidate.hasPendingInvite || existing?.hasPendingInvite || isPendingForUser(candidate.userId)
+        ),
+      };
+      candidates.set(candidate.userId, merged);
+      cacheDiscovered(merged);
+    };
+
+    try {
+      const looksLikeReg = /[A-Z]/.test(compact) && /\d/.test(compact);
+      const [regRowsRes, nameRowsRes, exactRegRes] = await Promise.all([
+        compact.length >= 2
+          ? supabase
+              .from('student_profiles')
+              .select(
+                'user_id, institution, campus, study_level, registration_number, is_profile_verified, profiles(id, full_name, avatar_url, role, account_status, is_verified)'
+              )
+              .ilike('registration_number', `%${compact}%`)
+              .limit(20)
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from('profiles')
+          .select(
+            'id, full_name, avatar_url, role, account_status, is_verified, student_profiles(user_id, institution, campus, study_level, registration_number, is_profile_verified)'
+          )
+          .eq('role', 'student')
+          .neq('account_status', 'suspended')
+          .ilike('full_name', `%${trimmed}%`)
+          .limit(20),
+        looksLikeReg ? this.lookupStudentByRegistrationNumberFromSupabase(compact) : Promise.resolve(null),
+      ]);
+
+      if (Array.isArray(regRowsRes?.data)) {
+        for (const row of regRowsRes.data as any[]) {
+          const pRel = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+          if (pRel && (pRel.role && pRel.role !== 'student')) continue;
+          if (pRel?.account_status === 'suspended') continue;
+          addCandidate({
+            userId: row.user_id,
+            fullName: pRel?.full_name || 'OUTPOST Student',
+            avatarUrl: pRel?.avatar_url || null,
+            university: row.institution || 'Bayero University Kano',
+            campus: row.campus || 'New Campus',
+            studyLevel: row.study_level || 'Undergraduate',
+            registrationNumber: row.registration_number || null,
+            isProfileVerified: Boolean(row.is_profile_verified && (pRel ? pRel.is_verified !== false : true)),
+          });
+        }
+      }
+
+      if (Array.isArray(nameRowsRes?.data)) {
+        for (const row of nameRowsRes.data as any[]) {
+          const spRel = Array.isArray(row.student_profiles) ? row.student_profiles[0] : row.student_profiles;
+          addCandidate({
+            userId: row.id,
+            fullName: row.full_name || 'OUTPOST Student',
+            avatarUrl: row.avatar_url || null,
+            university: spRel?.institution || 'Bayero University Kano',
+            campus: spRel?.campus || 'New Campus',
+            studyLevel: spRel?.study_level || 'Undergraduate',
+            registrationNumber: spRel?.registration_number || null,
+            isProfileVerified: Boolean(spRel?.is_profile_verified && row.is_verified !== false),
+          });
+        }
+      }
+
+      if (exactRegRes && exactRegRes.found !== false && !exactRegRes.unavailable && exactRegRes.id) {
+        addCandidate({
+          userId: exactRegRes.id,
+          fullName: exactRegRes.displayName || 'OUTPOST Student',
+          avatarUrl: exactRegRes.avatarUrl || null,
+          university: exactRegRes.university || 'Bayero University Kano',
+          campus: exactRegRes.campus || 'New Campus',
+          studyLevel: exactRegRes.studyLevel || 'Undergraduate',
+          registrationNumber: exactRegRes.registrationNumber || compact,
+          isProfileVerified: Boolean(exactRegRes.isVerified),
+        });
+      }
+    } catch {
+      // Preserve local matches below if network query fails
+    }
+
+    for (const sp of this.searchStudents(trimmed)) {
+      const usr = this.getUserById(sp.userId);
+      if (usr?.accountStatus === 'suspended') continue;
+      addCandidate({
+        userId: sp.userId,
+        fullName: sp.fullName || usr?.fullName || 'OUTPOST Student',
+        avatarUrl: usr?.avatarUrl || null,
+        university: sp.university || 'Bayero University Kano',
+        campus: sp.campus || 'New Campus',
+        studyLevel: sp.studyLevel || 'Undergraduate',
+        registrationNumber: sp.registrationNumber || null,
+        isProfileVerified: Boolean(sp.isProfileVerified),
+      });
+    }
+
+    return Array.from(candidates.values()).sort((a, b) => {
+      const aReg = normalizeRegistrationNumber(a.registrationNumber || '');
+      const bReg = normalizeRegistrationNumber(b.registrationNumber || '');
+      const aRank = aReg === compact ? 0 : aReg.startsWith(compact) ? 1 : aReg.includes(compact) ? 2 : 3;
+      const bRank = bReg === compact ? 0 : bReg.startsWith(compact) ? 1 : bReg.includes(compact) ? 2 : 3;
+      if (aRank !== bRank) return aRank - bRank;
+      return a.fullName.localeCompare(b.fullName);
+    });
   }
 
   public getAllStudentDocs(): StudentVerificationDocument[] {
@@ -3259,6 +3606,174 @@ export class SupabaseRepository {
     return { success: true };
   }
 
+  public async inviteStudentToGroupPersisted(
+    groupId: string,
+    senderId: string,
+    receiverId?: string,
+    regNumber?: string
+  ): Promise<{ success: boolean; invitation?: GroupInvitation; error?: string }> {
+    const group = this.getGroupById(groupId);
+    if (group && receiverId && group.memberIds.includes(receiverId)) {
+      return { success: false, error: 'Student is already a member of this cohort.' };
+    }
+    if (group && group.memberIds.length >= group.maxCapacity) {
+      return { success: false, error: 'Cohort has already reached its maximum member capacity.' };
+    }
+
+    const normalizedReg = regNumber ? normalizeRegistrationNumber(regNumber) : undefined;
+
+    const upsertLocalInvitation = (inv: GroupInvitation) => {
+      this.invitations = [
+        inv,
+        ...this.invitations.filter((i) => !(i.groupId === inv.groupId && i.receiverId === inv.receiverId)),
+      ];
+      appEventBus.publish('groupsUpdated', this.groups);
+    };
+
+    try {
+      const { data, error } = await supabase.rpc('invite_student_to_group_atomic', {
+        p_group_id: groupId,
+        p_target_user_id: receiverId || null,
+        p_reg_number: normalizedReg || null,
+      });
+
+      if (!error && data && typeof data === 'object') {
+        if ((data as any).success === false) {
+          return { success: false, error: String((data as any).error || 'Could not send invitation.') };
+        }
+        const rawInv = (data as any).invitation || {};
+        const targetId = String(rawInv.receiverId || receiverId || '');
+        const targetSp = targetId ? this.getStudentProfile(targetId) : undefined;
+        const senderSp = this.getStudentProfile(senderId);
+        const inv: GroupInvitation = {
+          id: String(rawInv.id || crypto.randomUUID()),
+          groupId,
+          groupName: String(rawInv.groupName || group?.name || 'Accommodation Cohort'),
+          senderId: String(rawInv.senderId || senderId),
+          senderName: String(rawInv.senderName || senderSp?.fullName || this.getUserById(senderId)?.fullName || 'Cohort Admin'),
+          receiverId: targetId,
+          receiverName: rawInv.receiverName || targetSp?.fullName,
+          receiverRegNumber: rawInv.receiverRegNumber || targetSp?.registrationNumber || normalizedReg,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        };
+        upsertLocalInvitation(inv);
+        return { success: true, invitation: inv };
+      }
+
+      if (error) {
+        const errMsg = String(error.message || '').toLowerCase();
+        const isMissingRpc =
+          error.code === 'PGRST202' ||
+          error.code === '42883' ||
+          errMsg.includes('could not find the function') ||
+          errMsg.includes('does not exist');
+        if (!isMissingRpc) {
+          return { success: false, error: error.message || 'Unable to send cohort invitation.' };
+        }
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase();
+      if (!msg.includes('could not find the function') && !msg.includes('does not exist')) {
+        return { success: false, error: err?.message || 'Unable to send cohort invitation.' };
+      }
+    }
+
+    // Fallback when Migration 16 RPC is not yet deployed
+    let resolvedTargetId = receiverId;
+    let resolvedTargetName: string | undefined;
+    let resolvedReg: string | undefined = normalizedReg;
+
+    if (!resolvedTargetId && normalizedReg) {
+      const publicMatch = await this.lookupStudentByRegistrationNumberFromSupabase(normalizedReg);
+      if (publicMatch && publicMatch.found !== false && !publicMatch.unavailable && publicMatch.id) {
+        resolvedTargetId = publicMatch.id;
+        resolvedTargetName = publicMatch.displayName;
+        resolvedReg = publicMatch.registrationNumber || normalizedReg;
+      } else {
+        const matches = await this.searchStudentsForInviteFromSupabase(normalizedReg, groupId);
+        const exact = matches.find(
+          (m) => normalizeRegistrationNumber(m.registrationNumber || '') === normalizedReg
+        );
+        if (exact) {
+          resolvedTargetId = exact.userId;
+          resolvedTargetName = exact.fullName;
+          resolvedReg = exact.registrationNumber || normalizedReg;
+        }
+      }
+    }
+
+    if (!resolvedTargetId) {
+      return { success: false, error: 'No registered student found with that registration number.' };
+    }
+    if (group && group.memberIds.includes(resolvedTargetId)) {
+      return { success: false, error: 'Student is already a member of this cohort.' };
+    }
+
+    const existingPending = this.invitations.find(
+      (i) => i.groupId === groupId && i.receiverId === resolvedTargetId && i.status === 'pending'
+    );
+    if (existingPending) {
+      return { success: false, error: 'An invitation is already pending for this student.' };
+    }
+
+    const sender = this.getStudentProfile(senderId);
+    const targetSp = this.getStudentProfile(resolvedTargetId);
+    const nowIso = new Date().toISOString();
+    const inv: GroupInvitation = {
+      id: crypto.randomUUID(),
+      groupId,
+      groupName: group?.name || 'Accommodation Cohort',
+      senderId,
+      senderName: sender?.fullName || this.getUserById(senderId)?.fullName || 'Cohort Admin',
+      receiverId: resolvedTargetId,
+      receiverName: resolvedTargetName || targetSp?.fullName || this.getUserById(resolvedTargetId)?.fullName,
+      receiverRegNumber: resolvedReg || targetSp?.registrationNumber,
+      status: 'pending',
+      createdAt: nowIso,
+    };
+
+    const { data: persistedRow, error: upsertError } = await supabase
+      .from('group_invitations')
+      .upsert(
+        {
+          id: inv.id,
+          group_id: groupId,
+          invited_by: senderId,
+          student_id: resolvedTargetId,
+          status: 'pending',
+          updated_at: nowIso,
+        },
+        { onConflict: 'group_id,student_id' }
+      )
+      .select('id, created_at, updated_at')
+      .maybeSingle();
+
+    if (upsertError) {
+      return { success: false, error: upsertError.message || 'Could not save invitation.' };
+    }
+
+    if (persistedRow?.id) {
+      inv.id = persistedRow.id;
+      inv.createdAt = persistedRow.created_at || inv.createdAt;
+    }
+
+    supabase
+      .from('notifications')
+      .insert({
+        user_id: resolvedTargetId,
+        title: 'Cohort Invitation Received',
+        message: `${inv.senderName} invited you to join "${inv.groupName}".`,
+        type: 'group_invitation',
+        link: '/student/groups',
+        metadata: { groupId, invitationId: inv.id },
+      })
+      .then(() => {});
+
+    upsertLocalInvitation(inv);
+    return { success: true, invitation: inv };
+  }
+
   public inviteStudentToGroup(
     groupId: string,
     senderId: string,
@@ -3307,6 +3822,106 @@ export class SupabaseRepository {
 
   public getPendingGroupInvitations(userId: string): GroupInvitation[] {
     return this.invitations.filter((i) => i.receiverId === userId && i.status === 'pending');
+  }
+
+  public async respondToGroupInvitationPersisted(
+    inviteId: string,
+    action: 'accept' | 'reject'
+  ): Promise<{ success: boolean; error?: string }> {
+    const applyLocal = (inv: GroupInvitation | undefined) => {
+      if (!inv) return;
+      inv.status = action === 'accept' ? 'accepted' : 'rejected';
+      inv.updatedAt = new Date().toISOString();
+      if (action === 'accept') {
+        const group = this.getGroupById(inv.groupId);
+        if (group && !group.memberIds.includes(inv.receiverId) && group.memberIds.length < group.maxCapacity) {
+          const user = this.getUserById(inv.receiverId);
+          const sp = this.getStudentProfile(inv.receiverId);
+          group.members.push({
+            userId: inv.receiverId,
+            name: sp?.fullName || user?.fullName || inv.receiverName || 'Member',
+            role: 'member',
+            status: 'active',
+            joinedAt: new Date().toISOString(),
+          });
+          group.memberIds.push(inv.receiverId);
+          group.updatedAt = new Date().toISOString();
+          this.updateGroup(group);
+          this.syncGroupConversation(group);
+        }
+      }
+      appEventBus.publish('groupsUpdated', this.groups);
+    };
+
+    const cachedInv = this.invitations.find((i) => i.id === inviteId);
+
+    try {
+      const { data, error } = await supabase.rpc('respond_to_group_invitation_atomic', {
+        p_invite_id: inviteId,
+        p_action: action,
+      });
+
+      if (!error && data && typeof data === 'object') {
+        if ((data as any).success === false) {
+          return { success: false, error: String((data as any).error || 'Unable to respond to invitation.') };
+        }
+        applyLocal(cachedInv);
+        return { success: true };
+      }
+
+      if (error) {
+        const errMsg = String(error.message || '').toLowerCase();
+        const isMissingRpc =
+          error.code === 'PGRST202' ||
+          error.code === '42883' ||
+          errMsg.includes('could not find the function') ||
+          errMsg.includes('does not exist');
+        if (!isMissingRpc) {
+          return { success: false, error: error.message || 'Unable to process invitation response.' };
+        }
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase();
+      if (!msg.includes('could not find the function') && !msg.includes('does not exist')) {
+        return { success: false, error: err?.message || 'Unable to process invitation response.' };
+      }
+    }
+
+    if (!cachedInv) {
+      return { success: false, error: 'Invitation not found.' };
+    }
+
+    const nextStatus = action === 'accept' ? 'accepted' : 'rejected';
+    if (action === 'accept') {
+      const group = this.getGroupById(cachedInv.groupId);
+      if (group && !group.memberIds.includes(cachedInv.receiverId) && group.memberIds.length >= group.maxCapacity) {
+        return { success: false, error: 'This cohort has already reached its maximum capacity.' };
+      }
+    }
+
+    const { error: updateErr } = await supabase
+      .from('group_invitations')
+      .update({ status: nextStatus, updated_at: new Date().toISOString() })
+      .eq('id', inviteId);
+
+    if (updateErr) {
+      return { success: false, error: updateErr.message || 'Failed to update invitation status.' };
+    }
+
+    if (action === 'accept') {
+      const { error: memberErr } = await supabase
+        .from('group_members')
+        .upsert(
+          { group_id: cachedInv.groupId, user_id: cachedInv.receiverId, role: 'member' },
+          { onConflict: 'group_id,user_id' }
+        );
+      if (memberErr) {
+        return { success: false, error: memberErr.message || 'Failed to join cohort.' };
+      }
+    }
+
+    applyLocal(cachedInv);
+    return { success: true };
   }
 
   public respondToGroupInvitation(inviteId: string, action: 'accept' | 'reject'): boolean {

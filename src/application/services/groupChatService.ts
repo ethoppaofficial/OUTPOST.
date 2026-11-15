@@ -1,4 +1,11 @@
-import { AccommodationGroup, GroupInvitation, GroupJoinRequest, StudentProfile, User } from '../../domain/types';
+import {
+  AccommodationGroup,
+  GroupInvitation,
+  GroupJoinRequest,
+  StudentInviteCandidate,
+  StudentProfile,
+  User,
+} from '../../domain/types';
 import { repository } from '../../infrastructure/repositories';
 import { appEventBus } from '../../infrastructure/events/eventBus';
 
@@ -96,12 +103,28 @@ export class GroupChatService {
     return repository.inviteStudentToGroup(groupId, senderId, receiverId);
   }
 
+  public async inviteMemberPersisted(
+    groupId: string,
+    senderId: string,
+    receiverId?: string,
+    regNumber?: string
+  ): Promise<{ success: boolean; invitation?: GroupInvitation; error?: string }> {
+    return repository.inviteStudentToGroupPersisted(groupId, senderId, receiverId, regNumber);
+  }
+
   public getPendingInvitations(userId: string): GroupInvitation[] {
     return repository.getPendingGroupInvitations(userId);
   }
 
   public respondToInvitation(inviteId: string, action: 'accept' | 'reject'): boolean {
     return repository.respondToGroupInvitation(inviteId, action);
+  }
+
+  public async respondToInvitationPersisted(
+    inviteId: string,
+    action: 'accept' | 'reject'
+  ): Promise<{ success: boolean; error?: string }> {
+    return repository.respondToGroupInvitationPersisted(inviteId, action);
   }
 
   public getStudentProfile(userId: string): StudentProfile | undefined {
@@ -114,6 +137,10 @@ export class GroupChatService {
 
   public searchStudents(query: string): StudentProfile[] {
     return repository.searchStudents(query);
+  }
+
+  public async searchStudentsForInvite(query: string, groupId?: string): Promise<StudentInviteCandidate[]> {
+    return repository.searchStudentsForInviteFromSupabase(query, groupId);
   }
 }
 

@@ -583,6 +583,19 @@ export interface PublicStudentProfile {
   createdAt?: string;
 }
 
+export interface StudentInviteCandidate {
+  userId: string;
+  fullName: string;
+  avatarUrl?: string | null;
+  university?: string | null;
+  campus?: string | null;
+  studyLevel?: string | null;
+  registrationNumber?: string | null;
+  isProfileVerified: boolean;
+  isAlreadyMember: boolean;
+  hasPendingInvite: boolean;
+}
+
 export interface InvoiceItem {
   description: string;
   amount: number;
