@@ -433,19 +433,11 @@ export default function App() {
               />
               <Route
                 path="/landlord/chat"
-                element={
-                  <ProtectedRoute allowedRoles={['landlord']}>
-                    <ChatPage />
-                  </ProtectedRoute>
-                }
+                element={<Navigate to="/landlord/dashboard" replace />}
               />
               <Route
                 path="/landlord/chat/:conversationId"
-                element={
-                  <ProtectedRoute allowedRoles={['landlord']}>
-                    <ChatPage />
-                  </ProtectedRoute>
-                }
+                element={<Navigate to="/landlord/dashboard" replace />}
               />
 
               {/* Admin Routes */}

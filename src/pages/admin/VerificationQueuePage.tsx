@@ -101,7 +101,7 @@ export const VerificationQueuePage: React.FC = () => {
     } catch (err: unknown) {
       const msg = err instanceof Error
         ? err.message
-        : 'Unable to retrieve signed evidence link via get-private-asset-url.';
+        : 'Unable to generate a secure preview link for this document.';
       setActionError(msg);
     } finally {
       setOpeningEvidenceId(null);

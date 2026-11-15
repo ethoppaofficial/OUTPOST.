@@ -13,6 +13,51 @@ import { Modal } from '../../components/ui/Modal';
 
 type ReviewTarget = { id: string; title: string; scope: 'property' | 'location'; action: 'reject' | 'suspend' };
 
+function formatListingStatus(status?: string): string {
+  switch (status) {
+    case 'approved':
+      return 'Approved';
+    case 'rejected':
+      return 'Rejected';
+    case 'suspended':
+    case 'archived':
+      return 'Suspended';
+    case 'pending':
+      return 'Pending Review';
+    default:
+      return status ? status.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Unknown';
+  }
+}
+
+function formatLocationStatus(status?: string): string {
+  switch (status) {
+    case 'approved':
+    case 'verified':
+      return 'Verified';
+    case 'pending':
+      return 'Pending Review';
+    case 'rejected':
+      return 'Rejected';
+    case 'not_submitted':
+      return 'Not Submitted';
+    default:
+      return status ? status.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Not Submitted';
+  }
+}
+
+function getLocationBadgeClasses(status?: string): string {
+  if (status === 'approved' || status === 'verified') {
+    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'pending') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+  }
+  if (status === 'rejected') {
+    return 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300';
+  }
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
 export const PropertyApprovalsPage: React.FC = () => {
   const {
     data: propertiesData,
@@ -85,7 +130,7 @@ export const PropertyApprovalsPage: React.FC = () => {
       <header>
         <h1 className="text-2xl font-black text-slate-900 dark:text-white">Property moderation</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Listing approval and location verification are separate decisions backed by privileged PostgreSQL RPCs.
+          Review accommodation listings and verify submitted property locations separately.
         </p>
       </header>
 
@@ -135,10 +180,10 @@ export const PropertyApprovalsPage: React.FC = () => {
                         {property.propertyType || 'Property'}
                       </span>
                       <span className="rounded-full bg-purple-100 px-2 py-1 font-semibold text-purple-800 dark:bg-purple-950/40 dark:text-purple-300">
-                        Listing: {propertyStatus}
+                        Listing: {formatListingStatus(propertyStatus)}
                       </span>
-                      <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                        Location: {locationStatus}
+                      <span className={`rounded-full px-2 py-1 font-semibold ${getLocationBadgeClasses(locationStatus)}`}>
+                        Location: {formatLocationStatus(locationStatus)}
                       </span>
                     </div>
                     <h2 className="mt-2 text-lg font-bold text-slate-900 dark:text-white">

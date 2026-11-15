@@ -401,7 +401,7 @@ export const UsersPage: React.FC = () => {
 
       <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
         <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-        Suspensions update the PostgreSQL account record via the privileged <span className="font-mono">admin_set_user_status</span> RPC with audit logging. Administrators cannot be suspended here.
+        Account suspensions take effect immediately and are recorded in the platform audit log. Administrators cannot be suspended here.
       </div>
 
       {/* User Profile Inspection Modal */}

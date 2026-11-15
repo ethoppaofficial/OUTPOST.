@@ -53,7 +53,6 @@ import {
 import { Modal } from '../../components/ui/Modal';
 
 export function getChatBasePathForRole(role?: string | null): string {
-  if (role === 'landlord') return '/landlord/chat';
   if (role === 'admin') return '/admin/chat';
   return '/student/chat';
 }

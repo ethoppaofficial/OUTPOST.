@@ -157,8 +157,12 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
       assert.match(propDetailSrc, /reportError/);
     });
 
-    test('AdminAuditLogsPage table header columns match the 5 rendered td cells', () => {
-      assert.match(auditLogsSrc, /<th className="p-3">Details<\/th>/);
+    test('AdminAuditLogsPage table renders 4 clean columns without redundant Details column', () => {
+      assert.match(auditLogsSrc, /<th className="p-3">Timestamp<\/th>/);
+      assert.match(auditLogsSrc, /<th className="p-3">Actor<\/th>/);
+      assert.match(auditLogsSrc, /<th className="p-3">Action<\/th>/);
+      assert.match(auditLogsSrc, /<th className="p-3">Affected record<\/th>/);
+      assert.doesNotMatch(auditLogsSrc, /<th[^>]*>Details<\/th>/i);
     });
 
     test('Roommate & Group pages subscribe to appEventBus hydration events', () => {

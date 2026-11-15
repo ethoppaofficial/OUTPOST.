@@ -14,7 +14,7 @@ describe('Chat, Group Sync & Role Routing Regression Suite', () => {
     const chatPage = readFile('src/pages/student/ChatPage.tsx');
 
     assert.match(chatPage, /export function getChatBasePathForRole/);
-    assert.match(chatPage, /role === 'landlord'\s*\)\s*return '\/landlord\/chat'/);
+    assert.doesNotMatch(chatPage, /role === 'landlord'\s*\)\s*return '\/landlord\/chat'/);
     assert.match(chatPage, /role === 'admin'\s*\)\s*return '\/admin\/chat'/);
     assert.match(chatPage, /navigate\(`\$\{chatBasePath\}\/\$\{id\}`\)/);
 
@@ -65,19 +65,19 @@ describe('Chat, Group Sync & Role Routing Regression Suite', () => {
     assert.match(chatService, /res\.messageId/);
   });
 
-  it('App.tsx registers chat routes for student, landlord, and admin roles plus /reset-password handler', () => {
+  it('App.tsx registers chat routes for student and admin roles, redirects landlord chat, and handles /reset-password', () => {
     const appTsx = readFile('src/App.tsx');
 
     for (const routePath of [
       '/student/chat',
       '/student/chat/:conversationId',
-      '/landlord/chat',
-      '/landlord/chat/:conversationId',
       '/admin/chat',
       '/admin/chat/:conversationId',
       '/reset-password',
     ]) {
       assert.ok(appTsx.includes(`path="${routePath}"`), `Missing route ${routePath} in App.tsx`);
     }
+
+    assert.match(appTsx, /path="\/landlord\/chat"\s+element=\{<Navigate to="\/landlord\/dashboard" replace \/>\}/);
   });
 });

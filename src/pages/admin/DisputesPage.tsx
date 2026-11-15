@@ -4,7 +4,7 @@ import { adminService, AdminRecord } from '../../application/services/adminServi
 import { storageService } from '../../application/services/storageService';
 import { useAdminData } from '../../application/hooks/useAdminData';
 import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
-import { ReservationStatusBadge } from '../../components/ui/Badge';
+import { ReceiptStatusBadge, ReservationStatusBadge } from '../../components/ui/Badge';
 
 interface OversightPayload {
   reservations: AdminRecord[];
@@ -91,7 +91,7 @@ export const DisputesPage: React.FC = () => {
       <header>
         <h1 className="text-2xl font-black text-slate-900 dark:text-white">Reservations and receipt oversight</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Read-only monitoring across live Supabase reservations and payment receipts. Private receipt files require short-lived signed URLs from <span className="font-mono text-xs">get-private-asset-url</span>.
+          Monitor live student reservations and inspect uploaded payment transfer receipts across the platform.
         </p>
       </header>
 
@@ -159,7 +159,7 @@ export const DisputesPage: React.FC = () => {
             : ['pending_review', 'approved', 'rejected']
           ).map((value) => (
             <option key={value} value={value}>
-              {value.replaceAll('_', ' ')}
+              {value.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
             </option>
           ))}
         </select>
@@ -217,13 +217,11 @@ export const DisputesPage: React.FC = () => {
               >
                 <div className="flex flex-col justify-between gap-3 sm:flex-row">
                   <div>
-                    <p className="flex items-center gap-2 font-semibold">
+                    <div className="flex flex-wrap items-center gap-2 font-semibold">
                       <Receipt className="h-4 w-4 text-emerald-600" />
-                      {item.propertyName || 'Receipt'}{' '}
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800">
-                        {item.status}
-                      </span>
-                    </p>
+                      <span>{item.propertyName || 'Receipt'}</span>
+                      <ReceiptStatusBadge status={item.status} />
+                    </div>
                     <p className="mt-1 text-xs text-slate-500">
                       Student: {item.studentName || item.studentId} · Reference: {item.paymentReference || '—'}
                     </p>
@@ -273,9 +271,9 @@ export const DisputesPage: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-        <AlertTriangle className="h-4 w-4 shrink-0" />
-        Admins can inspect private receipts through audited signed URLs, but cannot mutate amounts or approve financial settlements from this oversight view.
+      <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+        Payment receipt verification and booking confirmation are handled directly by the property landlord. Administrators may open uploaded receipts above for dispute inspection.
       </div>
     </div>
   );

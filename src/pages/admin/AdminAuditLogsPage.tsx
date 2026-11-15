@@ -31,7 +31,7 @@ export const AdminAuditLogsPage: React.FC = () => {
     const term = search.trim().toLowerCase();
     if (!term) return logs;
     return logs.filter((log) =>
-      [log.action, log.actorName, log.actorId, log.targetEntity, log.targetId, log.details].some((value) =>
+      [log.action, log.actorName, log.actorId, log.targetEntity, log.targetId].some((value) =>
         String(value || '').toLowerCase().includes(term)
       )
     );
@@ -45,7 +45,7 @@ export const AdminAuditLogsPage: React.FC = () => {
           <h1 className="text-2xl font-black text-slate-900 dark:text-white">Audit logs</h1>
         </div>
         <p className="mt-1 text-sm text-slate-500">
-          Administrative and security actions recorded in PostgreSQL <span className="font-mono text-xs">audit_logs</span> (append-only).
+          Chronological record of administrative and security actions across the platform.
         </p>
       </header>
 
@@ -64,7 +64,7 @@ export const AdminAuditLogsPage: React.FC = () => {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           maxLength={120}
-          placeholder="Search action, administrator, target, or details"
+          placeholder="Search action, administrator, or affected record"
           className="w-full bg-transparent text-sm outline-none"
         />
       </label>
@@ -77,14 +77,13 @@ export const AdminAuditLogsPage: React.FC = () => {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <table className="w-full min-w-[800px] text-left text-xs">
+          <table className="w-full min-w-[680px] text-left text-xs">
             <thead className="bg-slate-50 uppercase text-slate-500 dark:bg-slate-800/70">
               <tr>
                 <th className="p-3">Timestamp</th>
                 <th className="p-3">Actor</th>
                 <th className="p-3">Action</th>
                 <th className="p-3">Affected record</th>
-                <th className="p-3">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -101,9 +100,6 @@ export const AdminAuditLogsPage: React.FC = () => {
                   <td className="p-3">
                     {log.targetEntity}
                     <span className="mt-1 block font-mono text-[10px] text-slate-400">{log.targetId}</span>
-                  </td>
-                  <td className="max-w-sm whitespace-normal p-3 text-slate-600 dark:text-slate-300">
-                    {log.details || '—'}
                   </td>
                 </tr>
               ))}

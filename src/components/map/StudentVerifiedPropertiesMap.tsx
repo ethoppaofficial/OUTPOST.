@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { maplibregl } from '../../infrastructure/config/maplibreSetup';
-import type { Map as MapInstance, Marker, Popup } from 'maplibre-gl';
+import type { GeoJSONSource, Map as MapInstance, Marker, Popup } from 'maplibre-gl';
 import { supabase } from '../../infrastructure/supabase/supabaseClient';
 import { propertyService } from '../../application/services/propertyService';
 import {
@@ -9,7 +9,7 @@ import {
   applyMapTilerBuildingsLayer,
 } from '../../infrastructure/config/mapConfig';
 import { MapStyleSelector } from './MapStyleSelector';
-import { AlertTriangle, MapPin, Building2, ExternalLink, Navigation, RotateCcw, X, Compass } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Navigation, RotateCcw, X, Compass } from 'lucide-react';
 import {
   requestCurrentDevicePosition,
   DevicePosition,
@@ -18,9 +18,6 @@ import {
 import {
   calculateDistanceKm,
   AREA_CENTERS,
-  BUK_NEW_CAMPUS_GATE_1,
-  BUK_NEW_CAMPUS_GATE_2,
-  LOCAL_REFERENCE_LANDMARKS,
   getNearestLandmarkOrientation,
 } from '../../domain/geoUtils';
 import { walkingRouteService } from '../../application/services/walkingRouteService';
@@ -64,6 +61,15 @@ export interface StudentVerifiedPropertiesMapProps {
   onPropertyOpen?: (property: VerifiedMapProperty) => void;
 }
 
+const CLUSTER_SOURCE_ID = 'outpost-verified-properties';
+const CLUSTER_LAYER_IDS = [
+  'cluster-count',
+  'clusters',
+  'unclustered-label',
+  'unclustered-point-selected',
+  'unclustered-point',
+] as const;
+
 function isValidCoordinate(latitude: unknown, longitude: unknown): boolean {
   return (
     typeof latitude === 'number' &&
@@ -77,67 +83,13 @@ function isValidCoordinate(latitude: unknown, longitude: unknown): boolean {
   );
 }
 
-function toVerifiedProperty(
-  snapshot: any,
-): VerifiedMapProperty | null {
-  const data = snapshot.data();
-
-  // Defensive validation: authoritative layer is PostgreSQL Row Level Security
-  if (
-    data.verificationStatus !== 'approved' ||
-    data.locationVerificationStatus !== 'verified' ||
-    data.isActive === false ||
-    !['Dambare', 'Rimin Gata'].includes(data.area) ||
-    data.state !== 'Kano State' ||
-    !isValidCoordinate(data.publicLatitude, data.publicLongitude)
-  ) {
-    return null;
-  }
-
-  return {
-    id: snapshot.id,
-    title: String(data.title ?? 'Student accommodation'),
-    area: data.area as HousingArea,
-    publicLatitude: data.publicLatitude,
-    publicLongitude: data.publicLongitude,
-    publicLocationPrecision: data.publicLocationPrecision,
-    publicLocationLabel: data.publicLocationLabel,
-    propertyType: data.propertyType,
-    accommodationType: data.accommodationType,
-    pricePerSession: typeof data.pricePerSession === 'number' ? data.pricePerSession : undefined,
-    currency: data.currency ?? 'NGN',
-    availableSpaces: typeof data.availableSpaces === 'number' ? data.availableSpaces : undefined,
-    totalCapacity: typeof data.totalCapacity === 'number' ? data.totalCapacity : undefined,
-    images: Array.isArray(data.images) ? data.images.filter((item) => typeof item === 'string') : [],
-    slug: data.slug,
-    fullAddress: data.fullAddress || data.address,
-    nearestLandmark: data.nearestLandmark,
-    directions: data.directions,
-  };
-}
-
 function escapeHtml(text: string): string {
-  return text
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-function createPropertyMarker(property: VerifiedMapProperty): HTMLButtonElement {
-  const element = document.createElement('button');
-  element.type = 'button';
-  element.className =
-    'outpost-map-pin h-8 w-8 rounded-full border-2 border-white bg-emerald-600 shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer flex items-center justify-center text-white';
-  element.setAttribute('aria-label', `Verified property: ${property.title}`);
-  element.innerHTML = `
-    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-      <circle cx="12" cy="10" r="3"/>
-    </svg>
-  `;
-  return element;
 }
 
 function formatPrice(price?: number, currency = 'NGN'): string {
@@ -160,12 +112,13 @@ export const StudentVerifiedPropertiesMap: React.FC<
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapInstance | null>(null);
-  const markersRef = useRef<globalThis.Map<string, Marker>>(new globalThis.Map());
-  const popupsRef = useRef<globalThis.Map<string, Popup>>(new globalThis.Map());
+  const activePopupRef = useRef<Popup | null>(null);
   const userLocationMarkerRef = useRef<Marker | null>(null);
+
   const [area, setArea] = useState<HousingArea>(initialArea);
   const [properties, setProperties] = useState<VerifiedMapProperty[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fallbackAppliedRef = useRef(false);
@@ -178,6 +131,266 @@ export const StudentVerifiedPropertiesMap: React.FC<
 
   const activeStyle = mapStyleUrl || mapConfig.styleUrl;
 
+  const visibleProperties = useMemo(
+    () =>
+      properties.filter(
+        (property) =>
+          property.area === area &&
+          (typeof property.availableSpaces !== 'number' || property.availableSpaces > 0)
+      ),
+    [area, properties],
+  );
+
+  const visiblePropertiesRef = useRef<VerifiedMapProperty[]>(visibleProperties);
+  visiblePropertiesRef.current = visibleProperties;
+
+  const onPropertyOpenRef = useRef(onPropertyOpen);
+  onPropertyOpenRef.current = onPropertyOpen;
+
+  const geojsonData = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: visibleProperties.map((property) => ({
+        type: 'Feature' as const,
+        id: property.id,
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [property.publicLongitude, property.publicLatitude],
+        },
+        properties: {
+          id: property.id,
+          title: property.title,
+          area: property.area,
+          propertyType: property.propertyType || 'Hostel',
+          accommodationType: property.accommodationType || 'Student unit',
+          pricePerSession: typeof property.pricePerSession === 'number' ? property.pricePerSession : -1,
+          priceK:
+            typeof property.pricePerSession === 'number'
+              ? Math.round(property.pricePerSession / 1000)
+              : -1,
+          currency: property.currency || 'NGN',
+          availableSpaces:
+            typeof property.availableSpaces === 'number' ? property.availableSpaces : -1,
+          nearestLandmark: property.nearestLandmark || '',
+          directions: property.directions || '',
+          lat: property.publicLatitude,
+          lng: property.publicLongitude,
+        },
+      })),
+    }),
+    [visibleProperties],
+  );
+
+  const geojsonDataRef = useRef(geojsonData);
+  geojsonDataRef.current = geojsonData;
+
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  const showPropertyPopup = useCallback((property: VerifiedMapProperty) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (activePopupRef.current) {
+      activePopupRef.current.remove();
+      activePopupRef.current = null;
+    }
+
+    const landmarkHtml = property.nearestLandmark
+      ? `<div class="text-[10px] text-slate-500">Landmark: <span class="text-slate-700 font-medium">${escapeHtml(property.nearestLandmark)}</span></div>`
+      : '';
+
+    const spacesHtml =
+      property.availableSpaces !== undefined
+        ? `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">${property.availableSpaces} spaces left</span>`
+        : '';
+
+    const directionsHtml = property.directions
+      ? `<div class="text-[10px] text-slate-500 line-clamp-1 italic">${escapeHtml(property.directions)}</div>`
+      : '';
+
+    const proximity = walkingRouteService.getImmediateDualGateProximity(
+      property.publicLatitude,
+      property.publicLongitude
+    );
+    const orientation = getNearestLandmarkOrientation(
+      property.publicLatitude,
+      property.publicLongitude
+    );
+    const googleMapsUrl = getGoogleMapsWalkingUrl(
+      property.publicLatitude,
+      property.publicLongitude
+    );
+
+    const orientationHtml = orientation
+      ? `<div class="px-2 py-1 rounded bg-slate-50 border border-slate-200/80 text-[10px] text-slate-600 flex items-center gap-1">
+          <span class="text-emerald-600">🧭</span>
+          <span>${escapeHtml(orientation.formattedDescription)}</span>
+        </div>`
+      : '';
+
+    const gatesHtml = `
+      <div class="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">BUK Campus Access</div>
+        <div class="grid grid-cols-2 gap-1.5">
+          <div class="p-1 rounded bg-emerald-50 border border-emerald-100 text-[10px]">
+            <div class="font-bold text-emerald-900">Gate 1</div>
+            <div class="text-emerald-700 font-semibold">${escapeHtml(proximity.gate1.displayText)}</div>
+          </div>
+          <div class="p-1 rounded bg-blue-50 border border-blue-100 text-[10px]">
+            <div class="font-bold text-blue-900">Gate 2</div>
+            <div class="text-blue-700 font-semibold">${escapeHtml(proximity.gate2.displayText)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const popupContainer = document.createElement('div');
+    popupContainer.className = 'p-2 space-y-1.5 text-left';
+    popupContainer.innerHTML = `
+      <strong class="text-xs font-bold text-slate-900 block leading-tight">${escapeHtml(property.title)}</strong>
+      <div class="text-[11px] text-slate-500 font-medium">${escapeHtml(property.area)}, Kano State</div>
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-xs font-bold text-emerald-600">${escapeHtml(formatPrice(property.pricePerSession, property.currency))}</span>
+        ${spacesHtml}
+      </div>
+      ${orientationHtml}
+      ${gatesHtml}
+      ${landmarkHtml}
+      ${directionsHtml}
+      <div class="flex items-center gap-1.5 pt-1">
+        <button type="button" data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details flex-1 py-1.5 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
+        ${googleMapsUrl ? `<a href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer" title="Walking route in Google Maps" class="p-1.5 rounded-lg border border-slate-200 text-blue-600 hover:bg-slate-50 text-xs">🚶</a>` : ''}
+      </div>
+    `;
+
+    const detailsBtn = popupContainer.querySelector<HTMLButtonElement>('[data-property-id]');
+    detailsBtn?.addEventListener('click', () => onPropertyOpenRef.current?.(property));
+
+    const popup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: false,
+      maxWidth: '280px',
+      offset: [0, -10],
+    })
+      .setLngLat([property.publicLongitude, property.publicLatitude])
+      .setDOMContent(popupContainer)
+      .addTo(map);
+
+    activePopupRef.current = popup;
+  }, []);
+
+  const setupClusteringLayers = useCallback((map: MapInstance) => {
+    for (const id of CLUSTER_LAYER_IDS) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    if (map.getSource(CLUSTER_SOURCE_ID)) {
+      map.removeSource(CLUSTER_SOURCE_ID);
+    }
+
+    map.addSource(CLUSTER_SOURCE_ID, {
+      type: 'geojson',
+      data: geojsonDataRef.current,
+      cluster: true,
+      clusterMaxZoom: 16,
+      clusterRadius: 55,
+    });
+
+    map.addLayer({
+      id: 'clusters',
+      type: 'circle',
+      source: CLUSTER_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': [
+          'step',
+          ['get', 'point_count'],
+          '#10b981',
+          5,
+          '#059669',
+          15,
+          '#047857',
+        ],
+        'circle-radius': [
+          'step',
+          ['get', 'point_count'],
+          18,
+          5,
+          24,
+          15,
+          30,
+        ],
+        'circle-stroke-width': 3,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-opacity': 0.95,
+      },
+    });
+
+    map.addLayer({
+      id: 'cluster-count',
+      type: 'symbol',
+      source: CLUSTER_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      layout: {
+        'text-field': '{point_count_abbreviated}',
+        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+        'text-size': 12,
+      },
+      paint: {
+        'text-color': '#ffffff',
+      },
+    });
+
+    map.addLayer({
+      id: 'unclustered-point',
+      type: 'circle',
+      source: CLUSTER_SOURCE_ID,
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-color': '#059669',
+        'circle-radius': 8.5,
+        'circle-stroke-width': 2.5,
+        'circle-stroke-color': '#ffffff',
+      },
+    });
+
+    map.addLayer({
+      id: 'unclustered-point-selected',
+      type: 'circle',
+      source: CLUSTER_SOURCE_ID,
+      filter: [
+        'all',
+        ['!', ['has', 'point_count']],
+        ['==', ['get', 'id'], selectedIdRef.current || ''],
+      ],
+      paint: {
+        'circle-color': '#10b981',
+        'circle-radius': 13.5,
+        'circle-stroke-width': 3.5,
+        'circle-stroke-color': '#ffffff',
+      },
+    });
+
+    map.addLayer({
+      id: 'unclustered-label',
+      type: 'symbol',
+      source: CLUSTER_SOURCE_ID,
+      filter: ['all', ['!', ['has', 'point_count']], ['>', ['get', 'priceK'], 0]],
+      layout: {
+        'text-field': ['concat', '₦', ['to-string', ['get', 'priceK']], 'k'],
+        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+        'text-size': 11,
+        'text-offset': [0, 1.35],
+        'text-anchor': 'top',
+      },
+      paint: {
+        'text-color': '#0f172a',
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 2,
+      },
+    });
+  }, []);
+
   useEffect(() => {
     const unsubscribe = subscribeToMapConfig(() => {
       if (mapRef.current && mapConfig.styleUrl) {
@@ -188,22 +401,9 @@ export const StudentVerifiedPropertiesMap: React.FC<
           console.warn('Could not update map style dynamically:', e);
         }
       }
-      if (mapRef.current) {
-        applyMapTilerBuildingsLayer(mapRef.current);
-      }
     });
     return unsubscribe;
   }, []);
-
-  const visibleProperties = useMemo(
-    () =>
-      properties.filter(
-        (property) =>
-          property.area === area &&
-          (typeof property.availableSpaces !== 'number' || property.availableSpaces > 0)
-      ),
-    [area, properties],
-  );
 
   // PostgreSQL Row Level Security enforces this same public visibility contract.
   useEffect(() => {
@@ -258,7 +458,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
         try {
           await supabase.rpc('expire_overdue_reservations_safe');
         } catch {
-          // Ignore if Migration 11 has not yet been applied
+          // Ignore if overdue hold expiration RPC is unavailable
         }
         const { data, error } = await supabase
           .from('properties')
@@ -295,10 +495,6 @@ export const StudentVerifiedPropertiesMap: React.FC<
         }
 
         if (data && data.length > 0) {
-          // Privacy & Integrity Rules:
-          // 1. Never map all properties to Dambare by default; respect actual area (Dambare or Rimin Gata).
-          // 2. Never invent coordinates (e.g. 11.9842, 8.4187) or prices. Properties without verified
-          //    public coordinates are retained for textual discovery but omitted from the map pin canvas.
           const mapProps: VerifiedMapProperty[] = data
             .filter((p: any) => {
               const loc = p.property_locations?.[0];
@@ -339,7 +535,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
         } else {
           loadFallbackFromRepository();
         }
-      } catch (err: unknown) {
+      } catch {
         setError('Map data synchronization interrupted. Textual listings remain fully accessible.');
         loadFallbackFromRepository();
       } finally {
@@ -361,7 +557,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
     };
   }, []);
 
-  // Initialize Map
+  // Initialize Map with Native Vector Clustering
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -372,6 +568,8 @@ export const StudentVerifiedPropertiesMap: React.FC<
       style: activeStyle as any,
       center: viewport.center,
       zoom: viewport.zoom,
+      minZoom: 11,
+      maxZoom: 18,
       attributionControl: false,
     });
 
@@ -380,8 +578,62 @@ export const StudentVerifiedPropertiesMap: React.FC<
 
     map.on('load', () => {
       map.resize();
+      setMapLoaded(true);
       applyMapTilerBuildingsLayer(map);
+      setupClusteringLayers(map);
     });
+
+    map.on('style.load', () => {
+      applyMapTilerBuildingsLayer(map);
+      setupClusteringLayers(map);
+    });
+
+    const handleClusterClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
+      const clusterId = features[0]?.properties?.cluster_id;
+      if (clusterId === undefined) return;
+
+      const source = map.getSource(CLUSTER_SOURCE_ID) as GeoJSONSource | undefined;
+      if (!source) return;
+
+      source
+        .getClusterExpansionZoom(clusterId)
+        .then((zoom) => {
+          if (zoom === undefined || isNaN(zoom)) return;
+          const coordinates = (features[0].geometry as any).coordinates.slice();
+          map.easeTo({
+            center: coordinates,
+            zoom: Math.min(18, zoom + 0.65),
+            duration: 500,
+          });
+        })
+        .catch((err) => {
+          console.warn('Could not expand cluster:', err);
+        });
+    };
+
+    map.on('click', 'clusters', handleClusterClick);
+    map.on('click', 'cluster-count', handleClusterClick);
+
+    map.on('click', 'unclustered-point', (e) => {
+      const features = map.queryRenderedFeatures(e.point, { layers: ['unclustered-point'] });
+      if (!features.length) return;
+      const featureId = features[0]?.properties?.id;
+      const property = visiblePropertiesRef.current.find((p) => p.id === featureId);
+      if (!property) return;
+
+      setSelectedId(property.id);
+      showPropertyPopup(property);
+    });
+
+    for (const layerId of ['clusters', 'cluster-count', 'unclustered-point']) {
+      map.on('mouseenter', layerId, () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', layerId, () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
 
     const handleMapError = () => {
       if (!fallbackAppliedRef.current) {
@@ -398,154 +650,64 @@ export const StudentVerifiedPropertiesMap: React.FC<
     map.on('error', handleMapError);
 
     return () => {
-      markersRef.current.forEach((marker: Marker) => marker.remove());
-      popupsRef.current.forEach((popup: Popup) => popup.remove());
-      markersRef.current.clear();
-      popupsRef.current.clear();
+      if (activePopupRef.current) {
+        activePopupRef.current.remove();
+        activePopupRef.current = null;
+      }
       if (userLocationMarkerRef.current) {
         userLocationMarkerRef.current.remove();
         userLocationMarkerRef.current = null;
       }
       map.remove();
       mapRef.current = null;
+      setMapLoaded(false);
     };
-  }, [areaViewports, initialArea, activeStyle]);
+  }, [areaViewports, initialArea, activeStyle, setupClusteringLayers, showPropertyPopup]);
 
   // Handle area change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
+    if (activePopupRef.current) {
+      activePopupRef.current.remove();
+      activePopupRef.current = null;
+    }
+
     const viewport = areaViewports[area];
     map.flyTo({ center: viewport.center, zoom: viewport.zoom, essential: true });
   }, [area, areaViewports]);
 
-  // Update Markers when properties change
+  // Update GeoJSON Clustered Source & Selection Filter when visibleProperties or selectedId change
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !mapLoaded) return;
 
-    markersRef.current.forEach((marker: Marker, id: string) => {
-      if (!visibleProperties.some((property) => property.id === id)) {
-        marker.remove();
-        markersRef.current.delete(id);
-        popupsRef.current.get(id)?.remove();
-        popupsRef.current.delete(id);
-      }
-    });
-
-    visibleProperties.forEach((property) => {
-      const coordinates: [number, number] = [
-        property.publicLongitude,
-        property.publicLatitude,
-      ];
-      const existing = markersRef.current.get(property.id);
-
-      if (existing) {
-        existing.setLngLat(coordinates);
-        return;
-      }
-
-      const landmarkHtml = property.nearestLandmark
-        ? `<div class="text-[10px] text-slate-500">Landmark: <span class="text-slate-700 dark:text-slate-300 font-medium">${escapeHtml(property.nearestLandmark)}</span></div>`
-        : '';
-
-      const spacesHtml = property.availableSpaces !== undefined
-        ? `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">${property.availableSpaces} spaces left</span>`
-        : '';
-
-      const directionsHtml = property.directions
-        ? `<div class="text-[10px] text-slate-500 line-clamp-1 italic">${escapeHtml(property.directions)}</div>`
-        : '';
-
-      const proximity = walkingRouteService.getImmediateDualGateProximity(
-        property.publicLatitude,
-        property.publicLongitude
-      );
-      const orientation = getNearestLandmarkOrientation(
-        property.publicLatitude,
-        property.publicLongitude
-      );
-      const googleMapsUrl = getGoogleMapsWalkingUrl(
-        property.publicLatitude,
-        property.publicLongitude
-      );
-
-      const orientationHtml = orientation
-        ? `<div class="px-2 py-1 rounded bg-slate-50 border border-slate-200/80 text-[10px] text-slate-600 flex items-center gap-1">
-            <span class="text-emerald-600">🧭</span>
-            <span>${escapeHtml(orientation.formattedDescription)}</span>
-          </div>`
-        : '';
-
-      const gatesHtml = `
-        <div class="space-y-1 pt-1 border-t border-slate-100 text-[10px]">
-          <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">BUK Campus Access</div>
-          <div class="grid grid-cols-2 gap-1.5">
-            <div class="p-1 rounded bg-emerald-50 border border-emerald-100 text-[10px]">
-              <div class="font-bold text-emerald-900">Gate 1</div>
-              <div class="text-emerald-700 font-semibold">${escapeHtml(proximity.gate1.displayText)}</div>
-            </div>
-            <div class="p-1 rounded bg-blue-50 border border-blue-100 text-[10px]">
-              <div class="font-bold text-blue-900">Gate 2</div>
-              <div class="text-blue-700 font-semibold">${escapeHtml(proximity.gate2.displayText)}</div>
-            </div>
-          </div>
-        </div>
-      `;
-
-      const popup = new maplibregl.Popup({
-        closeButton: true,
-        closeOnClick: false,
-        maxWidth: '280px',
-      }).setHTML(`
-        <div class="p-2 space-y-1.5 text-left">
-          <strong class="text-xs font-bold text-slate-900 block leading-tight">${escapeHtml(property.title)}</strong>
-          <div class="text-[11px] text-slate-500 font-medium">${escapeHtml(property.area)}, Kano State</div>
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-xs font-bold text-emerald-600">${escapeHtml(formatPrice(property.pricePerSession, property.currency))}</span>
-            ${spacesHtml}
-          </div>
-          ${orientationHtml}
-          ${gatesHtml}
-          ${landmarkHtml}
-          ${directionsHtml}
-          <div class="flex items-center gap-1.5 pt-1">
-            <button data-property-id="${escapeHtml(property.id)}" class="outpost-popup-details flex-1 py-1.5 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-500 transition cursor-pointer">View details</button>
-            ${googleMapsUrl ? `<a href="${escapeHtml(googleMapsUrl)}" target="_blank" rel="noopener noreferrer" title="Walking route in Google Maps" class="p-1.5 rounded-lg border border-slate-200 text-blue-600 hover:bg-slate-50 text-xs">🚶</a>` : ''}
-          </div>
-        </div>
-      `);
-
-      popup.on('open', () => {
-        const button = document.querySelector<HTMLButtonElement>(
-          `[data-property-id="${CSS.escape(property.id)}"]`,
-        );
-        button?.addEventListener('click', () => onPropertyOpen?.(property));
-      });
-
-      const marker = new maplibregl.Marker({
-        element: createPropertyMarker(property),
-      })
-        .setLngLat(coordinates)
-        .setPopup(popup)
-        .addTo(map);
-
-      marker.getElement().addEventListener('click', () => {
-        setSelectedId(property.id);
-      });
-
-      markersRef.current.set(property.id, marker);
-      popupsRef.current.set(property.id, popup);
-    });
-
-    // Fit map bounds to visible properties if more than 1 exists
-    if (visibleProperties.length > 1) {
-      const bounds = new maplibregl.LngLatBounds();
-      visibleProperties.forEach((p) => bounds.extend([p.publicLongitude, p.publicLatitude]));
-      map.fitBounds(bounds, { padding: 45, maxZoom: 16 });
+    const source = map.getSource(CLUSTER_SOURCE_ID) as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(geojsonData);
+    } else {
+      setupClusteringLayers(map);
     }
-  }, [onPropertyOpen, visibleProperties]);
+
+    if (map.getLayer('unclustered-point-selected')) {
+      map.setFilter('unclustered-point-selected', [
+        'all',
+        ['!', ['has', 'point_count']],
+        ['==', ['get', 'id'], selectedId || ''],
+      ]);
+    }
+  }, [geojsonData, mapLoaded, selectedId, setupClusteringLayers]);
+
+  // Fit bounds when visibleProperties updates (keeps points grouped via clusters)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || visibleProperties.length <= 1) return;
+
+    const bounds = new maplibregl.LngLatBounds();
+    visibleProperties.forEach((p) => bounds.extend([p.publicLongitude, p.publicLatitude]));
+    map.fitBounds(bounds, { padding: 45, maxZoom: 15 });
+  }, [mapLoaded, visibleProperties]);
 
   const handleUseCurrentLocation = async () => {
     setLocationError(null);
@@ -625,7 +787,7 @@ export const StudentVerifiedPropertiesMap: React.FC<
       zoom: 17,
       essential: true,
     });
-    markersRef.current.get(property.id)?.togglePopup();
+    showPropertyPopup(property);
   };
 
   return (

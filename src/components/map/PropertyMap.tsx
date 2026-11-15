@@ -250,8 +250,8 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         type: 'geojson',
         data: geojsonData,
         cluster: true,
-        clusterMaxZoom: 14,
-        clusterRadius: 50,
+        clusterMaxZoom: 16,
+        clusterRadius: 55,
       });
 
       // 1. Cluster Circles Layer
@@ -535,8 +535,7 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         setupClusteringLayers(map);
       });
 
-      // Click on Vector Circle Cluster -> Smooth Zoom Expansion
-      map.on('click', 'clusters', (e) => {
+      const handleClusterClick = (e: maplibregl.MapLayerMouseEvent) => {
         if (!map) return;
         const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
         const clusterId = features[0]?.properties?.cluster_id;
@@ -550,14 +549,18 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
             const coordinates = (features[0].geometry as any).coordinates.slice();
             map.easeTo({
               center: coordinates,
-              zoom: zoom + 0.5,
+              zoom: Math.min(18, zoom + 0.65),
               duration: 500,
             });
           })
           .catch((err) => {
             console.warn('Could not expand cluster:', err);
           });
-      });
+      };
+
+      // Click on Vector Circle Cluster or Count -> Smooth Zoom Expansion
+      map.on('click', 'clusters', handleClusterClick);
+      map.on('click', 'cluster-count', handleClusterClick);
 
       // Click on Unclustered Single Point -> Open Rich Popup
       map.on('click', 'unclustered-point', (e) => {
@@ -579,6 +582,12 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
         if (map) map.getCanvas().style.cursor = 'pointer';
       });
       map.on('mouseleave', 'clusters', () => {
+        if (map) map.getCanvas().style.cursor = '';
+      });
+      map.on('mouseenter', 'cluster-count', () => {
+        if (map) map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'cluster-count', () => {
         if (map) map.getCanvas().style.cursor = '';
       });
       map.on('mouseenter', 'unclustered-point', () => {

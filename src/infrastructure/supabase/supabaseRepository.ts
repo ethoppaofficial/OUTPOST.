@@ -75,6 +75,8 @@ export class SupabaseRepository {
   private hydratedUserId: string = '';
   private notificationsRealtimeChannel: any = null;
   private notificationsRealtimeUserId: string = '';
+  private landlordActivityChannel: any = null;
+  private landlordActivityUserId: string = '';
 
   // In-memory cache synced with Supabase PostgreSQL tables
   private users: User[] = [];
@@ -1199,6 +1201,21 @@ export class SupabaseRepository {
     const needsHydration = Boolean(userId && (changed || this.hydratedUserId !== userId));
     this.activeUserId = userId;
     appEventBus.publish('userChanged', userId);
+    if (!userId && typeof window !== 'undefined') {
+      if (this.notificationsRealtimeChannel) {
+        supabase.removeChannel(this.notificationsRealtimeChannel);
+        this.notificationsRealtimeChannel = null;
+        this.notificationsRealtimeUserId = '';
+      }
+      if (this.landlordActivityChannel) {
+        supabase.removeChannel(this.landlordActivityChannel);
+        this.landlordActivityChannel = null;
+        this.landlordActivityUserId = '';
+      }
+      this.hydratedUserId = '';
+      return;
+    }
+
     if (needsHydration && userId && typeof window !== 'undefined') {
       this.hydratedUserId = userId;
       this.hydrateUserConversationsAndMessages(userId).catch((err) =>
@@ -1211,6 +1228,7 @@ export class SupabaseRepository {
         console.warn('[SupabaseRepository] Notifications hydration notice:', err?.message || err)
       );
       this.subscribeToNotificationsRealtime(userId);
+      this.subscribeToLandlordActivityRealtime(userId);
     }
   }
 
@@ -5471,9 +5489,6 @@ export class SupabaseRepository {
     const otherUsers = this.notifications.filter((n) => n.userId !== userId);
     this.notifications = [...mapped, ...otherUsers];
     appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
-    if (mapped[0]) {
-      appEventBus.publish(`notifications:${userId}`, mapped[0]);
-    }
     return this.getNotifications(userId);
   }
 
@@ -5506,6 +5521,7 @@ export class SupabaseRepository {
           if (payload.new?.id) {
             const mapped = this.mapNotificationRow(payload.new);
             const idx = this.notifications.findIndex((n) => n.id === mapped.id);
+            const isNewInsert = payload.eventType === 'INSERT' && idx < 0;
             if (idx >= 0) {
               this.notifications[idx] = mapped;
             } else {
@@ -5513,12 +5529,95 @@ export class SupabaseRepository {
             }
             appEventBus.publish(`notifications:${userId}`, mapped);
             appEventBus.publish('notificationsUpdated', this.getNotifications(userId));
+            if (isNewInsert && !mapped.isRead) {
+              appEventBus.publish(`notificationIncoming:${userId}`, mapped);
+            }
           }
         }
       )
       .subscribe();
 
     this.notificationsRealtimeChannel = channel;
+  }
+
+  private subscribeToLandlordActivityRealtime(landlordId: string): void {
+    if (!landlordId || typeof window === 'undefined') return;
+    if (this.landlordActivityUserId === landlordId && this.landlordActivityChannel) return;
+
+    if (this.landlordActivityChannel) {
+      supabase.removeChannel(this.landlordActivityChannel);
+      this.landlordActivityChannel = null;
+    }
+
+    this.landlordActivityUserId = landlordId;
+    const channel = supabase
+      .channel(`landlord-activity:${landlordId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'reservations',
+          filter: `landlord_id=eq.${landlordId}`,
+        },
+        (payload: any) => {
+          if (payload.new?.id) {
+            appEventBus.publish(`landlordReminderAlert:${landlordId}`, {
+              kind: 'reservation',
+              id: payload.new.id,
+              status: payload.new.status,
+            });
+            this.hydrateUserSessionContext(landlordId).catch(() => {});
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'reservations',
+          filter: `landlord_id=eq.${landlordId}`,
+        },
+        (payload: any) => {
+          if (
+            payload.new?.id &&
+            (payload.new.status === 'payment_submitted' || payload.new.status === 'pending_payment')
+          ) {
+            appEventBus.publish(`landlordReminderAlert:${landlordId}`, {
+              kind: 'reservation',
+              id: payload.new.id,
+              status: payload.new.status,
+            });
+            this.hydrateUserSessionContext(landlordId).catch(() => {});
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'payment_receipts',
+          filter: `landlord_id=eq.${landlordId}`,
+        },
+        (payload: any) => {
+          if (
+            payload.new?.id &&
+            (payload.eventType === 'INSERT' || payload.new.status === 'pending_review')
+          ) {
+            appEventBus.publish(`landlordReminderAlert:${landlordId}`, {
+              kind: 'payment_receipt',
+              id: payload.new.id,
+              status: payload.new.status,
+            });
+            this.hydrateUserSessionContext(landlordId).catch(() => {});
+          }
+        }
+      )
+      .subscribe();
+
+    this.landlordActivityChannel = channel;
   }
 
   public createNotification(data: Omit<AppNotification, 'id' | 'isRead' | 'createdAt'>): AppNotification {
@@ -5531,6 +5630,9 @@ export class SupabaseRepository {
     this.notifications.unshift(notif);
     appEventBus.publish(`notifications:${notif.userId}`, notif);
     appEventBus.publish('notificationsUpdated', this.getNotifications(notif.userId));
+    if (!this.activeUserId || notif.userId === this.activeUserId) {
+      appEventBus.publish(`notificationIncoming:${notif.userId}`, notif);
+    }
 
     supabase
       .from('notifications')
@@ -5793,6 +5895,7 @@ export class SupabaseRepository {
       .from('profiles')
       .select('id, full_name, email, role, account_status')
       .neq('id', excludeUserId)
+      .neq('role', 'landlord')
       .neq('account_status', 'suspended')
       .or(`full_name.ilike.%${clean.replace(/[,%()]/g, '')}%,email.ilike.%${clean.replace(/[,%()]/g, '')}%`)
       .limit(20);
