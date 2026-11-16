@@ -714,7 +714,7 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
     });
   });
 
-  describe('UI Cleanup, MapLibre Clustering, Tenant Inquiries Removal & Sound Tones', () => {
+  describe('UI Cleanup, MapLibre Clustering & Tenant Inquiries Removal', () => {
     test('Both PropertyMap and StudentVerifiedPropertiesMap configure native MapLibre GeoJSON clustering', () => {
       const propMapSrc = read('src/components/map/PropertyMap.tsx');
       const studentMapSrc = read('src/components/map/StudentVerifiedPropertiesMap.tsx');
@@ -757,46 +757,6 @@ describe('OUTPOST: Targeted Requirements Verification Suite (1-8)', () => {
       assert.doesNotMatch(appShellSrc, /Tenant Inquiries/);
       assert.doesNotMatch(appShellSrc, /\/landlord\/chat/);
       assert.match(repoSrc, /\.neq\('role',\s*'landlord'\)/);
-    });
-
-    test('Sound service, Realtime channels, and AppShell enable notification and landlord payment/reservation reminder tones', async () => {
-      const soundMod = await import('../src/application/services/soundService.ts');
-      const appShellSrc = read('src/components/layout/AppShell.tsx');
-      const repoSrc = read('src/infrastructure/supabase/supabaseRepository.ts');
-      const m18 = read('supabase/migrations/20261115000018_enable_realtime_reservations_and_receipts.sql');
-
-      assert.equal(
-        soundMod.soundService.isPaymentOrReservationNotification({
-          title: 'New Bank Transfer Receipt Uploaded',
-          message: 'Student submitted payment receipt for review.',
-          type: 'payment',
-        }),
-        true,
-      );
-      assert.equal(
-        soundMod.soundService.isPaymentOrReservationNotification({
-          title: 'New Room Reservation Placed',
-          message: 'A student placed a 7-day hold.',
-          type: 'reservation',
-        }),
-        true,
-      );
-      assert.equal(
-        soundMod.soundService.isPaymentOrReservationNotification({
-          title: 'Welcome Notice',
-          message: 'Platform announcement',
-          type: 'broadcast',
-        }),
-        false,
-      );
-
-      assert.match(repoSrc, /subscribeToLandlordActivityRealtime/);
-      assert.match(repoSrc, /notificationIncoming:/);
-      assert.match(repoSrc, /landlordReminderAlert:/);
-      assert.match(appShellSrc, /playNotificationTone/);
-      assert.match(appShellSrc, /playLandlordReminderTone/);
-      assert.match(m18, /ALTER PUBLICATION supabase_realtime ADD TABLE public\.reservations/i);
-      assert.match(m18, /ALTER PUBLICATION supabase_realtime ADD TABLE public\.payment_receipts/i);
     });
   });
 });

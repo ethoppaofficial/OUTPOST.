@@ -42,13 +42,9 @@ import {
   PanelLeftOpen,
   Settings,
   Megaphone,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { notificationService } from '../../application/services/notificationService';
 import { chatService } from '../../application/services/chatService';
-import { soundService } from '../../application/services/soundService';
-import { repository } from '../../infrastructure/repositories';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuth } from '../../application/context/AuthContext';
 import { Avatar } from '../common/Avatar';
@@ -85,7 +81,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifsDropdownOpen, setNotifsDropdownOpen] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => soundService.isSoundEnabled());
 
   // Expanded and collapsed desktop sidebar modes with persisted preference
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -141,50 +136,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     refreshSession();
   }, [currentUser?.id]);
 
-  // Listen to persona/session changes, notification tones, and landlord payment/reservation reminders
+  // Listen to persona/session changes & notification subscriptions
   useEffect(() => {
     if (!session?.user?.id) return;
     const currentUserId = session.user.id;
-    const activeRole = session.user.role || 'student';
 
     const unsubNotifs = notificationService.subscribeToNotifications(currentUserId, () => {
       setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
     });
-
-    const unsubIncoming = notificationService.subscribeToIncomingNotifications(currentUserId, (notif) => {
-      setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
-      if (activeRole === 'landlord' && soundService.isPaymentOrReservationNotification(notif)) {
-        soundService.playLandlordReminderTone(`notif:${notif.id}`);
-      } else {
-        soundService.playNotificationTone(`notif:${notif.id}`);
-      }
-    });
-
-    const unsubLandlordReminders =
-      activeRole === 'landlord'
-        ? notificationService.subscribeToLandlordReminders(currentUserId, (evt) => {
-            soundService.playLandlordReminderTone(
-              `landlord:${evt.kind}:${evt.id}:${evt.status || ''}`
-            );
-          })
-        : () => {};
-
-    const reminderInterval =
-      activeRole === 'landlord' && typeof window !== 'undefined'
-        ? window.setInterval(() => {
-            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-            const pendingReceipts = repository
-              .getPaymentReceiptsForLandlord(currentUserId)
-              .filter((r) => r.status === 'pending_review');
-            const activePendingReservations = repository
-              .getReservationsForLandlord(currentUserId)
-              .filter((r) => r.status === 'receipt_submitted' || r.status === 'pending_payment');
-
-            if (pendingReceipts.length > 0 || activePendingReservations.length > 0) {
-              soundService.playLandlordReminderTone('landlord:pending-reminder');
-            }
-          }, 90000)
-        : null;
 
     const unsubNotifList = notificationService.subscribeToListUpdates(() => {
       setUnreadNotifs(notificationService.getUnreadCount(currentUserId));
@@ -196,13 +155,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
     return () => {
       unsubNotifs();
-      unsubIncoming();
-      unsubLandlordReminders();
-      if (reminderInterval !== null) window.clearInterval(reminderInterval);
       unsubNotifList();
       unsubConvos();
     };
-  }, [session?.user?.id, session?.user?.role]);
+  }, [session?.user?.id]);
 
   // Mobile menu scroll lock and keyboard escape handling
   useEffect(() => {
@@ -744,34 +700,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                     </span>
                   )}
                 </Link>
-              )}
-
-              {/* Notification & Reminder Tone Toggle */}
-              {session?.user && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !soundEnabled;
-                    setSoundEnabled(next);
-                    soundService.setSoundEnabled(next);
-                    if (next) {
-                      if (userRole === 'landlord') {
-                        soundService.playLandlordReminderTone('toggle-preview');
-                      } else {
-                        soundService.playNotificationTone('toggle-preview');
-                      }
-                    }
-                  }}
-                  className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                  aria-label={soundEnabled ? 'Mute notification tones' : 'Enable notification tones'}
-                  title={soundEnabled ? 'Notification tones enabled (click to mute)' : 'Notification tones muted (click to enable)'}
-                >
-                  {soundEnabled ? (
-                    <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <VolumeX className="w-4 h-4 text-slate-400" />
-                  )}
-                </button>
               )}
 
               {/* Notification Bell */}
