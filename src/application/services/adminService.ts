@@ -589,11 +589,26 @@ export function createAdminService(deps?: { client?: any }) {
     const landlordById = new Map<string, AdminRecord>(landlords.map((item) => [item.user_id, item]));
     const userById = new Map<string, AdminRecord>(profiles.map((item) => [item.id, item]));
 
+    const statusWeight = (status: unknown) => {
+      if (status === 'pending') return 0;
+      if (status === 'approved') return 1;
+      if (status === 'rejected') return 2;
+      return 3;
+    };
+
+    const sortVerificationRecords = (a: AdminRecord, b: AdminRecord) => {
+      const weightDiff = statusWeight(a.status) - statusWeight(b.status);
+      if (weightDiff !== 0) return weightDiff;
+      const aTime = Math.max(toMillis(a.reviewedAt), toMillis(a.submittedAt));
+      const bTime = Math.max(toMillis(b.reviewedAt), toMillis(b.submittedAt));
+      return bTime - aTime;
+    };
+
     const formattedStudents: AdminRecord[] = studentDocs
-      .filter((item) => item.status === 'pending')
       .map((item) => {
         const studentProfile: AdminRecord = studentById.get(item.student_id) || { id: '' };
         const user: AdminRecord = userById.get(item.student_id) || { id: '' };
+        const reviewer: AdminRecord | undefined = item.reviewer_id ? userById.get(item.reviewer_id) : undefined;
 
         const displayDocType =
           item.document_type === 'student_id_card' || item.document_type === 'student_id'
@@ -606,10 +621,13 @@ export function createAdminService(deps?: { client?: any }) {
             ? 'National Identity (NIN) Slip'
             : item.document_type || 'Academic Identity Proof';
 
+        const status = item.status || 'pending';
+
         return {
           ...item,
           id: item.id,
           studentId: item.student_id,
+          status,
           fullName: user.full_name || studentProfile.full_name || 'Student',
           registrationNumber: studentProfile.registration_number || '',
           university: studentProfile.institution || 'Bayero University Kano',
@@ -618,24 +636,29 @@ export function createAdminService(deps?: { client?: any }) {
           studyLevel: studentProfile.study_level || '',
           studentEmail: user.email || '',
           submittedAt: displayDate(item.created_at),
+          reviewedAt: displayDate(item.reviewed_at),
+          reviewerId: item.reviewer_id || '',
+          reviewerName: reviewer?.full_name || reviewer?.email || undefined,
+          rejectionReason: item.rejection_reason || undefined,
           documentType: displayDocType,
           documentUrl: item.storage_path || '',
           storage_path: item.storage_path || '',
           hasUploadedEvidence: Boolean(item.storage_path),
         };
       })
-      .sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt));
+      .sort(sortVerificationRecords);
 
-    const processedLandlordIds = new Set<string>();
+    const landlordsWithSubmissions = new Set<string>();
     const formattedLandlords: AdminRecord[] = [];
 
     for (const sub of landlordSubmissions) {
-      if (sub.status !== 'pending') continue;
       const landlordId = sub.landlord_id;
-      processedLandlordIds.add(landlordId);
+      landlordsWithSubmissions.add(landlordId);
 
       const landlordProfile: AdminRecord = landlordById.get(landlordId) || { id: '' };
       const user: AdminRecord = userById.get(landlordId) || { id: '' };
+      const reviewerId = sub.reviewer_id || landlordProfile.verified_by || '';
+      const reviewer: AdminRecord | undefined = reviewerId ? userById.get(reviewerId) : undefined;
 
       const displayDocType =
         sub.document_type === 'national_id'
@@ -652,11 +675,14 @@ export function createAdminService(deps?: { client?: any }) {
           ? 'CAC Certificate'
           : sub.document_type || 'Identity & Ownership';
 
+      const status = sub.status || landlordProfile.verification_status || 'pending';
+
       formattedLandlords.push({
         ...sub,
         id: sub.id,
         submissionId: sub.id,
         userId: landlordId,
+        status,
         legalName: user.full_name || landlordProfile.company_name || 'Landlord',
         businessName: landlordProfile.company_name || '',
         email: user.email || '',
@@ -664,30 +690,45 @@ export function createAdminService(deps?: { client?: any }) {
         idNumber: landlordProfile.tax_id || '',
         ownershipDocType: sub.file_name || displayDocType,
         submittedAt: displayDate(sub.created_at),
+        reviewedAt: displayDate(sub.reviewed_at || (status === 'approved' ? landlordProfile.verified_at : '')),
+        reviewerId,
+        reviewerName: reviewer?.full_name || reviewer?.email || undefined,
+        rejectionReason: sub.rejection_reason || landlordProfile.rejection_reason || undefined,
         documentUrl: sub.storage_path || '',
         storage_path: sub.storage_path || '',
         hasUploadedEvidence: Boolean(sub.storage_path),
       });
     }
 
-    // Surface pending landlord_profiles that have not yet linked a submission row
+    // Surface pending, approved, or rejected landlord_profiles without a linked submission row
     for (const lp of landlords) {
-      if (lp.verification_status !== 'pending') continue;
-      if (processedLandlordIds.has(lp.user_id)) continue;
+      if (!['pending', 'approved', 'rejected'].includes(String(lp.verification_status || ''))) continue;
+      if (landlordsWithSubmissions.has(lp.user_id)) continue;
 
       const user: AdminRecord = userById.get(lp.user_id) || { id: '' };
+      const reviewer: AdminRecord | undefined = lp.verified_by ? userById.get(lp.verified_by) : undefined;
       formattedLandlords.push({
         ...lp,
         id: lp.id || lp.user_id,
         submissionId: lp.id || lp.user_id,
         userId: lp.user_id,
+        status: lp.verification_status,
         legalName: user.full_name || lp.company_name || 'Landlord',
         businessName: lp.company_name || '',
         email: user.email || '',
-        idType: 'Pending Verification Profile',
+        idType:
+          lp.verification_status === 'approved'
+            ? 'Verified Landlord Profile'
+            : lp.verification_status === 'rejected'
+            ? 'Declined Landlord Profile'
+            : 'Pending Verification Profile',
         idNumber: lp.tax_id || '',
         ownershipDocType: 'No document row recorded',
         submittedAt: displayDate(lp.updated_at || lp.created_at),
+        reviewedAt: displayDate(lp.verified_at),
+        reviewerId: lp.verified_by || '',
+        reviewerName: reviewer?.full_name || reviewer?.email || undefined,
+        rejectionReason: lp.rejection_reason || undefined,
         documentUrl: '',
         storage_path: '',
         hasUploadedEvidence: false,
@@ -696,7 +737,7 @@ export function createAdminService(deps?: { client?: any }) {
 
     return {
       students: formattedStudents,
-      landlords: formattedLandlords.sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt)),
+      landlords: formattedLandlords.sort(sortVerificationRecords),
     };
   }
 

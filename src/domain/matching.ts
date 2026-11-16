@@ -48,6 +48,19 @@ export interface CompatibilityResult {
  * @param prefB - Profile preferences of the candidate student.
  * @returns {CompatibilityResult} Calculated score, match band, and explanatory factors.
  */
+const isNoPreference = (value?: string): boolean => {
+  const normalized = (value || '').trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === 'none' ||
+    normalized === 'nil' ||
+    normalized === 'no preference' ||
+    normalized === 'n/a'
+  );
+};
+
+const normalizePrefValue = (value?: string): string => (value || '').trim().toLowerCase();
+
 export function calculateCompatibility(
   prefA: RoommatePreference,
   prefB: RoommatePreference
@@ -65,35 +78,50 @@ export function calculateCompatibility(
   const minB = typeof safePrefB.minBudget === 'number' ? safePrefB.minBudget : 0;
   const maxB = typeof safePrefB.maxBudget === 'number' ? safePrefB.maxBudget : 0;
 
-  const overlapMin = Math.max(minA, minB);
-  const overlapMax = Math.min(maxA, maxB);
-  if (overlapMin <= overlapMax && overlapMax > 0) {
-    score += 25;
-    matchingFactors.push('Aligned budget ranges (₦' + overlapMin.toLocaleString() + ' - ₦' + overlapMax.toLocaleString() + ')');
+  if ((minA === 0 && maxA === 0) || (minB === 0 && maxB === 0)) {
+    score += 18;
+    matchingFactors.push('Flexible or unspecified rental budget preference');
   } else {
-    const diff = overlapMin - overlapMax;
-    if (diff <= 50000) {
-      score += 12;
-      divergingFactors.push('Close budget range within ₦50k difference');
+    const overlapMin = Math.max(minA, minB);
+    const overlapMax = Math.min(maxA, maxB);
+    if (overlapMin <= overlapMax && overlapMax > 0) {
+      score += 25;
+      matchingFactors.push('Aligned budget ranges (₦' + overlapMin.toLocaleString() + ' - ₦' + overlapMax.toLocaleString() + ')');
     } else {
-      divergingFactors.push('Substantial budget difference');
+      const diff = overlapMin - overlapMax;
+      if (diff <= 50000) {
+        score += 12;
+        divergingFactors.push('Close budget range within ₦50k difference');
+      } else {
+        divergingFactors.push('Substantial budget difference');
+      }
     }
   }
 
   // 2. Preferred Location overlap (20 pts)
   const locationsA = Array.isArray(safePrefA.preferredNeighbourhoods) ? safePrefA.preferredNeighbourhoods : [];
   const locationsB = Array.isArray(safePrefB.preferredNeighbourhoods) ? safePrefB.preferredNeighbourhoods : [];
-  const commonLocations = locationsA.filter((n) => locationsB.includes(n));
+  const locationsAOpen = locationsA.length === 0 || locationsA.some((n) => isNoPreference(n));
+  const locationsBOpen = locationsB.length === 0 || locationsB.some((n) => isNoPreference(n));
+  const commonLocations = locationsA.filter((n) =>
+    !isNoPreference(n) && locationsB.some((b) => normalizePrefValue(b) === normalizePrefValue(n))
+  );
   if (commonLocations.length > 0) {
     score += 20;
     matchingFactors.push(`Mutual interest in ${commonLocations.join(', ')}`);
+  } else if (locationsAOpen || locationsBOpen) {
+    score += 15;
+    matchingFactors.push('Open to flexible campus neighbourhoods');
   } else {
     score += 5;
     divergingFactors.push('Different preferred campus neighbourhoods');
   }
 
   // 3. Move-in period (15 pts)
-  if (safePrefA.moveInPeriod && safePrefA.moveInPeriod === safePrefB.moveInPeriod) {
+  if (isNoPreference(safePrefA.moveInPeriod) || isNoPreference(safePrefB.moveInPeriod)) {
+    score += 12;
+    matchingFactors.push('Flexible move-in timing');
+  } else if (normalizePrefValue(safePrefA.moveInPeriod) === normalizePrefValue(safePrefB.moveInPeriod)) {
     score += 15;
     matchingFactors.push(`Both planning to move in ${safePrefA.moveInPeriod}`);
   } else {
@@ -102,7 +130,9 @@ export function calculateCompatibility(
   }
 
   // 4. Cleanliness (10 pts) & Study Habits (5 pts)
-  if (safePrefA.cleanliness && safePrefA.cleanliness === safePrefB.cleanliness) {
+  if (isNoPreference(safePrefA.cleanliness) || isNoPreference(safePrefB.cleanliness)) {
+    score += 8;
+  } else if (normalizePrefValue(safePrefA.cleanliness) === normalizePrefValue(safePrefB.cleanliness)) {
     score += 10;
     matchingFactors.push(`Compatible cleanliness expectations (${safePrefA.cleanliness})`);
   } else if (
@@ -114,7 +144,9 @@ export function calculateCompatibility(
     score += 6;
   }
 
-  if (safePrefA.studyHabits && safePrefA.studyHabits === safePrefB.studyHabits) {
+  if (isNoPreference(safePrefA.studyHabits) || isNoPreference(safePrefB.studyHabits)) {
+    score += 4;
+  } else if (normalizePrefValue(safePrefA.studyHabits) === normalizePrefValue(safePrefB.studyHabits)) {
     score += 5;
     matchingFactors.push(`Harmonious study lifestyle (${safePrefA.studyHabits})`);
   } else {
@@ -122,14 +154,18 @@ export function calculateCompatibility(
   }
 
   // 5. Sleep Schedule & Noise (15 pts)
-  if (safePrefA.sleepSchedule && safePrefA.sleepSchedule === safePrefB.sleepSchedule) {
+  if (isNoPreference(safePrefA.sleepSchedule) || isNoPreference(safePrefB.sleepSchedule)) {
+    score += 6;
+  } else if (normalizePrefValue(safePrefA.sleepSchedule) === normalizePrefValue(safePrefB.sleepSchedule)) {
     score += 8;
     matchingFactors.push(`Synchronized sleep schedule (${safePrefA.sleepSchedule})`);
   } else {
     score += 3;
   }
 
-  if (safePrefA.noiseTolerance && safePrefA.noiseTolerance === safePrefB.noiseTolerance) {
+  if (isNoPreference(safePrefA.noiseTolerance) || isNoPreference(safePrefB.noiseTolerance)) {
+    score += 5;
+  } else if (normalizePrefValue(safePrefA.noiseTolerance) === normalizePrefValue(safePrefB.noiseTolerance)) {
     score += 7;
     matchingFactors.push(`Similar acoustic tolerance (${safePrefA.noiseTolerance})`);
   } else {
@@ -137,7 +173,9 @@ export function calculateCompatibility(
   }
 
   // 6. Smoking & Guest preference (10 pts)
-  if (safePrefA.smoking === 'Non-Smoker Only' && safePrefB.smoking === 'Non-Smoker Only') {
+  if (isNoPreference(safePrefA.smoking) || isNoPreference(safePrefB.smoking)) {
+    score += 4;
+  } else if (safePrefA.smoking === 'Non-Smoker Only' && safePrefB.smoking === 'Non-Smoker Only') {
     score += 5;
     matchingFactors.push('Both smoke-free living environment');
   } else if (
@@ -145,26 +183,53 @@ export function calculateCompatibility(
     (safePrefB.smoking === 'Non-Smoker Only' && safePrefA.smoking !== 'Non-Smoker Only')
   ) {
     divergingFactors.push('Conflicting smoking boundary');
+  } else if (normalizePrefValue(safePrefA.smoking) === normalizePrefValue(safePrefB.smoking)) {
+    score += 5;
+    matchingFactors.push(`Aligned smoking policy (${safePrefA.smoking})`);
   } else {
     score += 4;
   }
 
-  if (safePrefA.guestPreference && safePrefA.guestPreference === safePrefB.guestPreference) {
+  if (isNoPreference(safePrefA.guestPreference) || isNoPreference(safePrefB.guestPreference)) {
+    score += 4;
+  } else if (normalizePrefValue(safePrefA.guestPreference) === normalizePrefValue(safePrefB.guestPreference)) {
     score += 5;
     matchingFactors.push(`Shared guest policy (${safePrefA.guestPreference})`);
   } else {
     score += 2;
   }
 
+  // 7. Custom Other Preferences Table comparisons (Tribe, Language, Religion, etc.)
+  const customA = Array.isArray(safePrefA.customPreferences) ? safePrefA.customPreferences : [];
+  const customB = Array.isArray(safePrefB.customPreferences) ? safePrefB.customPreferences : [];
+  if (customA.length > 0 && customB.length > 0) {
+    for (const itemA of customA) {
+      const catA = normalizePrefValue(itemA?.category);
+      const valA = itemA?.value?.trim() || '';
+      if (!catA || isNoPreference(valA)) continue;
+
+      const matchB = customB.find((itemB) => normalizePrefValue(itemB?.category) === catA);
+      if (!matchB || isNoPreference(matchB.value)) continue;
+
+      if (normalizePrefValue(valA) === normalizePrefValue(matchB.value)) {
+        score += 3;
+        matchingFactors.push(`Shared ${itemA.category.trim()} preference (${valA})`);
+      } else {
+        divergingFactors.push(`Different ${itemA.category.trim()} preference (${valA} vs ${matchB.value.trim()})`);
+      }
+    }
+  }
+
   // Determine Match Band
+  const finalScore = Math.min(100, Math.max(0, score));
   let matchBand: CompatibilityResult['matchBand'] = 'Moderate Match';
-  if (score >= 85) matchBand = 'Excellent Match';
-  else if (score >= 70) matchBand = 'Great Match';
-  else if (score >= 50) matchBand = 'Moderate Match';
+  if (finalScore >= 85) matchBand = 'Excellent Match';
+  else if (finalScore >= 70) matchBand = 'Great Match';
+  else if (finalScore >= 50) matchBand = 'Moderate Match';
   else matchBand = 'Low Match';
 
   return {
-    score: Math.min(100, Math.max(0, score)),
+    score: finalScore,
     matchBand,
     matchingFactors,
     divergingFactors,

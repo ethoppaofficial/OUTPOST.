@@ -10,6 +10,8 @@ import { groupChatService } from '../src/application/services/groupChatService.t
 import { chatService } from '../src/application/services/chatService.ts';
 import { authService } from '../src/application/services/authService.ts';
 import { verificationService } from '../src/application/services/verificationService.ts';
+import { createAdminService } from '../src/application/services/adminService.ts';
+import { calculateCompatibility } from '../src/domain/matching.ts';
 import { supabase } from '../src/infrastructure/supabase/supabaseClient.ts';
 
 const read = (relPath) => fs.readFileSync(path.resolve(relPath), 'utf8');
@@ -642,6 +644,183 @@ describe('OUTPOST: System Audit & Breakdown Fixes (Migration 15)', () => {
       assert.match(usersPageSrc, /user\.phone \? ` · \$\{user\.phone\}` : ''/);
       const publicBody = publicProfileSrc.slice(publicProfileSrc.indexOf('export const PublicProfilePage'));
       assert.doesNotMatch(publicBody, /\bphone\b/i);
+    });
+  });
+
+  describe('9. Roommate Lifestyle Custom Options, None/Nil & Other Preferences Table', () => {
+    const prefsPageSrc = read('src/pages/student/RoommatePreferencesPage.tsx');
+
+    test('RoommatePreferencesPage includes None/Nil, Custom inputs across options, and Other Preferences table', () => {
+      assert.match(prefsPageSrc, /Other Preferences Table/);
+      assert.match(prefsPageSrc, /category:\s*'Tribe'/);
+      assert.match(prefsPageSrc, /category:\s*'Language'/);
+      assert.match(prefsPageSrc, /category:\s*'Religion'/);
+      assert.match(prefsPageSrc, /__custom__/);
+      assert.match(prefsPageSrc, /value:\s*'None'/);
+      assert.match(prefsPageSrc, /value:\s*'Nil'/);
+      assert.match(prefsPageSrc, /Add Preference Row/);
+    });
+
+    test('saveRoommatePreference & calculateCompatibility handle None/Nil, custom strings, and customPreferences table rows', () => {
+      const idA = '91111111-1111-4111-8111-111111111111';
+      const idB = '92222222-2222-4222-8222-222222222222';
+
+      const prefA = roommateService.saveStudentPreferences({
+        studentId: idA,
+        preferredNeighbourhoods: ['None'],
+        minBudget: 0,
+        maxBudget: 0,
+        moveInPeriod: 'None',
+        studyHabits: 'Custom group revision evenings',
+        sleepSchedule: 'Nil',
+        cleanliness: 'None',
+        smoking: 'Nil',
+        guestPreference: 'None',
+        noiseTolerance: 'Custom medium background podcast OK',
+        roomSharing: 'None',
+        genderPreference: 'Nil',
+        customPreferences: [
+          { category: 'Tribe', value: 'Hausa' },
+          { category: 'Language', value: 'Hausa / English' },
+          { category: 'Religion', value: 'Nil' },
+        ],
+      });
+
+      const prefB = roommateService.saveStudentPreferences({
+        studentId: idB,
+        preferredNeighbourhoods: ['Dambare'],
+        minBudget: 250000,
+        maxBudget: 400000,
+        moveInPeriod: 'Immediate',
+        studyHabits: 'Custom group revision evenings',
+        sleepSchedule: 'Sleeps Midnight - 2am',
+        cleanliness: 'Moderate / Weekly',
+        smoking: 'Non-Smoker Only',
+        guestPreference: 'Weekends Only',
+        noiseTolerance: 'Custom medium background podcast OK',
+        roomSharing: 'Open to 2-Person Shared',
+        genderPreference: 'Same Gender Only',
+        customPreferences: [
+          { category: 'Tribe', value: 'Hausa' },
+          { category: 'Language', value: 'English' },
+          { category: 'Religion', value: 'Islam' },
+        ],
+      });
+
+      assert.equal(roommateService.getStudentPreferences(idA)?.customPreferences?.length, 3);
+      assert.equal(prefA.studyHabits, 'Custom group revision evenings');
+
+      const result = calculateCompatibility(prefA, prefB);
+      assert.ok(result.score >= 0 && result.score <= 100);
+      assert.ok(result.matchingFactors.some((f) => f.includes('Shared Tribe preference (Hausa)')));
+      assert.ok(result.divergingFactors.some((f) => f.includes('Different Language preference')));
+      assert.ok(!result.divergingFactors.some((f) => f.includes('Religion')));
+      assert.ok(!result.divergingFactors.some((f) => f.includes('Conflicting smoking boundary')));
+    });
+
+    test('Supabase mapper serializes & restores customPreferences and None/Nil without breaking SQL enum constraints', () => {
+      assert.match(repoSrc, /customPreferences:\s*sanitizedCustomPreferences/);
+      assert.match(repoSrc, /pref\.smoking === 'Non-Smoker Only'\s*\?\s*'no_smoking'\s*:\s*'flexible'/);
+    });
+  });
+
+  describe('10. Admin Verification History & Verified User Documents', () => {
+    const verifQueueSrc = read('src/pages/admin/VerificationQueuePage.tsx');
+
+    test('adminService.getVerificationQueues includes approved, rejected, and pending student and landlord history', async () => {
+      const adminId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const sPending = '11111111-1111-4111-8111-111111111111';
+      const sVerified = '22222222-2222-4222-8222-222222222222';
+      const lVerified = '33333333-3333-4333-8333-333333333333';
+
+      const tables = {
+        profiles: [
+          { id: adminId, email: 'admin@outpost.ng', role: 'admin', account_status: 'active', full_name: 'Primary Admin' },
+          { id: sPending, email: 'p@buk.edu.ng', role: 'student', account_status: 'active', full_name: 'Pending Student' },
+          { id: sVerified, email: 'v@buk.edu.ng', role: 'student', account_status: 'active', full_name: 'Verified Student' },
+          { id: lVerified, email: 'l@outpost.ng', role: 'landlord', account_status: 'profile_verified', full_name: 'Verified Landlord' },
+        ],
+        student_profiles: [
+          { user_id: sPending, registration_number: 'CST/22/COM/0001' },
+          { user_id: sVerified, registration_number: 'CST/21/SWE/0002' },
+        ],
+        student_verification_documents: [
+          { id: 'doc-p', student_id: sPending, document_type: 'student_id', file_name: 'id-p.png', storage_path: `${sPending}/id-p.png`, status: 'pending', created_at: '2026-11-15T10:00:00Z' },
+          { id: 'doc-v', student_id: sVerified, document_type: 'admission_letter', file_name: 'adm-v.pdf', storage_path: `${sVerified}/adm-v.pdf`, status: 'approved', reviewer_id: adminId, reviewed_at: '2026-11-14T10:00:00Z', created_at: '2026-11-13T10:00:00Z' },
+        ],
+        landlord_verification_submissions: [
+          { id: 'sub-v', landlord_id: lVerified, document_type: 'national_id', file_name: 'nin-v.pdf', storage_path: `${lVerified}/nin-v.pdf`, status: 'approved', reviewer_id: adminId, reviewed_at: '2026-11-14T12:00:00Z', created_at: '2026-11-12T10:00:00Z' },
+        ],
+        landlord_profiles: [
+          { user_id: lVerified, company_name: 'Danbare Estates', business_address: 'Gwarzo Rd', tax_id: 'NIN-9988', verification_status: 'approved', verified_at: '2026-11-14T12:00:00Z' },
+        ],
+      };
+
+      const mockClient = {
+        auth: {
+          async getUser() {
+            return { data: { user: { id: adminId, email: 'admin@outpost.ng' } }, error: null };
+          },
+        },
+        from(table) {
+          const filters = [];
+          const inFilters = [];
+          const execute = () => {
+            const rows = (tables[table] || []).filter(
+              (r) => filters.every((f) => f(r)) && inFilters.every((f) => f(r))
+            );
+            return { data: rows, error: null };
+          };
+          const q = {
+            select() { return q; },
+            eq(col, val) { filters.push((r) => r?.[col] === val); return q; },
+            in(col, vals) { inFilters.push((r) => Array.isArray(vals) && vals.includes(r?.[col])); return q; },
+            order() { return q; },
+            async maybeSingle() {
+              const res = execute();
+              return { data: res.data[0] ?? null, error: null };
+            },
+            then(resolve, reject) {
+              return Promise.resolve(execute()).then(resolve, reject);
+            },
+          };
+          return q;
+        },
+      };
+
+      const queues = await createAdminService({ client: mockClient }).getVerificationQueues();
+      assert.equal(queues.students.length, 2);
+      assert.equal(queues.students[0].status, 'pending');
+      assert.equal(queues.students[1].status, 'approved');
+      assert.equal(queues.students[1].reviewerName, 'Primary Admin');
+
+      assert.equal(queues.landlords.length, 1);
+      assert.equal(queues.landlords[0].status, 'approved');
+      assert.equal(queues.landlords[0].storage_path, `${lVerified}/nin-v.pdf`);
+      assert.equal(queues.landlords[0].documentUrl, `${lVerified}/nin-v.pdf`);
+    });
+
+    test('VerificationQueuePage supports history status filters and viewing already-verified documents', () => {
+      assert.match(verifQueueSrc, /All history/);
+      assert.match(verifQueueSrc, /Verified \/ Approved/);
+      assert.match(verifQueueSrc, /View verified document \(15m signed link\)/);
+    });
+  });
+
+  describe('11. Authentication, Session Stability & Email Confirmation Redirect Hardening', () => {
+    test('Captures initialAuthCallback synchronously before GoTrue URL stripping & prevents StrictMode double verifyOtp', () => {
+      assert.match(supabaseClientSrc, /export const initialAuthCallback = captureInitialAuthCallback\(\)/);
+      assert.match(loginPageSrc, /verifyConfirmationTokenOnce/);
+      assert.match(loginPageSrc, /hasAuthError/);
+      assert.match(appSrc, /const isRecoveryFlow = flowType === 'recovery'/);
+      assert.match(appSrc, /window\.location\.pathname !== '\/reset-password'/);
+    });
+
+    test('AuthContext avoids setting loading=true on background TOKEN_REFRESHED and normalizes confirmed student status', () => {
+      assert.match(authCtxSrc, /event === 'TOKEN_REFRESHED'/);
+      assert.match(authCtxSrc, /sameAuthenticatedUser/);
+      assert.match(authCtxSrc, /resolvedStatus === 'email_unverified' && user\.email_confirmed_at/);
+      assert.match(authSvcSrc, /hydratedLandlordProfile/);
     });
   });
 });

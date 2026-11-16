@@ -562,35 +562,79 @@ export const UsersPage: React.FC = () => {
                 </section>
 
                 {/* Roommate Preferences */}
-                {profileDetails.roommatePreferences && (
-                  <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Roommate Preferences</h4>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <div>
-                        <span className="text-slate-400">Annual Budget Range</span>
-                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
-                          ₦{Number(profileDetails.roommatePreferences.budget_min || 0).toLocaleString()} – ₦
-                          {Number(profileDetails.roommatePreferences.budget_max || 0).toLocaleString()}
-                        </p>
+                {profileDetails.roommatePreferences && (() => {
+                  const rp = profileDetails.roommatePreferences;
+                  let extraPrefs: any = {};
+                  if (typeof rp.bio === 'string' && rp.bio.trim().startsWith('{')) {
+                    try {
+                      extraPrefs = JSON.parse(rp.bio);
+                    } catch {
+                      extraPrefs = {};
+                    }
+                  }
+                  const customRows = Array.isArray(extraPrefs.customPreferences)
+                    ? extraPrefs.customPreferences.filter((r: any) => r?.category || r?.value)
+                    : [];
+
+                  return (
+                    <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">Roommate Preferences</h4>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <div>
+                          <span className="text-slate-400">Annual Budget Range</span>
+                          <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                            ₦{Number(rp.budget_min || 0).toLocaleString()} – ₦
+                            {Number(rp.budget_max || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Preferred Areas</span>
+                          <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
+                            {Array.isArray(rp.preferred_area)
+                              ? rp.preferred_area.join(', ')
+                              : 'Not set'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Habits</span>
+                          <p className="mt-0.5 font-semibold capitalize text-slate-900 dark:text-white">
+                            {extraPrefs.sleepSchedule || String(rp.sleep_habit || '').replace(/_/g, ' ')} ·{' '}
+                            {extraPrefs.studyHabits || String(rp.study_habit || '').replace(/_/g, ' ')}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-slate-400">Preferred Areas</span>
-                        <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
-                          {Array.isArray(profileDetails.roommatePreferences.preferred_area)
-                            ? profileDetails.roommatePreferences.preferred_area.join(', ')
-                            : 'Not set'}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Habits</span>
-                        <p className="mt-0.5 font-semibold capitalize text-slate-900 dark:text-white">
-                          {String(profileDetails.roommatePreferences.sleep_habit || '').replace(/_/g, ' ')} ·{' '}
-                          {String(profileDetails.roommatePreferences.study_habit || '').replace(/_/g, ' ')}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-                )}
+                      {customRows.length > 0 && (
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">
+                            Other Preferences
+                          </span>
+                          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500">
+                                <tr>
+                                  <th className="px-3 py-1.5 font-semibold">Feature</th>
+                                  <th className="px-3 py-1.5 font-semibold">Preference</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {customRows.map((item: any, idx: number) => (
+                                  <tr key={idx}>
+                                    <td className="px-3 py-1.5 font-medium text-slate-700 dark:text-slate-200">
+                                      {item.category || 'Custom'}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-slate-600 dark:text-slate-300">
+                                      {item.value || 'Nil'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  );
+                })()}
 
                 {/* Student Verification Documents */}
                 <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800 space-y-3">
@@ -831,6 +875,7 @@ export const UsersPage: React.FC = () => {
                   <img
                     src={signedPreview.url}
                     alt={signedPreview.fileName || 'Submitted evidence'}
+                    referrerPolicy="no-referrer"
                     className="max-h-80 w-full rounded-lg border border-emerald-200 bg-white object-contain dark:border-emerald-900 dark:bg-slate-950"
                   />
                 )}
@@ -838,6 +883,7 @@ export const UsersPage: React.FC = () => {
                   <iframe
                     src={signedPreview.url}
                     title={signedPreview.fileName || 'Submitted PDF evidence'}
+                    referrerPolicy="no-referrer"
                     className="h-80 w-full rounded-lg border border-emerald-200 bg-white dark:border-emerald-900"
                   />
                 )}

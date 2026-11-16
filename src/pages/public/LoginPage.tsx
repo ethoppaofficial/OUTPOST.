@@ -17,8 +17,24 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { LogIn, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../../application/services/authService';
 import { useAuth } from '../../application/context/AuthContext';
-import { supabase } from '../../infrastructure/supabase/supabaseClient';
+import { initialAuthCallback, supabase } from '../../infrastructure/supabase/supabaseClient';
 import { repository } from '../../infrastructure/repositories';
+
+// Deduplicate single-use token_hash verification calls across React StrictMode double-mounts.
+const tokenVerificationInFlight = new Map<string, Promise<{ error: any }>>();
+
+const verifyConfirmationTokenOnce = (tokenHash: string, type: 'signup' | 'email') => {
+  const existing = tokenVerificationInFlight.get(tokenHash);
+  if (existing) return existing;
+  const pending = supabase.auth
+    .verifyOtp({
+      token_hash: tokenHash,
+      type,
+    })
+    .then((res) => ({ error: res.error }));
+  tokenVerificationInFlight.set(tokenHash, pending);
+  return pending;
+};
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -31,9 +47,20 @@ export const LoginPage: React.FC = () => {
   const [otpCode, setOtpCode] = useState('');
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [handlingConfirmation, setHandlingConfirmation] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { signInWithGoogle, connected, authUser, signInWithEmail, profileStatus, profileError, signOut } = useAuth();
+  const {
+    signInWithGoogle,
+    connected,
+    authUser,
+    currentUser,
+    loading,
+    signInWithEmail,
+    profileStatus,
+    profileError,
+    signOut,
+  } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const confirmationSignOutPendingRef = useRef(false);
 
@@ -42,57 +69,105 @@ export const LoginPage: React.FC = () => {
     const searchParams = new URLSearchParams(location.search || window.location.search || '');
     const hashStr = window.location.hash || '';
     const hashParams = new URLSearchParams(hashStr.replace(/^#/, ''));
-    const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
-    const tokenHash = hashParams.get('token_hash') || searchParams.get('token_hash');
+    const captured = initialAuthCallback && !initialAuthCallback.consumed ? initialAuthCallback : null;
 
-    const isConfirmationArrival =
-      searchParams.get('confirmed') === '1' ||
-      flowType === 'signup' ||
-      flowType === 'email' ||
-      Boolean(tokenHash);
-
-    if (!isConfirmationArrival) return;
+    const flowType = (
+      hashParams.get('type') ||
+      searchParams.get('type') ||
+      captured?.flowType ||
+      ''
+    ).toLowerCase();
+    const tokenHash =
+      hashParams.get('token_hash') || searchParams.get('token_hash') || captured?.tokenHash || '';
+    const authCode = searchParams.get('code') || captured?.code || '';
 
     const authErrorCode =
       hashParams.get('error_code') ||
       searchParams.get('error_code') ||
       hashParams.get('error') ||
-      searchParams.get('error');
+      searchParams.get('error') ||
+      captured?.errorCode ||
+      captured?.error;
     const authErrorDesc =
-      hashParams.get('error_description') || searchParams.get('error_description');
+      hashParams.get('error_description') ||
+      searchParams.get('error_description') ||
+      captured?.errorDescription;
+    const hasAuthError = Boolean(
+      authErrorCode ||
+        authErrorDesc ||
+        hashStr.includes('otp_expired') ||
+        location.search.includes('otp_expired') ||
+        captured?.hasAuthError
+    );
 
-    if (authErrorCode || authErrorDesc || hashStr.includes('otp_expired')) {
+    const isConfirmationArrival =
+      searchParams.get('confirmed') === '1' ||
+      captured?.confirmedParam === '1' ||
+      flowType === 'signup' ||
+      flowType === 'email' ||
+      flowType === 'email_change' ||
+      Boolean(tokenHash) ||
+      hasAuthError;
+
+    if (!isConfirmationArrival) return;
+
+    if (initialAuthCallback) {
+      initialAuthCallback.consumed = true;
+    }
+    try {
+      window.sessionStorage.removeItem('outpost_signup_confirmation_pending');
+    } catch {
+      // Ignore storage restrictions
+    }
+
+    if (hasAuthError) {
       confirmationSignOutPendingRef.current = false;
+      setHandlingConfirmation(false);
       setConfirmationMessage(null);
+      const rawDesc = authErrorDesc ? authErrorDesc.replace(/\+/g, ' ') : '';
       setError(
-        authErrorDesc
-          ? authErrorDesc.replace(/\+/g, ' ')
+        rawDesc
+          ? `${rawDesc}. Enter your email below to resend a confirmation link, or sign in with your password if your account is already confirmed.`
           : 'Your email confirmation link is invalid or has expired. Enter your email below and resend confirmation, or sign in if already confirmed.'
       );
-      window.history.replaceState({}, '', '/login');
+      if (window.location.search || window.location.hash) {
+        window.history.replaceState({}, '', '/login');
+      }
       return;
     }
 
     confirmationSignOutPendingRef.current = true;
+    setHandlingConfirmation(true);
     setError(null);
 
     let cancelled = false;
     (async () => {
       try {
         if (tokenHash && (flowType === 'signup' || flowType === 'email' || !flowType)) {
-          const { error: otpErr } = await supabase.auth.verifyOtp({
-            token_hash: tokenHash,
-            type: flowType === 'email' ? 'email' : 'signup',
-          });
+          const { error: otpErr } = await verifyConfirmationTokenOnce(
+            tokenHash,
+            flowType === 'email' ? 'email' : 'signup'
+          );
           if (otpErr && !cancelled) {
-            confirmationSignOutPendingRef.current = false;
-            setConfirmationMessage(null);
-            setError(otpErr.message || 'Could not confirm email from link. Try resending confirmation.');
-            return;
+            // Check whether session already succeeded (e.g. GoTrue pre-verified link)
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (!sessionData?.session) {
+              confirmationSignOutPendingRef.current = false;
+              setConfirmationMessage(null);
+              setError(
+                otpErr.message ||
+                  'Could not confirm email from link. Enter your email below to resend confirmation or sign in if already confirmed.'
+              );
+              return;
+            }
           }
         } else {
-          // Wait for Supabase client to settle any URL token/PKCE confirmation callback first
+          // Wait for Supabase client to settle any URL token or PKCE ?code= confirmation callback first
           await supabase.auth.getSession();
+          if (authCode) {
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            await supabase.auth.getSession();
+          }
         }
         if (!cancelled) {
           setConfirmationMessage(
@@ -107,8 +182,11 @@ export const LoginPage: React.FC = () => {
       } catch {
         // Non-fatal cleanup
       } finally {
-        if (!cancelled && (window.location.search || window.location.hash)) {
-          window.history.replaceState({}, '', '/login');
+        if (!cancelled) {
+          setHandlingConfirmation(false);
+          if (window.location.search || window.location.hash) {
+            window.history.replaceState({}, '', '/login');
+          }
         }
       }
     })();
@@ -127,9 +205,46 @@ export const LoginPage: React.FC = () => {
     }
   }, [authUser]);
 
+  useEffect(() => {
+    if (
+      loading ||
+      submitting ||
+      handlingConfirmation ||
+      confirmationSignOutPendingRef.current ||
+      error ||
+      confirmationMessage
+    ) {
+      return;
+    }
+
+    if (profileStatus === 'authenticated' && currentUser) {
+      const stateFrom = (location.state as { from?: string } | null)?.from;
+      const defaultPortal =
+        currentUser.role === 'admin'
+          ? '/admin/dashboard'
+          : currentUser.role === 'landlord'
+          ? '/landlord/dashboard'
+          : '/student/dashboard';
+      navigate(stateFrom && !stateFrom.startsWith('/login') ? stateFrom : defaultPortal, {
+        replace: true,
+      });
+    }
+  }, [
+    loading,
+    submitting,
+    handlingConfirmation,
+    error,
+    confirmationMessage,
+    profileStatus,
+    currentUser,
+    location.state,
+    navigate,
+  ]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     confirmationSignOutPendingRef.current = false;
+    setHandlingConfirmation(false);
     setError(null);
     setResendStatus(null);
     setSubmitting(true);
@@ -137,9 +252,14 @@ export const LoginPage: React.FC = () => {
     try {
       const result = await signInWithEmail(email, password);
       if (result.success && result.user) {
-        if (result.user.role === 'student') navigate('/student/dashboard');
-        else if (result.user.role === 'landlord') navigate('/landlord/dashboard');
-        else if (result.user.role === 'admin') navigate('/admin/dashboard');
+        const stateFrom = (location.state as { from?: string } | null)?.from;
+        if (result.user.role === 'student') {
+          navigate(stateFrom?.startsWith('/student') ? stateFrom : '/student/dashboard', { replace: true });
+        } else if (result.user.role === 'landlord') {
+          navigate(stateFrom?.startsWith('/landlord') ? stateFrom : '/landlord/dashboard', { replace: true });
+        } else if (result.user.role === 'admin') {
+          navigate(stateFrom?.startsWith('/admin') ? stateFrom : '/admin/dashboard', { replace: true });
+        }
       } else {
         setError(result.error || 'Login failed.');
       }

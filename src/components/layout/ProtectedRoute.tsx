@@ -56,6 +56,22 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, ch
         <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
         <h2 className="text-lg font-bold text-slate-900 dark:text-white">Setting up your account profile...</h2>
         <p className="text-sm text-slate-500 max-w-md">Your profile is being initialized in the database. Please wait a moment.</p>
+        <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={() => void refreshAuthProfile()}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     );
   }

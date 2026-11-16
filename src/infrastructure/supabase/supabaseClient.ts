@@ -15,6 +15,78 @@ import { appConfig } from '../config/appConfig';
 const supabaseUrl = appConfig.supabase.url || 'http://127.0.0.1:54321';
 const supabaseAnonKey = appConfig.supabase.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon_local_test_key';
 
+export interface InitialAuthCallbackState {
+  pathname: string;
+  search: string;
+  hash: string;
+  flowType: string;
+  tokenHash: string;
+  code: string;
+  confirmedParam: string;
+  hasAccessToken: boolean;
+  error: string;
+  errorCode: string;
+  errorDescription: string;
+  hasAuthError: boolean;
+  consumed: boolean;
+}
+
+const captureInitialAuthCallback = (): InitialAuthCallbackState | null => {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname || '/';
+  const search = window.location.search || '';
+  const hash = window.location.hash || '';
+  const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
+  const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+  const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
+  const tokenHash = hashParams.get('token_hash') || searchParams.get('token_hash') || '';
+  const code = searchParams.get('code') || '';
+  const confirmedParam = searchParams.get('confirmed') || '';
+  const hasAccessToken = Boolean(
+    hashParams.get('access_token') || searchParams.get('access_token')
+  );
+  const error = hashParams.get('error') || searchParams.get('error') || '';
+  const errorCode = hashParams.get('error_code') || searchParams.get('error_code') || '';
+  const errorDescription =
+    hashParams.get('error_description') || searchParams.get('error_description') || '';
+  const hasAuthError = Boolean(
+    error ||
+      errorCode ||
+      errorDescription ||
+      hash.includes('otp_expired') ||
+      search.includes('otp_expired')
+  );
+
+  if (
+    !flowType &&
+    !tokenHash &&
+    !code &&
+    !confirmedParam &&
+    !hasAccessToken &&
+    !hasAuthError
+  ) {
+    return null;
+  }
+
+  return {
+    pathname,
+    search,
+    hash,
+    flowType,
+    tokenHash,
+    code,
+    confirmedParam,
+    hasAccessToken,
+    error,
+    errorCode,
+    errorDescription,
+    hasAuthError,
+    consumed: false,
+  };
+};
+
+export const initialAuthCallback = captureInitialAuthCallback();
+
 export const isSupabaseConfigured = Boolean(
   appConfig.supabase.url &&
   appConfig.supabase.anonKey &&

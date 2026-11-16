@@ -1269,6 +1269,15 @@ export class SupabaseRepository {
         ? 'Frequent Visitors OK'
         : 'Weekends Only';
 
+    const customPreferences = Array.isArray(extra.customPreferences)
+      ? extra.customPreferences
+          .map((item: any) => ({
+            category: String(item?.category ?? '').trim(),
+            value: String(item?.value ?? '').trim(),
+          }))
+          .filter((item: { category: string; value: string }) => item.category.length > 0 || item.value.length > 0)
+      : [];
+
     return {
       studentId: row.student_id,
       preferredNeighbourhoods:
@@ -1276,7 +1285,7 @@ export class SupabaseRepository {
           ? row.preferred_area
           : ['Dambare'],
       minBudget: Number(row.budget_min || 0),
-      maxBudget: Number(row.budget_max || 500000),
+      maxBudget: Number(row.budget_max || 0),
       moveInPeriod: extra.moveInPeriod || 'Immediate',
       studyHabits: extra.studyHabits || studyFromDb,
       sleepSchedule: extra.sleepSchedule || sleepFromDb,
@@ -1286,6 +1295,7 @@ export class SupabaseRepository {
       noiseTolerance: extra.noiseTolerance || 'Quiet Environment Essential',
       roomSharing: extra.roomSharing || 'Open to 2-Person Shared',
       genderPreference: extra.genderPreference || 'Same Gender Only',
+      customPreferences,
     };
   }
 
@@ -1313,15 +1323,24 @@ export class SupabaseRepository {
     const smokingPref =
       pref.smoking === 'Outdoor Only'
         ? 'outside_only'
-        : pref.smoking === "Doesn't Mind"
-        ? 'flexible'
-        : 'no_smoking';
+        : pref.smoking === 'Non-Smoker Only'
+        ? 'no_smoking'
+        : 'flexible';
     const guestPolicy =
       pref.guestPreference === 'No Overnight Guests'
         ? 'no_guests'
         : pref.guestPreference === 'Frequent Visitors OK'
         ? 'frequent'
         : 'occasional';
+
+    const sanitizedCustomPreferences = Array.isArray(pref.customPreferences)
+      ? pref.customPreferences
+          .map((item) => ({
+            category: String(item?.category ?? '').trim(),
+            value: String(item?.value ?? '').trim(),
+          }))
+          .filter((item) => item.category.length > 0 || item.value.length > 0)
+      : [];
 
     return {
       student_id: pref.studentId,
@@ -1346,6 +1365,7 @@ export class SupabaseRepository {
         noiseTolerance: pref.noiseTolerance,
         roomSharing: pref.roomSharing,
         genderPreference: pref.genderPreference,
+        customPreferences: sanitizedCustomPreferences,
       }),
     };
   }

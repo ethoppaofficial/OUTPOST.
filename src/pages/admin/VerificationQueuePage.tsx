@@ -9,8 +9,8 @@
  * - Live Queue Sync: Uses `useAdminData` with post-review auto-refresh and manual refresh control.
  */
 
-import React, { useState } from 'react';
-import { CheckCircle2, ExternalLink, FileCheck2, Loader2, XCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { CheckCircle2, ExternalLink, FileCheck2, Loader2, Search, XCircle } from 'lucide-react';
 import { adminService, AdminRecord } from '../../application/services/adminService';
 import { storageService } from '../../application/services/storageService';
 import { useAdminData } from '../../application/hooks/useAdminData';
@@ -18,6 +18,7 @@ import { AdminStatusBar } from '../../components/admin/AdminStatusBar';
 import { Modal } from '../../components/ui/Modal';
 
 type Kind = 'student' | 'landlord';
+type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 type Target = { kind: Kind; id: string; name: string };
 
 function maskIdentifier(value: unknown): string {
@@ -43,6 +44,25 @@ function getEvidencePreviewKind(item: AdminRecord): EvidencePreviewKind {
   return null;
 }
 
+function getStatusBadge(status: string) {
+  if (status === 'approved') {
+    return {
+      label: 'Verified / Approved',
+      className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
+    };
+  }
+  if (status === 'rejected') {
+    return {
+      label: 'Rejected',
+      className: 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+    };
+  }
+  return {
+    label: 'Pending review',
+    className: 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+  };
+}
+
 export const VerificationQueuePage: React.FC = () => {
   const {
     data: queuesData,
@@ -61,6 +81,8 @@ export const VerificationQueuePage: React.FC = () => {
   );
 
   const [activeTab, setActiveTab] = useState<Kind>('student');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openingEvidenceId, setOpeningEvidenceId] = useState<string | null>(null);
@@ -76,7 +98,42 @@ export const VerificationQueuePage: React.FC = () => {
 
   const students = !loadError && queuesData ? queuesData.students : [];
   const landlords = !loadError && queuesData ? queuesData.landlords : [];
-  const queue = activeTab === 'student' ? students : landlords;
+  const rawQueue = activeTab === 'student' ? students : landlords;
+
+  const statusCounts = useMemo(() => {
+    const counts = { all: rawQueue.length, pending: 0, approved: 0, rejected: 0 };
+    for (const item of rawQueue) {
+      const s = String(item.status || 'pending');
+      if (s === 'approved') counts.approved += 1;
+      else if (s === 'rejected') counts.rejected += 1;
+      else counts.pending += 1;
+    }
+    return counts;
+  }, [rawQueue]);
+
+  const queue = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rawQueue.filter((item) => {
+      const itemStatus = String(item.status || 'pending');
+      const statusOk =
+        statusFilter === 'all' ||
+        (statusFilter === 'pending' && itemStatus !== 'approved' && itemStatus !== 'rejected') ||
+        itemStatus === statusFilter;
+      if (!statusOk) return false;
+      if (!q) return true;
+      return [
+        item.fullName,
+        item.legalName,
+        item.studentEmail,
+        item.email,
+        item.registrationNumber,
+        item.businessName,
+        item.documentType,
+        item.idType,
+        item.file_name,
+      ].some((val) => String(val || '').toLowerCase().includes(q));
+    });
+  }, [rawQueue, statusFilter, search]);
 
   const handleRequestSignedEvidence = async (item: AdminRecord, kind: Kind) => {
     const recordId = kind === 'student' ? item.id : item.submissionId || item.userId || item.id;
@@ -137,7 +194,10 @@ export const VerificationQueuePage: React.FC = () => {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification</h1>
+        <h1 className="text-2xl font-black text-slate-900 dark:text-white">Credential verification &amp; history</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Review pending submissions and inspect verified or rejected student and landlord documents.
+        </p>
       </header>
 
       <AdminStatusBar
@@ -165,7 +225,10 @@ export const VerificationQueuePage: React.FC = () => {
           <button
             key={kind}
             type="button"
-            onClick={() => setActiveTab(kind)}
+            onClick={() => {
+              setActiveTab(kind);
+              setSignedEvidence(null);
+            }}
             className={`flex-1 rounded-lg py-2.5 capitalize cursor-pointer ${
               activeTab === kind ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white' : 'text-slate-500'
             }`}
@@ -175,19 +238,59 @@ export const VerificationQueuePage: React.FC = () => {
         ))}
       </div>
 
+      {/* History Status Filter & Search */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Verification status filter">
+          {(
+            [
+              { id: 'all', label: `All history (${statusCounts.all})` },
+              { id: 'pending', label: `Pending review (${statusCounts.pending})` },
+              { id: 'approved', label: `Verified / Approved (${statusCounts.approved})` },
+              { id: 'rejected', label: `Rejected (${statusCounts.rejected})` },
+            ] as Array<{ id: StatusFilter; label: string }>
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setStatusFilter(tab.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                statusFilter === tab.id
+                  ? 'bg-slate-900 text-white dark:bg-emerald-600'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900 sm:w-72">
+          <Search className="h-3.5 w-3.5 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={`Search ${activeTab} name, email, or file…`}
+            className="w-full bg-transparent outline-none"
+          />
+        </label>
+      </div>
+
       {loading && !queuesData ? (
         <p className="text-sm text-slate-500">Loading verification submissions…</p>
       ) : loadError ? null : queue.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700">
-          No pending {activeTab} submissions.
+          No {statusFilter === 'all' ? '' : `${statusFilter} `}{activeTab} verification records found.
         </div>
       ) : (
         <div className="space-y-4">
           {queue.map((item) => {
             const name = activeTab === 'student' ? item.fullName : item.legalName;
-            const id = activeTab === 'student' ? item.id : item.submissionId || item.userId || item.id;
+            const id = activeTab === 'student' ? item.id : item.userId || item.id;
             const evidenceRecordId = activeTab === 'student' ? item.id : item.submissionId || item.userId || item.id;
             const activeSigned = signedEvidence?.id === evidenceRecordId ? signedEvidence : null;
+            const itemStatus = String(item.status || 'pending');
+            const badge = getStatusBadge(itemStatus);
 
             return (
               <article
@@ -197,7 +300,15 @@ export const VerificationQueuePage: React.FC = () => {
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
                     <div className="flex items-center gap-2">
-                      <FileCheck2 className="h-4 w-4 text-amber-600" />
+                      <FileCheck2
+                        className={`h-4 w-4 ${
+                          itemStatus === 'approved'
+                            ? 'text-emerald-600'
+                            : itemStatus === 'rejected'
+                            ? 'text-rose-600'
+                            : 'text-amber-600'
+                        }`}
+                      />
                       <h2 className="font-bold text-slate-900 dark:text-white">
                         {name || (activeTab === 'student' ? 'Student' : 'Landlord')}
                       </h2>
@@ -208,8 +319,8 @@ export const VerificationQueuePage: React.FC = () => {
                         : `${item.email || 'No email'} · ${item.businessName || 'Individual landlord'}`}
                     </p>
                   </div>
-                  <span className="w-fit rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                    Pending review
+                  <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-bold ${badge.className}`}>
+                    {badge.label}
                   </span>
                 </div>
 
@@ -252,6 +363,22 @@ export const VerificationQueuePage: React.FC = () => {
                     </p>
                   </div>
                 </div>
+
+                {(item.reviewedAt || item.reviewerName || item.rejectionReason) && (
+                  <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 px-3.5 py-2.5 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-300 space-y-1">
+                    {(item.reviewedAt || item.reviewerName) && (
+                      <p>
+                        Reviewed {item.reviewedAt ? `on ${new Date(item.reviewedAt).toLocaleString()}` : ''}
+                        {item.reviewerName ? ` by ${item.reviewerName}` : ''}
+                      </p>
+                    )}
+                    {item.rejectionReason && (
+                      <p className="font-medium text-rose-600 dark:text-rose-400">
+                        Rejection reason: {item.rejectionReason}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {activeSigned && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs dark:border-emerald-900/50 dark:bg-emerald-950/30">
@@ -307,30 +434,36 @@ export const VerificationQueuePage: React.FC = () => {
                     )}
                     <span>
                       {item.hasUploadedEvidence
-                        ? 'Generate signed evidence link (15m)'
+                        ? itemStatus === 'approved'
+                          ? 'View verified document (15m signed link)'
+                          : 'Generate signed evidence link (15m)'
                         : 'No document path recorded'}
                     </span>
                   </button>
 
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={busyId === id}
-                      onClick={() => setTarget({ kind: activeTab, id, name: String(name || activeTab) })}
-                      className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 cursor-pointer"
-                    >
-                      <XCircle className="mr-1 inline h-3.5 w-3.5" />
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === id}
-                      onClick={() => void decide(item, activeTab, 'approved')}
-                      className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer"
-                    >
-                      <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-                      {busyId === id ? 'Saving…' : 'Approve'}
-                    </button>
+                    {itemStatus !== 'rejected' && (
+                      <button
+                        type="button"
+                        disabled={busyId === id}
+                        onClick={() => setTarget({ kind: activeTab, id, name: String(name || activeTab) })}
+                        className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 cursor-pointer"
+                      >
+                        <XCircle className="mr-1 inline h-3.5 w-3.5" />
+                        {itemStatus === 'approved' ? 'Reject / Invalidate' : 'Reject'}
+                      </button>
+                    )}
+                    {itemStatus !== 'approved' && (
+                      <button
+                        type="button"
+                        disabled={busyId === id}
+                        onClick={() => void decide(item, activeTab, 'approved')}
+                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer"
+                      >
+                        <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
+                        {busyId === id ? 'Saving…' : 'Approve'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>
@@ -373,7 +506,7 @@ export const VerificationQueuePage: React.FC = () => {
             />
           </label>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setTarget(null)} className="rounded-lg px-3 py-2 text-xs font-semibold">
+            <button type="button" onClick={() => setTarget(null)} className="rounded-lg px-3 py-2 text-xs">
               Cancel
             </button>
             <button disabled={!!busyId} className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white">

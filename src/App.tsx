@@ -72,6 +72,7 @@ import { ThemeProvider } from './application/context/ThemeContext';
 import { AuthProvider, useAuth } from './application/context/AuthContext';
 import { ConfigErrorScreen } from './components/ui/BackendStatusBanner';
 import { configValidationError } from './infrastructure/config/appConfig';
+import { initialAuthCallback } from './infrastructure/supabase/supabaseClient';
 
 const ProfileRouteRedirect: React.FC = () => {
   const { currentUser, loading } = useAuth();
@@ -85,45 +86,79 @@ const ProfileRouteRedirect: React.FC = () => {
 const RecoveryHashHandler: React.FC = () => {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const hash = window.location.hash || '';
-    const search = window.location.search || '';
-    const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
-    const searchParams = new URLSearchParams(search.replace(/^\?/, ''));
+    const liveHash = window.location.hash || '';
+    const liveSearch = window.location.search || '';
+    const hashParams = new URLSearchParams(liveHash.replace(/^#/, ''));
+    const searchParams = new URLSearchParams(liveSearch.replace(/^\?/, ''));
 
-    const flowType = (hashParams.get('type') || searchParams.get('type') || '').toLowerCase();
-    const isConfirmedFlow = searchParams.get('confirmed') === '1';
+    const captured = initialAuthCallback && !initialAuthCallback.consumed ? initialAuthCallback : null;
+    const hash = liveHash || captured?.hash || '';
+    const search = liveSearch || captured?.search || '';
+
+    const flowType = (
+      hashParams.get('type') ||
+      searchParams.get('type') ||
+      captured?.flowType ||
+      ''
+    ).toLowerCase();
+    const tokenHash =
+      hashParams.get('token_hash') || searchParams.get('token_hash') || captured?.tokenHash || '';
+    const code = searchParams.get('code') || captured?.code || '';
+    const isConfirmedFlow =
+      searchParams.get('confirmed') === '1' || captured?.confirmedParam === '1';
+
+    let hasPendingSignupRedirect = false;
+    try {
+      hasPendingSignupRedirect = window.sessionStorage.getItem('outpost_signup_confirmation_pending') === '1';
+    } catch {
+      hasPendingSignupRedirect = false;
+    }
 
     const hasAuthError = Boolean(
       hashParams.get('error') ||
         hashParams.get('error_code') ||
         searchParams.get('error') ||
         searchParams.get('error_code') ||
-        hash.includes('otp_expired') ||
-        search.includes('otp_expired')
+        liveHash.includes('otp_expired') ||
+        liveSearch.includes('otp_expired') ||
+        captured?.hasAuthError
     );
+
+    const hasAccessToken = Boolean(
+      hashParams.get('access_token') ||
+        searchParams.get('access_token') ||
+        captured?.hasAccessToken
+    );
+
+    const isRecoveryFlow = flowType === 'recovery';
+
+    if (isRecoveryFlow) {
+      if (window.location.pathname !== '/reset-password') {
+        const destination = `/reset-password${search}${hash}`;
+        window.location.replace(destination);
+      }
+      return;
+    }
 
     const isSignupConfirmation =
       flowType === 'signup' ||
       flowType === 'email' ||
       flowType === 'email_change' ||
-      isConfirmedFlow;
+      isConfirmedFlow ||
+      Boolean(tokenHash) ||
+      (hasAuthError && window.location.pathname !== '/login' && window.location.pathname !== '/reset-password') ||
+      (hasPendingSignupRedirect && (Boolean(code) || hasAccessToken) && window.location.pathname === '/');
 
     if (isSignupConfirmation) {
       if (window.location.pathname !== '/login') {
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.set('confirmed', '1');
+        const nextParams = new URLSearchParams((captured?.search || '').replace(/^\?/, ''));
+        searchParams.forEach((value, key) => nextParams.set(key, value));
+        if (!hasAuthError) {
+          nextParams.set('confirmed', '1');
+        }
         window.location.replace(`/login?${nextParams.toString()}${hash}`);
       }
       return;
-    }
-
-    const isRecoveryFlow =
-      flowType === 'recovery' ||
-      (hasAuthError && window.location.pathname !== '/login');
-
-    if (isRecoveryFlow && window.location.pathname !== '/reset-password') {
-      const destination = `/reset-password${search}${hash}`;
-      window.location.replace(destination);
     }
   }, []);
   return null;

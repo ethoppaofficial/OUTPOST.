@@ -392,20 +392,26 @@ export interface Property extends Partial<PropertyLocationDetails> {
   updatedAt: string;
 }
 
+export interface CustomRoommatePreferenceItem {
+  category: string;
+  value: string;
+}
+
 export interface RoommatePreference {
   studentId: string;
   preferredNeighbourhoods: string[];
   minBudget: number;
   maxBudget: number;
-  moveInPeriod: 'Immediate' | 'Next Semester' | 'Next Session';
-  studyHabits: 'Night Owl' | 'Early Bird' | 'Library Focused' | 'Flexible';
-  sleepSchedule: 'Sleeps Before 11pm' | 'Sleeps Midnight - 2am' | 'Irregular / Night Shift';
-  cleanliness: 'Extremely Neat / Daily' | 'Moderate / Weekly' | 'Relaxed';
-  smoking: 'Non-Smoker Only' | 'Outdoor Only' | 'Doesn\'t Mind';
-  guestPreference: 'No Overnight Guests' | 'Weekends Only' | 'Frequent Visitors OK';
-  noiseTolerance: 'Quiet Environment Essential' | 'Moderate Music/Conversation' | 'High Tolerance';
-  roomSharing: 'Own Room Only' | 'Open to 2-Person Shared' | 'Open to 3-4 Person Shared';
-  genderPreference: 'Same Gender Only' | 'No Preference';
+  moveInPeriod: 'Immediate' | 'Next Semester' | 'Next Session' | 'None' | 'Nil' | (string & {});
+  studyHabits: 'Night Owl' | 'Early Bird' | 'Library Focused' | 'Flexible' | 'None' | 'Nil' | (string & {});
+  sleepSchedule: 'Sleeps Before 11pm' | 'Sleeps Midnight - 2am' | 'Irregular / Night Shift' | 'None' | 'Nil' | (string & {});
+  cleanliness: 'Extremely Neat / Daily' | 'Moderate / Weekly' | 'Relaxed' | 'None' | 'Nil' | (string & {});
+  smoking: 'Non-Smoker Only' | 'Outdoor Only' | "Doesn't Mind" | 'None' | 'Nil' | (string & {});
+  guestPreference: 'No Overnight Guests' | 'Weekends Only' | 'Frequent Visitors OK' | 'None' | 'Nil' | (string & {});
+  noiseTolerance: 'Quiet Environment Essential' | 'Moderate Music/Conversation' | 'High Tolerance' | 'None' | 'Nil' | (string & {});
+  roomSharing: 'Own Room Only' | 'Open to 2-Person Shared' | 'Open to 3-4 Person Shared' | 'None' | 'Nil' | (string & {});
+  genderPreference: 'Same Gender Only' | 'No Preference' | 'None' | 'Nil' | (string & {});
+  customPreferences?: CustomRoommatePreferenceItem[];
 }
 
 export interface RoommateRequest {

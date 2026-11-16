@@ -79,10 +79,17 @@ class AuthService {
         sbUser = data.user;
       } else {
         const rawMsg = error?.message || 'Invalid email or password.';
-        if (rawMsg.toLowerCase().includes('email not confirmed')) {
+        const lower = rawMsg.toLowerCase();
+        if (lower.includes('email not confirmed')) {
           return {
             success: false,
             error: 'Your email address has not been confirmed yet. Please click the confirmation link sent to your email before signing in.',
+          };
+        }
+        if (lower.includes('invalid login credentials')) {
+          return {
+            success: false,
+            error: 'Invalid email or password. Please verify your registered email and password and try again.',
           };
         }
         // Do NOT fall back to local/seed records without credential verification.
@@ -218,14 +225,19 @@ class AuthService {
         }
       }
 
-      if (validRole === 'landlord' && (meta.company_name || meta.business_address || meta.tax_id)) {
+      let hydratedLandlordProfile: LandlordProfile | undefined;
+      if (validRole === 'landlord') {
         const { data: existingLp } = await supabase
           .from('landlord_profiles')
-          .select('company_name, business_address, tax_id')
+          .select('*')
           .eq('user_id', userId)
           .maybeSingle();
 
-        if (existingLp && (!existingLp.company_name || !existingLp.business_address || !existingLp.tax_id)) {
+        if (
+          existingLp &&
+          (meta.company_name || meta.business_address || meta.tax_id) &&
+          (!existingLp.company_name || !existingLp.business_address || !existingLp.tax_id)
+        ) {
           await supabase
             .from('landlord_profiles')
             .update({
@@ -235,26 +247,49 @@ class AuthService {
             })
             .eq('user_id', userId);
         }
+
+        if (existingLp) {
+          hydratedLandlordProfile = {
+            userId: existingLp.user_id,
+            legalName: profile.full_name || existingLp.company_name || meta.company_name || 'Landlord',
+            businessName: existingLp.company_name || meta.company_name || undefined,
+            phone: resolvedPhone,
+            contactAddress: existingLp.business_address || meta.business_address || '',
+            idType: 'National ID (NIN)',
+            idReference: existingLp.tax_id || meta.tax_id || '',
+            verificationStatus: (existingLp.verification_status as any) || 'not_started',
+            rejectionReason: existingLp.rejection_reason || undefined,
+            verifiedAt: existingLp.verified_at || undefined,
+          };
+          repository.saveLandlordProfile(hydratedLandlordProfile);
+        }
       }
+
+      const rawAccountStatus = (profile.account_status as AccountStatus) || 'active';
+      const resolvedAccountStatus: AccountStatus =
+        validRole === 'student' && rawAccountStatus === 'email_unverified' && sbUser.email_confirmed_at
+          ? 'active'
+          : rawAccountStatus;
 
       const existing = repository.getUserById(userId);
       const authenticatedUser: User = {
         ...(existing || {
           id: userId,
           email: sbUser.email || normalized,
-          accountStatus: (profile.account_status as AccountStatus) || 'active',
+          accountStatus: resolvedAccountStatus,
           emailVerified: Boolean(sbUser.email_confirmed_at),
           createdAt: sbUser.created_at || new Date().toISOString(),
         }),
         id: userId,
         email: sbUser.email || normalized,
         role: validRole,
-        accountStatus: (profile.account_status as AccountStatus) || 'active',
+        accountStatus: resolvedAccountStatus,
         emailVerified: Boolean(sbUser.email_confirmed_at),
         fullName: profile.full_name || sbUser.user_metadata?.full_name || '',
         avatarUrl: profile.avatar_url || sbUser.user_metadata?.avatar_url || '',
         phone: resolvedPhone || existing?.phone || undefined,
         studentProfile: repository.getStudentProfile(userId) || existing?.studentProfile,
+        landlordProfile: hydratedLandlordProfile || existing?.landlordProfile,
       };
 
       repository.cacheUser(authenticatedUser);
@@ -462,6 +497,14 @@ class AuthService {
         repository.setActiveUserId(sbUser.id);
       }
 
+      if (!hasSession && typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.setItem('outpost_signup_confirmation_pending', '1');
+        } catch {
+          // Ignore storage restrictions
+        }
+      }
+
       return { success: true, user: newUser, requiresEmailConfirmation: !hasSession };
     } catch (err: any) {
       return { success: false, error: err.message || 'Registration failed.' };
@@ -574,6 +617,14 @@ class AuthService {
           verificationStatus: 'not_started',
         });
         repository.setActiveUserId(sbUser.id);
+      }
+
+      if (!hasSession && typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.setItem('outpost_signup_confirmation_pending', '1');
+        } catch {
+          // Ignore storage restrictions
+        }
       }
 
       return { success: true, user: newUser, requiresEmailConfirmation: !hasSession };
@@ -724,6 +775,13 @@ class AuthService {
           };
         }
         return { success: false, error: error.message };
+      }
+      if (typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.setItem('outpost_signup_confirmation_pending', '1');
+        } catch {
+          // Ignore storage restrictions
+        }
       }
       return { success: true };
     } catch (err: any) {
